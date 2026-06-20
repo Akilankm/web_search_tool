@@ -1,0 +1,40 @@
+[project]
+name = "serp-hybrid-product-url-finder"
+version = "0.1.0"
+description = "Hybrid SerpAPI Google Search + AI Mode product URL finder with crawl4ai scrape verification"
+requires-python = ">=3.10,<3.12"
+dependencies = [
+    "requests>=2.32.0",
+    "python-dotenv>=1.0.1",
+    "loguru>=0.7.2",
+    "rich>=13.7.1",
+    "crawl4ai>=0.8.9",
+    "nest-asyncio>=1.6.0",
+]
+
+[dependency-groups]
+notebook = [
+    "ipykernel>=6.29.5",
+    "jupyter-client>=8.6.3",
+    "jupyter-core>=5.7.2",
+    "traitlets>=5.14.3",
+    "comm>=0.2.2",
+    "debugpy>=1.8.9",
+    "nest-asyncio>=1.6.0",
+    "matplotlib-inline>=0.1.7",
+    "ipython>=8.18.1",
+    "jedi>=0.19.2",
+    "prompt-toolkit>=3.0.48",
+    "pygments>=2.18.0",
+]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pdm]
+distribution = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
