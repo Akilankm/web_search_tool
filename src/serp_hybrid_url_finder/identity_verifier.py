@@ -233,10 +233,38 @@ class ProductIdentityVerifier:
     def _page_type(self, scrape: ScrapeResult) -> str:
         if scrape.is_soft_404:
             return PAGE_TYPE_SOFT_404
-        # if scrape.looks_like_product_page or scrape.has_price or scrape.structured_eans:
-        #     return PAGE_TYPE_PRODUCT_DETAIL
+        
+        # Check URL patterns for obvious category pages
+        url_lower = scrape.url.lower()
+        category_url_patterns = [
+            r'/kategorie/', r'/category/', r'/categories/', 
+            r'/c\/', r'/shop/', r'/collection/',
+            r'/browse/', r'/filter/', r'/products/',
+            r'[?&]category=', r'[?&]cat=',
+        ]
+        for pattern in category_url_patterns:
+            if re.search(pattern, url_lower):
+                # Category URLs are almost always non-product pages
+                return PAGE_TYPE_NON_PRODUCT
+        
+        # Check markup for category page signals
+        h1_lower = scrape.h1.lower()
+        title_lower = scrape.title.lower()
+        page_name_lower = scrape.page_product_name.lower()
+        
+        category_keywords = [
+            'all ', 'category', 'collection', 'shop ', 'browse',
+            'filter', 'sort', 'products', 'items', 'see ', 'view ',
+        ]
+        
+        # h1 with category keywords + no price = almost certainly category page
+        h1_looks_like_category = any(kw in h1_lower for kw in category_keywords)
+        if h1_looks_like_category and not scrape.has_price:
+            return PAGE_TYPE_NON_PRODUCT
+        
         if scrape.looks_like_homepage:
             return PAGE_TYPE_NON_PRODUCT
+        
         return PAGE_TYPE_UNKNOWN
 
     # -- decision ------------------------------------------------------------

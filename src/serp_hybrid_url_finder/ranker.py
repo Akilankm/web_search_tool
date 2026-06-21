@@ -168,6 +168,7 @@ class ProductURLRanker:
         penalty = self._non_product_penalty(candidate.url)
         scrape_score = self._scrape_score(scrape)
         identity_score = self._identity_score(verification)
+        richness_score = scrape.richness_score if scrape else 0.0
 
         breakdown[SCORE_KEY_ORGANIC_CONSENSUS] = organic_score
         breakdown[SCORE_KEY_AI_EVIDENCE] = ai_score
@@ -180,6 +181,7 @@ class ProductURLRanker:
         breakdown[SCORE_KEY_NON_PRODUCT_PENALTY] = penalty
         breakdown[SCORE_KEY_SCRAPE] = scrape_score
         breakdown[SCORE_KEY_IDENTITY] = identity_score
+        breakdown[SCORE_KEY_RICHNESS] = richness_score
 
         weights = self.weights
         base_confidence = (
@@ -193,6 +195,7 @@ class ProductURLRanker:
             + source_score
             + weights.scrape * scrape_score
             + weights.identity * identity_score
+            + weights.richness * richness_score
             - penalty
         )
         base_confidence = max(ZERO_SCORE, min(PERFECT_SCORE, base_confidence))
@@ -238,6 +241,7 @@ class ProductURLRanker:
                 SCORE_KEY_ORGANIC_CONSENSUS: organic_score,
                 SCORE_KEY_RETAILER: retailer_score,
                 SCORE_KEY_COUNTRY: country_score,
+                SCORE_KEY_RICHNESS: richness_score,
             },
             caps_applied=caps_applied,
             verification=verification,

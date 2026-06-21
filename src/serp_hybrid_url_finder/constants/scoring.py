@@ -122,6 +122,7 @@ class ScoreWeights:
     product_page_shape: float = 0.10
     scrape: float = 0.10
     identity: float = 0.30
+    richness: float = 0.15  # High weight for product team: prioritizes rich extractable content
 
 
 DEFAULT_SCORE_WEIGHTS: Final[ScoreWeights] = ScoreWeights()
