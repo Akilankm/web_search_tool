@@ -282,31 +282,28 @@ class ProductIdentityVerifier:
         if page_type in {PAGE_TYPE_SOFT_404, PAGE_TYPE_NON_PRODUCT} or not scrape.is_scrapable:
             return IDENTITY_UNVERIFIED
 
-        # TITLE IS REQUIRED: weak title match is a blocker.
+        # EAN IS AUTHORITATIVE: it is a globally unique product barcode.
+        # If the EAN is confirmed on the page, it IS that exact product regardless
+        # of language/title differences between the query and page.
+        if ean_check == CHECK_EAN_MATCHED:
+            return IDENTITY_VERIFIED
+
+        # EAN conflict means a DIFFERENT product's barcode is on the page.
+        if ean_check == CHECK_EAN_CONFLICT:
+            return IDENTITY_MISMATCH
+
+        # No EAN available — fall back to title-based verification.
+
+        # TITLE IS REQUIRED without EAN: weak title match is a blocker.
         if title_check == CHECK_TITLE_WEAK:
             return IDENTITY_UNVERIFIED
 
-        # STRONG TITLE: Best case - accept unless EAN explicitly conflicts.
+        # STRONG TITLE (70%+ distinctive token match).
         if title_check == CHECK_TITLE_STRONG:
-            # EAN match: authoritative confirmation
-            if ean_check == CHECK_EAN_MATCHED:
-                return IDENTITY_VERIFIED
-            # EAN conflict: title still dominant, but downgrade confidence
-            # (product coding team can verify with richness + scraping)
-            if ean_check == CHECK_EAN_CONFLICT:
-                return IDENTITY_PROBABLE
-            # EAN absent/unknown: title alone is sufficient
             return IDENTITY_PROBABLE
 
-        # PARTIAL TITLE: requires additional confirmation.
+        # PARTIAL TITLE (45-70%): accept with reduced confidence.
         if title_check == CHECK_TITLE_PARTIAL:
-            # Partial title + confirmed EAN: accept
-            if ean_check == CHECK_EAN_MATCHED:
-                return IDENTITY_PROBABLE
-            # Partial title + EAN conflict: too risky
-            if ean_check == CHECK_EAN_CONFLICT:
-                return IDENTITY_WEAK
-            # Partial title + no EAN info: weak confidence
             return IDENTITY_WEAK
 
         return IDENTITY_UNVERIFIED
