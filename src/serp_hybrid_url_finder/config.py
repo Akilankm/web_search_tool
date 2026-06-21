@@ -139,6 +139,15 @@ class PipelineConfig:
     # Product-identity verification (the returned URL must be the CORRECT product).
     require_identity_verified: bool = REQUIRE_IDENTITY_VERIFIED_DEFAULT
     allow_probable_as_final: bool = ALLOW_PROBABLE_AS_FINAL_DEFAULT
+    # Allow IDENTITY_WEAK (partial title match, no EAN) as a final result.
+    # These are always flagged NEEDS_REVIEW and confidence-capped at 0.50.
+    # Strongly recommended True for descriptive toy names (plush, pretend play,
+    # sports) where title overlap is partial and EAN is often absent.
+    allow_weak_as_final: bool = True
+    # When ALL crawl4ai scraping fails (bot-protected site), fall back to the URL
+    # that the AI explicitly selected, returned as NEEDS_REVIEW with low confidence.
+    # Prevents empty results when the retailer blocks headless browsers.
+    unscraped_ai_fallback: bool = True
     high_confidence_requires_justification: bool = HIGH_CONFIDENCE_REQUIRES_JUSTIFICATION_DEFAULT
 
     # Country scope. allow_global_fallback=False (default) LOCKS results to the

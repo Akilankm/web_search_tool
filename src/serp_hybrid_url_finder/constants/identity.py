@@ -89,8 +89,10 @@ VALIDATION_REJECTED: Final[str] = "REJECTED"          # identity conflict / unve
 VALIDATION_NO_MATCH: Final[str] = "NO_MATCH"          # nothing found
 
 # Title token matching thresholds (distinctive tokens only).
-TITLE_STRONG_MATCH_THRESHOLD: Final[float] = 0.70
-TITLE_PARTIAL_MATCH_THRESHOLD: Final[float] = 0.45
+# 0.60: 2/3 tokens qualify as STRONG (was 0.70 which needed 3/3 for short names
+# like 'PLÜSCH HUND BRAUN' and returned PARTIAL → WEAK → rejected).
+TITLE_STRONG_MATCH_THRESHOLD: Final[float] = 0.60
+TITLE_PARTIAL_MATCH_THRESHOLD: Final[float] = 0.40
 
 # JSON-LD structured-data keys used for authoritative identity.
 JSONLD_EAN_KEYS: Final[tuple[str, ...]] = (

@@ -288,24 +288,26 @@ class ProductIdentityVerifier:
         if ean_check == CHECK_EAN_MATCHED:
             return IDENTITY_VERIFIED
 
-        # EAN conflict means a DIFFERENT product's barcode is on the page.
+        # EAN conflict: a different barcode is on the page.
+        # If the title also matches strongly, it is likely a bundle/variant of the
+        # right product family → WEAK (not an outright reject).
+        # If title is also poor → truly the wrong product → MISMATCH.
         if ean_check == CHECK_EAN_CONFLICT:
+            if title_check == CHECK_TITLE_STRONG:
+                return IDENTITY_WEAK
             return IDENTITY_MISMATCH
 
         # No EAN available — fall back to title-based verification.
 
-        # TITLE IS REQUIRED without EAN: weak title match is a blocker.
-        if title_check == CHECK_TITLE_WEAK:
-            return IDENTITY_UNVERIFIED
-
-        # STRONG TITLE (70%+ distinctive token match).
+        # STRONG TITLE (≥60% distinctive token match): good enough without EAN.
         if title_check == CHECK_TITLE_STRONG:
             return IDENTITY_PROBABLE
 
-        # PARTIAL TITLE (45-70%): accept with reduced confidence.
+        # PARTIAL TITLE (40-60%): worth returning with review flag.
         if title_check == CHECK_TITLE_PARTIAL:
             return IDENTITY_WEAK
 
+        # WEAK TITLE (<40%): not enough corroboration.
         return IDENTITY_UNVERIFIED
 
     # -- helpers -------------------------------------------------------------

@@ -20,6 +20,7 @@ from src.serp_hybrid_url_finder.constants import (
     HIGH_CONFIDENCE_THRESHOLD,
     IDENTITY_PROBABLE,
     IDENTITY_VERIFIED,
+    IDENTITY_WEAK,
     REASON_AI_NO_MATCH,
     REASON_FORCED_IN_COUNTRY_WEAK,
     REASON_NO_URL_EXTRACTED,
@@ -201,7 +202,7 @@ class HybridProductURLFinderPipeline:
             scrapes=scrapes,
             verifications=verifications,
         )
-        final = self._select_final(scored_candidates)
+        final = self._select_final(scored_candidates, ai_evidence=ai_validation_evidence)
 
         repair_query: Optional[str] = None
         repair_response: Optional[SerpAIResponse] = None
@@ -239,7 +240,7 @@ class HybridProductURLFinderPipeline:
                 scrapes=scrapes,
                 verifications=verifications,
             )
-            final = self._select_final(scored_candidates)
+            final = self._select_final(scored_candidates, ai_evidence=repair_evidence)
 
         final_evidence = repair_evidence if repair_evidence is not None else ai_validation_evidence
         best_match = self._to_best_match(
@@ -337,6 +338,8 @@ class HybridProductURLFinderPipeline:
     def _select_final(
         self,
         scored_candidates: list[ScoredURLCandidate],
+        *,
+        ai_evidence: Optional[AIMatchEvidence] = None,
     ) -> Optional[ScoredURLCandidate]:
         if not scored_candidates:
             return None
@@ -351,7 +354,31 @@ class HybridProductURLFinderPipeline:
         # Fallback pass: only when global fallback is explicitly enabled may we
         # return an out-of-country product page.
         if self.pipeline_config.allow_global_fallback:
-            return self._first_acceptable(scored_candidates, allow_out_of_country=True)
+            result = self._first_acceptable(scored_candidates, allow_out_of_country=True)
+            if result is not None:
+                return result
+
+        # Scraping fallback: when ALL crawl4ai scraping failed (bot-protected site),
+        # return the URL that the AI explicitly selected. This prevents empty results
+        # from retailers that block headless browsers.
+        if (
+            self.pipeline_config.unscraped_ai_fallback
+            and ai_evidence is not None
+            and ai_evidence.final_url
+            and ai_evidence.match_decision in {"EXACT", "HIGH"}
+        ):
+            for scored in scored_candidates:
+                if scored.candidate.url == ai_evidence.final_url:
+                    # Only return if it passes country scope
+                    if (
+                        self.pipeline_config.allow_global_fallback
+                        or scored.country_check != COUNTRY_CHECK_ALTERNATIVE
+                    ):
+                        logger.warning(
+                            "Scraping fallback: returning AI-validated URL without scrape | url={}",
+                            scored.candidate.url,
+                        )
+                        return scored
 
         return None
 
@@ -395,6 +422,11 @@ class HybridProductURLFinderPipeline:
                 if (
                     verification.identity_status == IDENTITY_PROBABLE
                     and self.pipeline_config.allow_probable_as_final
+                ):
+                    return scored
+                if (
+                    verification.identity_status == IDENTITY_WEAK
+                    and self.pipeline_config.allow_weak_as_final
                 ):
                     return scored
                 continue
