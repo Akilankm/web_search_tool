@@ -147,13 +147,14 @@ class HybridProductURLFinderPipeline:
             temp_candidates = self.candidate_collector.collect_from_organic(organic_responses)
             
             # Decide: do we need global fallback?
-            # Criteria: very few candidates (< 2) OR all have low confidence
+            # Criteria: 
+            # - Very few candidates (< 2) from in-country searches
+            # - OR first search had zero results (indicates poor in-country availability)
+            first_search_had_results = bool(organic_responses[0].results)
+            
             need_global_fallback = (
                 len(temp_candidates) < 2
-                or (temp_candidates and all(
-                    c.initial_confidence < 0.5
-                    for c in temp_candidates
-                ))
+                or not first_search_had_results
             )
             
             if need_global_fallback:
