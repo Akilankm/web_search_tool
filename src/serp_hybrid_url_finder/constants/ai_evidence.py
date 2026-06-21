@@ -24,6 +24,20 @@ AI_MATCH_DECISION_SCORES: Final[dict[str, float]] = {
     AI_MATCH_DECISION_NO_MATCH: 0.00,
 }
 
+# Confidence floor applied to the FINAL emitted URL when crawl4ai could NOT
+# confirm the page on its scraped content and we are therefore trusting the AI
+# Mode decider's verdict (it judged the page against Google's live index).
+# Kept strictly BELOW HIGH_CONFIDENCE_THRESHOLD (0.75) so an AI-only pick is
+# always surfaced as NEEDS_REVIEW, never as VERIFIED. VERIFIED stays reserved
+# for pages whose identity was confirmed by deterministic scrape evidence.
+AI_DECISION_CONFIDENCE_FLOOR: Final[dict[str, float]] = {
+    AI_MATCH_DECISION_EXACT: 0.70,
+    AI_MATCH_DECISION_HIGH: 0.60,
+    AI_MATCH_DECISION_MEDIUM: 0.48,
+    AI_MATCH_DECISION_LOW: 0.33,
+    AI_MATCH_DECISION_NO_MATCH: 0.05,
+}
+
 AI_EVIDENCE_MATCHED_VALUE: Final[str] = "matched"
 AI_EVIDENCE_PARTIAL_VALUE: Final[str] = "partial"
 AI_EVIDENCE_WEAK_VALUE: Final[str] = "weak"

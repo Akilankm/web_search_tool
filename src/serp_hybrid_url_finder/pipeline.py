@@ -11,10 +11,12 @@ from src.serp_hybrid_url_finder.candidate_collector import CandidateCollector
 from src.serp_hybrid_url_finder.config import PipelineConfig, SerpAPIConfig
 from src.serp_hybrid_url_finder.country_mapping import resolve_language
 from src.serp_hybrid_url_finder.constants import (
+    AI_DECISION_CONFIDENCE_FLOOR,
     AI_REPAIR_QUERY_MAX_CHARS,
     AI_VALIDATION_QUERY_MAX_CHARS,
     CALL_TYPE_AI_MODE,
     CALL_TYPE_ORGANIC,
+    CONFIDENCE_ROUND_DIGITS,
     COUNTRY_CHECK_ALTERNATIVE,
     COUNTRY_CHECK_NOT_PROVIDED,
     HIGH_CONFIDENCE_THRESHOLD,
@@ -31,6 +33,7 @@ from src.serp_hybrid_url_finder.constants import (
     VALIDATION_NEEDS_REVIEW,
     VALIDATION_NO_MATCH,
     VALIDATION_REJECTED,
+    VALIDATION_VERIFIED,
 )
 from src.serp_hybrid_url_finder.identity_verifier import ProductIdentityVerifier
 from src.serp_hybrid_url_finder.models import (
@@ -342,83 +345,79 @@ class HybridProductURLFinderPipeline:
         *,
         ai_evidence: Optional[AIMatchEvidence] = None,
     ) -> Optional[ScoredURLCandidate]:
+        # Only truly empty when discovery found NOTHING at all. Whenever at least
+        # one candidate URL exists, this method returns one — the pipeline never
+        # emits an empty product URL for a product that has any plausible page.
         if not scored_candidates:
             return None
 
-        # Primary pass: stay inside the requested country. Country is a hard scope
-        # by default; candidates are pre-sorted richest-correct-first by the ranker,
-        # so the first acceptable one is the best in-country product page.
+        ai_url = ai_evidence.final_url if (ai_evidence and ai_evidence.final_url) else None
+        ai_decision = ai_evidence.match_decision.upper() if ai_evidence else ""
+        ai_backs_pick = bool(ai_url) and ai_decision not in {"NO_MATCH", ""}
+
+        def is_ai_pick(scored: ScoredURLCandidate) -> bool:
+            return ai_url is not None and scored.candidate.url == ai_url
+
+        def not_mismatch(scored: ScoredURLCandidate) -> bool:
+            return (
+                scored.verification is None
+                or scored.verification.identity_status != IDENTITY_MISMATCH
+            )
+
+        # Pass 1: best in-country candidate that clears the configured hard gates
+        # (scrapable + identity-verified when required). Country preferred first.
         in_scope = self._first_acceptable(scored_candidates, allow_out_of_country=False)
         if in_scope is not None:
             return in_scope
 
-        # Fallback pass: only when global fallback is explicitly enabled may we
-        # return an out-of-country product page.
+        # Pass 2: same quality gates, allowing an out-of-country verified page when
+        # global fallback is enabled. Country preference was already exhausted.
         if self.pipeline_config.allow_global_fallback:
-            result = self._first_acceptable(scored_candidates, allow_out_of_country=True)
-            if result is not None:
-                return result
+            out_scope = self._first_acceptable(scored_candidates, allow_out_of_country=True)
+            if out_scope is not None:
+                return out_scope
 
-        # Scraping fallback: when ALL crawl4ai scraping failed (bot-protected site),
-        # return the URL that the AI explicitly selected. MEDIUM included because
-        # a MEDIUM AI decision is still meaningful evidence.
-        if (
-            self.pipeline_config.unscraped_ai_fallback
-            and ai_evidence is not None
-            and ai_evidence.final_url
-            and ai_evidence.match_decision in {"EXACT", "HIGH", "MEDIUM"}
-        ):
-            for scored in scored_candidates:
-                if scored.candidate.url == ai_evidence.final_url:
-                    if (
-                        self.pipeline_config.allow_global_fallback
-                        or scored.country_check != COUNTRY_CHECK_ALTERNATIVE
-                    ):
-                        logger.warning(
-                            "Scraping fallback: returning AI-validated URL without scrape | url={}",
-                            scored.candidate.url,
-                        )
-                        return scored
-
-        # Last resort: the "from anywhere" net. When every scoped pass above
-        # fails, return the best available candidate REGARDLESS of country scope
-        # or scrapability. Country lock is intentionally IGNORED here — the whole
-        # point of this net is "get a URL from anywhere". The only thing excluded
-        # is a proven IDENTITY_MISMATCH (a different product's barcode on the page).
-        if self.pipeline_config.last_resort_fallback and scored_candidates:
-            _not_mismatch = (
-                lambda s: s.verification is None
-                or s.verification.identity_status != IDENTITY_MISMATCH
-            )
-            # 1. Prefer AI's explicit pick (any decision except NO_MATCH).
-            if (
-                ai_evidence is not None
-                and ai_evidence.final_url
-                and ai_evidence.match_decision not in {"NO_MATCH", ""}
-            ):
+        # Pass 3 (AI decider): the AI Mode LLM explicitly selected a URL it stands
+        # behind, but crawl4ai could not confirm the page (bot-protected, JS-only,
+        # or otherwise unscrapable). The AI judged it against Google's live index,
+        # so we trust that verdict. Prefer the in-country AI pick, then anywhere.
+        # Surfaced downstream as NEEDS_REVIEW, never as REJECTED.
+        if ai_backs_pick:
+            for require_in_country in (True, False):
                 for scored in scored_candidates:
-                    if scored.candidate.url == ai_evidence.final_url and _not_mismatch(scored):
-                        logger.warning(
-                            "Last resort (from anywhere): AI-picked URL | url={}",
-                            scored.candidate.url,
-                        )
-                        return scored
-            # 2. Otherwise the top-ranked non-mismatch candidate from anywhere.
-            for scored in scored_candidates:
-                if _not_mismatch(scored):
+                    if not is_ai_pick(scored) or not not_mismatch(scored):
+                        continue
+                    if require_in_country and scored.country_check == COUNTRY_CHECK_ALTERNATIVE:
+                        continue
                     logger.warning(
-                        "Last resort (from anywhere): top-ranked candidate | url={}",
+                        "AI-decider fallback: returning AI-selected URL without scrape "
+                        "confirmation | decision={} | in_country={} | url={}",
+                        ai_decision,
+                        scored.country_check != COUNTRY_CHECK_ALTERNATIVE,
                         scored.candidate.url,
                     )
                     return scored
-            # 3. Absolute floor: even a mismatch is better than nothing for review.
-            logger.warning(
-                "Last resort (from anywhere): returning top candidate despite mismatch | url={}",
-                scored_candidates[0].candidate.url,
-            )
-            return scored_candidates[0]
 
-        return None
+        # Pass 4 (no-empty guarantee): nothing was scrape-confirmed and the AI did
+        # not single one out, but candidates exist. Return the best-ranked page
+        # that is not a proven different-product (EAN) mismatch. Candidates are
+        # pre-sorted richest-correct-first by the ranker.
+        for scored in scored_candidates:
+            if not_mismatch(scored):
+                logger.warning(
+                    "No-empty fallback: returning top-ranked candidate for review | url={}",
+                    scored.candidate.url,
+                )
+                return scored
+
+        # Pass 5 (absolute floor): every candidate is a hard mismatch. Still return
+        # the top-ranked one so a non-empty pool never yields an empty result; it
+        # is flagged for review with its conflict noted downstream.
+        logger.warning(
+            "No-empty fallback: all candidates conflict; returning top-ranked for review | url={}",
+            scored_candidates[0].candidate.url,
+        )
+        return scored_candidates[0]
 
     def _first_acceptable(
         self,
@@ -577,14 +576,36 @@ class HybridProductURLFinderPipeline:
         scrape = final.scrape
         verification = final.verification
         breakdown = final.confidence_breakdown
-        validation_status = (
-            breakdown.validation_status if breakdown else VALIDATION_NEEDS_REVIEW
+
+        # Identity confirmed on the actually-scraped page (confirmed EAN, or matched
+        # pack-size with a strong title). This is the ONLY path to a VERIFIED verdict.
+        scrape_confirmed = bool(
+            verification is not None
+            and verification.identity_status == IDENTITY_VERIFIED
+            and verification.has_hard_justification
         )
-        # Confidence floor: returning a URL with confidence=0.0 is contradictory.
-        # Any candidate that survived to _to_best_match has at least minimal signal.
-        confidence_final = max(final.confidence, 0.05)
-        if confidence_final != final.confidence:
+
+        confidence_final = final.confidence
+        if not scrape_confirmed:
+            # crawl4ai could not confirm the page, so the AI Mode decider's verdict
+            # is the basis of trust (it judged the page against Google's live index).
+            # Lift confidence to that decision's tier so the emitted confidence and
+            # status agree. Floors stay below HIGH_CONFIDENCE_THRESHOLD, so an
+            # AI-only pick is always NEEDS_REVIEW and never VERIFIED.
+            ai_floor = AI_DECISION_CONFIDENCE_FLOOR.get(
+                ai_evidence.match_decision.upper(), 0.0
+            )
+            confidence_final = max(confidence_final, ai_floor)
+        confidence_final = round(confidence_final, CONFIDENCE_ROUND_DIGITS)
+
+        # INVARIANT: a URL is being emitted, therefore the status is NEVER REJECTED.
+        # VERIFIED is reserved for scrape-confirmed identity at high confidence;
+        # everything else the pipeline is willing to emit is NEEDS_REVIEW.
+        if scrape_confirmed and confidence_final >= HIGH_CONFIDENCE_THRESHOLD:
+            validation_status = VALIDATION_VERIFIED
+        else:
             validation_status = VALIDATION_NEEDS_REVIEW
+
         justification = (
             breakdown.justification_summary
             if breakdown
@@ -616,6 +637,21 @@ class HybridProductURLFinderPipeline:
             # A richer out-of-country page existed, but country lock kept us on the
             # best in-country page instead.
             justification = f"{justification} {REASON_FORCED_IN_COUNTRY_WEAK}"
+
+        # Transparency for NEEDS_REVIEW results: explain why this URL was emitted
+        # without scrape-confirmed identity, and surface any verification conflict
+        # so a reviewer knows exactly what to check.
+        if not scrape_confirmed:
+            justification = (
+                f"{justification} Review note: this URL could not be confirmed by "
+                f"page scraping; it is returned on the AI Mode decider's verdict "
+                f"(decision {ai_evidence.match_decision}) judged against Google's index."
+            )
+            if verification is not None and verification.blocking_reasons:
+                justification = (
+                    f"{justification} Open verification points: "
+                    f"{'; '.join(verification.blocking_reasons)}."
+                )
 
         return ProductURLMatch(
             row_id=product.row_id,

@@ -119,21 +119,38 @@ AI_VALIDATOR_ROLE: Final[str] = (
 )
 
 AI_VALIDATOR_TASK: Final[str] = (
-    "Choose the single best exact product detail URL from the candidate list. "
-    "Use evidence, not guesses. Do not invent a URL. "
-    "Do not return a URL outside the candidates unless it appears in your cited references."
+    "Choose the single best product detail URL for the requested product from the "
+    "candidate list. Use evidence, not guesses. Do not invent a URL. Do not return a "
+    "URL outside the candidates unless it appears in your cited references. "
+    "Always prefer returning the closest matching product detail page over NO_MATCH: "
+    "return NO_MATCH ONLY when not a single candidate could plausibly be the requested "
+    "product. If you are not fully certain, still return your single closest candidate "
+    "and lower MATCH_DECISION (HIGH / MEDIUM / LOW) to reflect that uncertainty. "
+    "A page being slow, bot-protected, or JavaScript-heavy does NOT disqualify it: "
+    "judge each candidate using Google's indexed knowledge of that page (title, "
+    "breadcrumbs, structured data, snippet), not whether it loads for you."
 )
 
 AI_VALIDATOR_RULES: Final[tuple[str, ...]] = (
     "Prefer EAN/GTIN/barcode match over fuzzy title match.",
     "If retailer_name is provided, prefer that retailer's product detail page.",
-    "The final URL must be a single product detail page.",
-    "Reject homepage, brand homepage, category, search, listing, review, social, image, PDF, cart, help, blog, or forum pages.",
-    "Reject different product variants, bundles, sizes, colors, or unrelated toys.",
-    "Pack size / quantity must match EXACTLY: e.g. '18 KS' (18 pieces) must NOT be matched to '32 KS' (32 pieces). A different count is a different product.",
-    "Reject soft-404 or 'product not found' pages even if they load.",
-    "PRODUCT CATEGORY: The final URL must be for a toy/game/collectible product. Reject books, textbooks, stationery, office supplies, or non-toy items.",
-    "If none are reliable, return NO_MATCH.",
+    "The final URL must be a single product detail page. Never select a homepage, "
+    "brand homepage, category, search, listing, review, social, image, PDF, cart, "
+    "help, blog, or forum page.",
+    "If candidates differ by variant, bundle, size, colour, or pack/quantity (e.g. "
+    "'18 KS' = 18 pieces is a DIFFERENT product from '32 KS' = 32 pieces), select the "
+    "one that matches the requested product EXACTLY. If only a near-variant exists, "
+    "return it as the closest match, lower MATCH_DECISION to LOW, and state the exact "
+    "difference in CONFIDENCE_REASON.",
+    "Never select a soft-404 or 'product not found' page.",
+    "PRODUCT CATEGORY: prefer a toy / game / collectible product page. Treat books, "
+    "textbooks, stationery, office supplies, or other non-toy items as a poor match - "
+    "select one only if it is genuinely the requested product, and set "
+    "TOY_CATEGORY_EVIDENCE accordingly.",
+    "A page being slow, bot-protected, or JavaScript-heavy is NOT a reason to reject "
+    "it; judge each candidate from Google's indexed knowledge of the page.",
+    "Always return your single closest product detail candidate. Return NO_MATCH ONLY "
+    "when NOT ONE candidate could plausibly be the requested product.",
     "Provide concrete justification and rejection reasons.",
 )
 
@@ -152,6 +169,8 @@ AI_VALIDATOR_OUTPUT_CONTRACT: Final[tuple[str, ...]] = (
 
 AI_REPAIR_TASK: Final[str] = (
     "The previous selected URL was rejected by deterministic validation. "
-    "Re-evaluate the candidate list and return only a valid exact product detail URL. "
-    "Return NO_MATCH if none are reliable."
+    "Re-evaluate the candidate list and return the single closest valid product detail "
+    "URL for the requested product, lowering MATCH_DECISION to reflect any remaining "
+    "uncertainty. Return NO_MATCH ONLY if not one candidate could plausibly be the "
+    "requested product."
 )

@@ -10,6 +10,7 @@ from loguru import logger
 from src.serp_hybrid_url_finder.constants import (
     AI_DECLARED_FINAL_SOURCE_SCORE,
     AI_EVIDENCE_FIELD_SCORES,
+    AI_MATCH_DECISION_NO_MATCH,
     AI_MATCH_DECISION_SCORES,
     CAP_DEAD_URL,
     CAP_EAN_UNCONFIRMED_ON_PAGE,
@@ -217,7 +218,9 @@ class ProductURLRanker:
         )
         confidence = round(confidence, CONFIDENCE_ROUND_DIGITS)
 
-        validation_status = self._validation_status(confidence, verification)
+        validation_status = self._validation_status(
+            confidence, verification, candidate, ai_evidence
+        )
 
         exact = (
             confidence >= EXACT_MATCH_CONFIDENCE_THRESHOLD
@@ -580,11 +583,27 @@ class ProductURLRanker:
         self,
         confidence: float,
         verification: Optional[MatchVerification],
+        candidate: URLCandidate,
+        ai_evidence: AIMatchEvidence,
     ) -> str:
         status = verification.identity_status if verification else None
+        # Gold standard: identity confirmed on the scraped page at high confidence.
         if status == IDENTITY_VERIFIED and confidence >= HIGH_CONFIDENCE_THRESHOLD:
             return VALIDATION_VERIFIED
+        # Any deterministic identity signal worth a human glance.
         if status in {IDENTITY_VERIFIED, IDENTITY_PROBABLE, IDENTITY_WEAK} and confidence > ZERO_SCORE:
+            return VALIDATION_NEEDS_REVIEW
+        # The AI Mode decider explicitly selected THIS url and stands behind it
+        # (decision is not NO_MATCH). It judged the page against Google's index, so
+        # it is review-worthy, never an outright rejection while it carries a URL.
+        ai_decision = ai_evidence.match_decision.upper() if ai_evidence else ""
+        is_ai_pick = bool(
+            ai_evidence
+            and ai_evidence.final_url
+            and ai_decision not in {AI_MATCH_DECISION_NO_MATCH, ""}
+            and self._same_url_or_domain_path(ai_evidence.final_url, candidate.url)
+        )
+        if is_ai_pick:
             return VALIDATION_NEEDS_REVIEW
         return VALIDATION_REJECTED
 
