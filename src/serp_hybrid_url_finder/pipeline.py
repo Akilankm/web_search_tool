@@ -380,41 +380,43 @@ class HybridProductURLFinderPipeline:
                         )
                         return scored
 
-        # Last resort: when everything above fails, return the best available
-        # non-mismatch candidate so no product ever comes back completely empty.
-        # AI's explicit pick is preferred; otherwise the top-ranked candidate.
+        # Last resort: the "from anywhere" net. When every scoped pass above
+        # fails, return the best available candidate REGARDLESS of country scope
+        # or scrapability. Country lock is intentionally IGNORED here — the whole
+        # point of this net is "get a URL from anywhere". The only thing excluded
+        # is a proven IDENTITY_MISMATCH (a different product's barcode on the page).
         if self.pipeline_config.last_resort_fallback and scored_candidates:
-            _lr_country_ok = (
-                lambda s: self.pipeline_config.allow_global_fallback
-                or s.country_check != COUNTRY_CHECK_ALTERNATIVE
-            )
-            _lr_not_mismatch = (
+            _not_mismatch = (
                 lambda s: s.verification is None
                 or s.verification.identity_status != IDENTITY_MISMATCH
             )
-            # Prefer AI's explicit pick (any non-NO_MATCH decision)
+            # 1. Prefer AI's explicit pick (any decision except NO_MATCH).
             if (
                 ai_evidence is not None
                 and ai_evidence.final_url
                 and ai_evidence.match_decision not in {"NO_MATCH", ""}
             ):
                 for scored in scored_candidates:
-                    if (
-                        scored.candidate.url == ai_evidence.final_url
-                        and _lr_not_mismatch(scored)
-                        and _lr_country_ok(scored)
-                    ):
+                    if scored.candidate.url == ai_evidence.final_url and _not_mismatch(scored):
                         logger.warning(
-                            "Last resort: AI-picked URL | url={}", scored.candidate.url
+                            "Last resort (from anywhere): AI-picked URL | url={}",
+                            scored.candidate.url,
                         )
                         return scored
-            # Fallback: top-ranked non-mismatch candidate
+            # 2. Otherwise the top-ranked non-mismatch candidate from anywhere.
             for scored in scored_candidates:
-                if _lr_not_mismatch(scored) and _lr_country_ok(scored):
+                if _not_mismatch(scored):
                     logger.warning(
-                        "Last resort: top-ranked candidate | url={}", scored.candidate.url
+                        "Last resort (from anywhere): top-ranked candidate | url={}",
+                        scored.candidate.url,
                     )
                     return scored
+            # 3. Absolute floor: even a mismatch is better than nothing for review.
+            logger.warning(
+                "Last resort (from anywhere): returning top candidate despite mismatch | url={}",
+                scored_candidates[0].candidate.url,
+            )
+            return scored_candidates[0]
 
         return None
 
@@ -600,7 +602,7 @@ class HybridProductURLFinderPipeline:
             )
 
         if final.country_check == COUNTRY_CHECK_ALTERNATIVE:
-            # Only reachable when allow_global_fallback is enabled.
+            # Reachable via global fallback OR the last-resort "from anywhere" net.
             justification = (
                 f"{justification} {REASON_OUT_OF_COUNTRY_FALLBACK} "
                 f"(requested country '{product.country_code}')."
