@@ -43,8 +43,9 @@ class OrganicSearchPlanner:
         if product.retailer_name:
             parts.append(product.retailer_name.strip())
 
-        if product.country_code:
-            parts.append(product.country_code.strip())
+        # NOTE: country_code is already passed to SerpAPI via 'gl' parameter;
+        # adding it to the query string as a literal search term over-constrains
+        # the query and often returns zero results. Rely on geographic filtering.
 
         # Keep this light. Heavy exclusions can produce zero results for rare products.
         parts.extend(("product", "produkt"))
@@ -72,8 +73,7 @@ class OrganicSearchPlanner:
             if product.retailer_name:
                 parts.append(product.retailer_name.strip())
 
-            if product.country_code:
-                parts.append(product.country_code.strip())
+            # NOTE: country_code is already passed via 'gl' parameter; skip literal term.
 
             parts.extend(("product", "produkt", "detail"))
 
@@ -87,8 +87,7 @@ class OrganicSearchPlanner:
             if product.retailer_name and not inferred_domain:
                 parts.append(product.retailer_name.strip())
 
-            if product.country_code:
-                parts.append(product.country_code.strip())
+            # NOTE: country_code is already passed via 'gl' parameter; skip literal term.
 
             parts.extend(ORGANIC_DETAIL_TERMS)
 
