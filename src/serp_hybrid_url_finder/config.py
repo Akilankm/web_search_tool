@@ -35,6 +35,7 @@ from src.serp_hybrid_url_finder.constants import (
     SERPAPI_API_KEY_ENV,
     ScoreWeights,
 )
+from src.serp_hybrid_url_finder.country_mapping import resolve_language
 from src.serp_hybrid_url_finder.markets import MarketProfile
 
 
@@ -59,7 +60,7 @@ class SerpAPIConfig:
         cls,
         *,
         country_code: str = DEFAULT_COUNTRY_CODE,
-        language_code: str = DEFAULT_LANGUAGE_CODE,
+        language_code: Optional[str] = None,
         device: str = DEFAULT_DEVICE,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
         max_retries: int = DEFAULT_MAX_RETRIES,
@@ -80,10 +81,21 @@ class SerpAPIConfig:
                 f"{SERPAPI_API_KEY_ENV} not found. Create .env or export the variable."
             )
 
+        # Auto-derive language from country if not explicitly provided
+        country_code = country_code.lower()
+        if language_code is None:
+            try:
+                language_code = resolve_language(country_code.upper())
+            except KeyError:
+                # Country not in mapping; fall back to default
+                language_code = DEFAULT_LANGUAGE_CODE
+        else:
+            language_code = language_code.lower()
+
         return cls(
             api_key=api_key,
-            country_code=country_code.lower(),
-            language_code=language_code.lower(),
+            country_code=country_code,
+            language_code=language_code,
             device=device,
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,

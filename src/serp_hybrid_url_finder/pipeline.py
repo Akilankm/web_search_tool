@@ -9,6 +9,7 @@ from src.serp_hybrid_url_finder.ai_evidence_parser import AIMatchEvidenceParser
 from src.serp_hybrid_url_finder.budget import BudgetTracker
 from src.serp_hybrid_url_finder.candidate_collector import CandidateCollector
 from src.serp_hybrid_url_finder.config import PipelineConfig, SerpAPIConfig
+from src.serp_hybrid_url_finder.country_mapping import resolve_language
 from src.serp_hybrid_url_finder.constants import (
     AI_REPAIR_QUERY_MAX_CHARS,
     AI_VALIDATION_QUERY_MAX_CHARS,
@@ -101,6 +102,18 @@ class HybridProductURLFinderPipeline:
         *,
         return_trace: bool = False,
     ) -> ProductURLMatch | PipelineTrace:
+        # Auto-resolve language from country if not explicitly provided
+        if product.language_code is None:
+            try:
+                resolved_language = resolve_language(product.country_code.upper(), product.region)
+                # Reconstruct product with resolved language
+                from dataclasses import replace
+                product = replace(product, language_code=resolved_language)
+            except KeyError:
+                # Country not in mapping; language will remain None and serp_clients
+                # will fall back to config.language_code
+                pass
+
         logger.info("Starting hybrid product URL finding | row_id={}", product.row_id)
 
         budget = BudgetTracker(

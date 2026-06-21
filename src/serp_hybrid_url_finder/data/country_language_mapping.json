@@ -1,0 +1,187 @@
+{
+  "CH": {
+    "primary_language": "de",
+    "alternative_languages": ["fr", "it"],
+    "market_profile_id": "ch",
+    "currency": "CHF",
+    "country_name": "Switzerland",
+    "region_language_mapping": {
+      "romandy": "fr",
+      "ticino": "it",
+      "grisons": "rm"
+    }
+  },
+  "CO": {
+    "primary_language": "es",
+    "alternative_languages": [],
+    "market_profile_id": "co",
+    "currency": "COP",
+    "country_name": "Colombia"
+  },
+  "DE": {
+    "primary_language": "de",
+    "alternative_languages": [],
+    "market_profile_id": "de",
+    "currency": "EUR",
+    "country_name": "Germany"
+  },
+  "AT": {
+    "primary_language": "de",
+    "alternative_languages": [],
+    "market_profile_id": "at",
+    "currency": "EUR",
+    "country_name": "Austria"
+  },
+  "CZ": {
+    "primary_language": "cs",
+    "alternative_languages": [],
+    "market_profile_id": "cz",
+    "currency": "CZK",
+    "country_name": "Czech Republic"
+  },
+  "ES": {
+    "primary_language": "es",
+    "alternative_languages": ["ca"],
+    "market_profile_id": "es",
+    "currency": "EUR",
+    "country_name": "Spain"
+  },
+  "FR": {
+    "primary_language": "fr",
+    "alternative_languages": [],
+    "market_profile_id": "fr",
+    "currency": "EUR",
+    "country_name": "France"
+  },
+  "IT": {
+    "primary_language": "it",
+    "alternative_languages": [],
+    "market_profile_id": "it",
+    "currency": "EUR",
+    "country_name": "Italy"
+  },
+  "NL": {
+    "primary_language": "nl",
+    "alternative_languages": [],
+    "market_profile_id": "nl",
+    "currency": "EUR",
+    "country_name": "Netherlands"
+  },
+  "BE": {
+    "primary_language": "nl",
+    "alternative_languages": ["fr"],
+    "market_profile_id": "be",
+    "currency": "EUR",
+    "country_name": "Belgium",
+    "region_language_mapping": {
+      "flanders": "nl",
+      "wallonia": "fr",
+      "brussels": "nl"
+    }
+  },
+  "PL": {
+    "primary_language": "pl",
+    "alternative_languages": [],
+    "market_profile_id": "pl",
+    "currency": "PLN",
+    "country_name": "Poland"
+  },
+  "PT": {
+    "primary_language": "pt",
+    "alternative_languages": [],
+    "market_profile_id": "pt",
+    "currency": "EUR",
+    "country_name": "Portugal"
+  },
+  "GB": {
+    "primary_language": "en",
+    "alternative_languages": [],
+    "market_profile_id": "gb",
+    "currency": "GBP",
+    "country_name": "United Kingdom"
+  },
+  "US": {
+    "primary_language": "en",
+    "alternative_languages": ["es"],
+    "market_profile_id": "us",
+    "currency": "USD",
+    "country_name": "United States"
+  },
+  "CA": {
+    "primary_language": "en",
+    "alternative_languages": ["fr"],
+    "market_profile_id": "ca",
+    "currency": "CAD",
+    "country_name": "Canada"
+  },
+  "MX": {
+    "primary_language": "es",
+    "alternative_languages": [],
+    "market_profile_id": "mx",
+    "currency": "MXN",
+    "country_name": "Mexico"
+  },
+  "BR": {
+    "primary_language": "pt",
+    "alternative_languages": [],
+    "market_profile_id": "br",
+    "currency": "BRL",
+    "country_name": "Brazil"
+  },
+  "AR": {
+    "primary_language": "es",
+    "alternative_languages": [],
+    "market_profile_id": "ar",
+    "currency": "ARS",
+    "country_name": "Argentina"
+  },
+  "AU": {
+    "primary_language": "en",
+    "alternative_languages": [],
+    "market_profile_id": "au",
+    "currency": "AUD",
+    "country_name": "Australia"
+  },
+  "JP": {
+    "primary_language": "ja",
+    "alternative_languages": [],
+    "market_profile_id": "jp",
+    "currency": "JPY",
+    "country_name": "Japan"
+  },
+  "CN": {
+    "primary_language": "zh",
+    "alternative_languages": [],
+    "market_profile_id": "cn",
+    "currency": "CNY",
+    "country_name": "China"
+  },
+  "IN": {
+    "primary_language": "en",
+    "alternative_languages": ["hi"],
+    "market_profile_id": "in",
+    "currency": "INR",
+    "country_name": "India"
+  },
+  "SG": {
+    "primary_language": "en",
+    "alternative_languages": ["zh", "ms", "ta"],
+    "market_profile_id": "sg",
+    "currency": "SGD",
+    "country_name": "Singapore"
+  },
+  "ZA": {
+    "primary_language": "en",
+    "alternative_languages": ["af"],
+    "market_profile_id": "za",
+    "currency": "ZAR",
+    "country_name": "South Africa"
+  },
+  "NZ": {
+    "primary_language": "en",
+    "alternative_languages": [],
+    "market_profile_id": "nz",
+    "currency": "NZD",
+    "country_name": "New Zealand"
+  }
+}

@@ -16,6 +16,10 @@ class ProductQuery:
     Optional:
         retailer_name: Preferred retailer. Biases candidate selection when given.
         ean:           EAN / GTIN barcode. Strongest identity evidence when given.
+        language_code: Language override (e.g. "de" for German in Switzerland).
+                      If None, auto-derived from country_code via mapping.
+        region:        Region/subdivision for multi-language countries 
+                      (e.g. "Romandy" for French-speaking Switzerland).
     """
 
     main_text: str
@@ -23,6 +27,8 @@ class ProductQuery:
     row_id: str = "demo-001"
     retailer_name: Optional[str] = None
     ean: Optional[str] = None
+    language_code: Optional[str] = None
+    region: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not self.main_text or not self.main_text.strip():
@@ -37,6 +43,8 @@ class ProductQuery:
             "ean": self.ean,
             "retailer_name": self.retailer_name,
             "country_code": self.country_code,
+            "language_code": self.language_code,
+            "region": self.region,
         }
 
 

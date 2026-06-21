@@ -82,14 +82,16 @@ class _BaseSerpAPIClient:
         engine: str,
         query: str,
         country_code: Optional[str] = None,
+        language_code: Optional[str] = None,
     ) -> Dict[str, Any]:
         gl = (country_code or self.config.country_code or "").lower().strip()
+        hl = (language_code or self.config.language_code or "").lower().strip()
         params: Dict[str, Any] = {
             SERPAPI_PARAM_API_KEY: self.config.api_key,
             SERPAPI_PARAM_ENGINE: engine,
             SERPAPI_PARAM_QUERY: query.strip(),
             SERPAPI_PARAM_COUNTRY: gl,
-            SERPAPI_PARAM_LANGUAGE: self.config.language_code.lower(),
+            SERPAPI_PARAM_LANGUAGE: hl,
             SERPAPI_PARAM_DEVICE: self.config.device,
             SERPAPI_PARAM_OUTPUT: SERPAPI_OUTPUT_JSON,
         }
@@ -182,10 +184,12 @@ class GoogleOrganicSearchClient(_BaseSerpAPIClient):
             raise ValueError("query cannot be empty")
 
         country_code = product.country_code if product else None
+        language_code = product.language_code if product else None
         params = self._base_params(
             engine=SERPAPI_ENGINE_GOOGLE,
             query=query,
             country_code=country_code,
+            language_code=language_code,
         )
         params[SERPAPI_PARAM_NUM] = self.config.organic_num_results
 
@@ -254,10 +258,12 @@ class GoogleAIModeClient(_BaseSerpAPIClient):
             raise ValueError("query cannot be empty")
 
         country_code = product.country_code if product else None
+        language_code = product.language_code if product else None
         params = self._base_params(
             engine=SERPAPI_ENGINE_GOOGLE_AI_MODE,
             query=query,
             country_code=country_code,
+            language_code=language_code,
         )
 
         logger.info("Calling Google AI Mode | query_chars={}", len(query))
