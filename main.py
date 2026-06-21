@@ -17,8 +17,9 @@ configure_logging('INFO')
 printer = RichPrinter()
 
 serp_config = SerpAPIConfig.from_env(
-    country_code='CO',  # SerpAPI gl fallback; per-product country_code overrides this
-    language_code='en',
+    country_code='CO',  # Colombia → auto-resolves to Spanish (es)
+    # language_code omitted → auto-derived from country_code via mapping
+    # To override: language_code='es' (explicit), or pass via ProductQuery
     no_cache=False,
 )
 
@@ -43,9 +44,11 @@ pipeline = HybridProductURLFinderPipeline(
 product = ProductQuery(
     row_id='demo-001',
     main_text='MATCHBOX LESNEY MADE IN ENGLAND #7  - NARANJA',
-    country_code='CO',        # required
-    retailer_name='meli',       # optional
+    country_code='CO',        # required; language auto-resolved from mapping
+    retailer_name='meli',     # optional
     ean='8018190039368',      # optional
+    # language_code=None,     # optional: auto-derived from country_code; can override
+    # region=None,            # optional: for multi-language countries (e.g., "Romandy" in CH)
 )
 
 trace = pipeline.run(product, return_trace=True)
