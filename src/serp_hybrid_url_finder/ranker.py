@@ -277,15 +277,22 @@ class ProductURLRanker:
         self, item: ScoredURLCandidate
     ) -> tuple[int, int, int, float, float]:
         """Ranking key (all descending): correct identity, then scrapable, then
-        in-country, then richest extractable content, then confidence."""
+        in-country, then richest extractable content (weighted when scrapable),
+        then confidence."""
         scrapable = 1 if (item.scrape and item.scrape.is_scrapable) else 0
         in_country = 0 if item.country_check == COUNTRY_CHECK_ALTERNATIVE else 1
         richness = item.scrape.richness_score if item.scrape else 0.0
+        
+        # When the URL is scrapable, weight richness heavily (x100) so it dominates 
+        # over confidence. Even tiny richness differences (0.05 vs 0.06 → 5 vs 6)
+        # will outweigh large confidence differences.
+        richness_weighted = richness * 100 if scrapable else richness
+        
         return (
             self._identity_rank(item.verification),
             scrapable,
             in_country,
-            richness,
+            richness_weighted,
             item.confidence,
         )
 
