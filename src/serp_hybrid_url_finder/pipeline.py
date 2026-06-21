@@ -18,6 +18,7 @@ from src.serp_hybrid_url_finder.constants import (
     COUNTRY_CHECK_ALTERNATIVE,
     COUNTRY_CHECK_NOT_PROVIDED,
     HIGH_CONFIDENCE_THRESHOLD,
+    IDENTITY_MISMATCH,
     IDENTITY_PROBABLE,
     IDENTITY_VERIFIED,
     IDENTITY_WEAK,
@@ -359,17 +360,16 @@ class HybridProductURLFinderPipeline:
                 return result
 
         # Scraping fallback: when ALL crawl4ai scraping failed (bot-protected site),
-        # return the URL that the AI explicitly selected. This prevents empty results
-        # from retailers that block headless browsers.
+        # return the URL that the AI explicitly selected. MEDIUM included because
+        # a MEDIUM AI decision is still meaningful evidence.
         if (
             self.pipeline_config.unscraped_ai_fallback
             and ai_evidence is not None
             and ai_evidence.final_url
-            and ai_evidence.match_decision in {"EXACT", "HIGH"}
+            and ai_evidence.match_decision in {"EXACT", "HIGH", "MEDIUM"}
         ):
             for scored in scored_candidates:
                 if scored.candidate.url == ai_evidence.final_url:
-                    # Only return if it passes country scope
                     if (
                         self.pipeline_config.allow_global_fallback
                         or scored.country_check != COUNTRY_CHECK_ALTERNATIVE
@@ -379,6 +379,42 @@ class HybridProductURLFinderPipeline:
                             scored.candidate.url,
                         )
                         return scored
+
+        # Last resort: when everything above fails, return the best available
+        # non-mismatch candidate so no product ever comes back completely empty.
+        # AI's explicit pick is preferred; otherwise the top-ranked candidate.
+        if self.pipeline_config.last_resort_fallback and scored_candidates:
+            _lr_country_ok = (
+                lambda s: self.pipeline_config.allow_global_fallback
+                or s.country_check != COUNTRY_CHECK_ALTERNATIVE
+            )
+            _lr_not_mismatch = (
+                lambda s: s.verification is None
+                or s.verification.identity_status != IDENTITY_MISMATCH
+            )
+            # Prefer AI's explicit pick (any non-NO_MATCH decision)
+            if (
+                ai_evidence is not None
+                and ai_evidence.final_url
+                and ai_evidence.match_decision not in {"NO_MATCH", ""}
+            ):
+                for scored in scored_candidates:
+                    if (
+                        scored.candidate.url == ai_evidence.final_url
+                        and _lr_not_mismatch(scored)
+                        and _lr_country_ok(scored)
+                    ):
+                        logger.warning(
+                            "Last resort: AI-picked URL | url={}", scored.candidate.url
+                        )
+                        return scored
+            # Fallback: top-ranked non-mismatch candidate
+            for scored in scored_candidates:
+                if _lr_not_mismatch(scored) and _lr_country_ok(scored):
+                    logger.warning(
+                        "Last resort: top-ranked candidate | url={}", scored.candidate.url
+                    )
+                    return scored
 
         return None
 
@@ -542,6 +578,11 @@ class HybridProductURLFinderPipeline:
         validation_status = (
             breakdown.validation_status if breakdown else VALIDATION_NEEDS_REVIEW
         )
+        # Confidence floor: returning a URL with confidence=0.0 is contradictory.
+        # Any candidate that survived to _to_best_match has at least minimal signal.
+        confidence_final = max(final.confidence, 0.05)
+        if confidence_final != final.confidence:
+            validation_status = VALIDATION_NEEDS_REVIEW
         justification = (
             breakdown.justification_summary
             if breakdown
@@ -581,7 +622,7 @@ class HybridProductURLFinderPipeline:
             retailer_name=product.retailer_name,
             country_code=product.country_code,
             product_url=final.candidate.url,
-            confidence=final.confidence,
+            confidence=confidence_final,
             is_exact_product_match=final.is_exact_product_match,
             match_reason=final.reason,
             validation_status=validation_status,

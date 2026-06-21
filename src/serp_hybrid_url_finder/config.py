@@ -148,6 +148,11 @@ class PipelineConfig:
     # that the AI explicitly selected, returned as NEEDS_REVIEW with low confidence.
     # Prevents empty results when the retailer blocks headless browsers.
     unscraped_ai_fallback: bool = True
+    # Absolute last resort: when all other passes fail, return the best available
+    # non-mismatch candidate (AI pick preferred) regardless of scrapability.
+    # Ensures every product always gets a URL for manual review.
+    # Returned with confidence floor of 0.05 and NEEDS_REVIEW status.
+    last_resort_fallback: bool = True
     high_confidence_requires_justification: bool = HIGH_CONFIDENCE_REQUIRES_JUSTIFICATION_DEFAULT
 
     # Country scope. allow_global_fallback=False (default) LOCKS results to the
