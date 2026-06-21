@@ -95,6 +95,42 @@ class OrganicSearchPlanner:
 
         return self._truncate(" ".join(parts))
 
+    def build_global_fallback_query(
+        self,
+        product: ProductQuery,
+        inferred_domain: Optional[str] = None,
+    ) -> str:
+        """
+        Global fallback search when in-country queries return poor results.
+        
+        Strategy:
+        - If retailer was inferred/specified, scope to that domain globally
+        - Otherwise, use relaxed title tokens (product is rare/niche)
+        - Skip country constraint; let Google return results from all markets
+        """
+        parts: list[str] = []
+
+        # If we found the retailer domain in earlier searches, prioritize it globally
+        if inferred_domain:
+            parts.append(QUERY_SITE_OPERATOR.format(domain=inferred_domain))
+            parts.append(self._quote(product.main_text))
+            if product.ean:
+                parts.append(product.ean.strip())
+            parts.extend(("product", "produkt"))
+
+        else:
+            # No known retailer; search globally with relaxed title
+            parts.extend(self._relaxed_title_tokens(product.main_text, max_tokens=8))
+            if product.retailer_name:
+                parts.append(product.retailer_name.strip())
+            if product.ean:
+                parts.append(product.ean.strip())
+            parts.extend(("product", "detail", "shop"))
+
+        parts.extend(self._light_exclusions())
+
+        return self._truncate(" ".join(parts))
+
     def infer_retailer_domain_from_organic(
         self,
         product: ProductQuery,

@@ -140,6 +140,35 @@ class HybridProductURLFinderPipeline:
             budget.consume(CALL_TYPE_ORGANIC)
             organic_responses.append(self.organic_client.search(q2, product=product))
 
+        # Organic Search #3: global fallback (if in-country searches yielded poor results).
+        # This helps find products that are rare/niche in the target country but available globally.
+        if budget.can_use_organic():
+            # Collect candidates from first 2 searches to assess quality
+            temp_candidates = self.candidate_collector.collect_from_organic(organic_responses)
+            
+            # Decide: do we need global fallback?
+            # Criteria: very few candidates (< 2) OR all have low confidence
+            need_global_fallback = (
+                len(temp_candidates) < 2
+                or (temp_candidates and all(
+                    c.initial_confidence < 0.5
+                    for c in temp_candidates
+                ))
+            )
+            
+            if need_global_fallback:
+                inferred_domain = self.organic_planner.infer_retailer_domain_from_organic(
+                    product, organic_responses[0]
+                )
+                q3 = self.organic_planner.build_global_fallback_query(
+                    product,
+                    inferred_domain=inferred_domain,
+                )
+                organic_queries.append(q3)
+                budget.consume(CALL_TYPE_ORGANIC)
+                organic_responses.append(self.organic_client.search(q3, product=product))
+                logger.info("Executed global fallback search | reason=insufficient_in_country_results")
+
         candidates = self.candidate_collector.collect_from_organic(organic_responses)
         candidates_text = self.candidate_collector.to_ai_candidate_text(
             candidates,

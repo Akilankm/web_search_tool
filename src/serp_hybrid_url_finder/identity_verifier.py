@@ -100,12 +100,12 @@ class ProductIdentityVerifier:
                 f"page declares a different GTIN ({', '.join(page_eans)}) than requested {product.ean}"
             )
 
+        # NOTE: Pack size is irrelevant for product coding team.
+        # Even if pack sizes differ, the page may still contain the product info they need.
+        # Keep quantity check in reporting but don't block on it.
         if quantity_check == CHECK_QTY_MATCHED:
             justifications.append(f"pack size matches ({req_qty})")
-        elif quantity_check == CHECK_QTY_CONFLICT:
-            blocking.append(
-                f"pack-size mismatch: requested '{req_qty}' but page is '{page_qty}'"
-            )
+        # Removed: elif quantity_check == CHECK_QTY_CONFLICT (pack size mismatch is not a blocker)
 
         if title_check == CHECK_TITLE_STRONG:
             justifications.append(
@@ -250,31 +250,35 @@ class ProductIdentityVerifier:
         title_check: str,
         page_type: str,
     ) -> str:
-        # Hard conflicts: a different product / variant.
-        if ean_check == CHECK_EAN_CONFLICT or quantity_check == CHECK_QTY_CONFLICT:
-            return IDENTITY_MISMATCH
-
-        # Cannot trust the page as a product source.
+        # HARD REJECTS: pages that are not genuine product sources.
         if page_type in {PAGE_TYPE_SOFT_404, PAGE_TYPE_NON_PRODUCT} or not scrape.is_scrapable:
             return IDENTITY_UNVERIFIED
 
-        # is_pdp = page_type == PAGE_TYPE_PRODUCT_DETAIL
+        # TITLE IS REQUIRED: weak title match is a blocker.
+        if title_check == CHECK_TITLE_WEAK:
+            return IDENTITY_UNVERIFIED
 
-        # Authoritative EAN match.
-        if ean_check == CHECK_EAN_MATCHED and title_check != CHECK_TITLE_WEAK:
-            return IDENTITY_VERIFIED
-
-        # Strong title + confirmed pack size on a real PDP.
+        # STRONG TITLE: Best case - accept unless EAN explicitly conflicts.
         if title_check == CHECK_TITLE_STRONG:
-            if quantity_check == CHECK_QTY_MATCHED:
+            # EAN match: authoritative confirmation
+            if ean_check == CHECK_EAN_MATCHED:
                 return IDENTITY_VERIFIED
-            if quantity_check in {CHECK_QTY_NOT_APPLICABLE, CHECK_QTY_UNKNOWN}:
+            # EAN conflict: title still dominant, but downgrade confidence
+            # (product coding team can verify with richness + scraping)
+            if ean_check == CHECK_EAN_CONFLICT:
                 return IDENTITY_PROBABLE
-
-        # Strong title on an unclear page type, or partial title on a PDP.
-        if title_check == CHECK_TITLE_STRONG:
+            # EAN absent/unknown: title alone is sufficient
             return IDENTITY_PROBABLE
+
+        # PARTIAL TITLE: requires additional confirmation.
         if title_check == CHECK_TITLE_PARTIAL:
+            # Partial title + confirmed EAN: accept
+            if ean_check == CHECK_EAN_MATCHED:
+                return IDENTITY_PROBABLE
+            # Partial title + EAN conflict: too risky
+            if ean_check == CHECK_EAN_CONFLICT:
+                return IDENTITY_WEAK
+            # Partial title + no EAN info: weak confidence
             return IDENTITY_WEAK
 
         return IDENTITY_UNVERIFIED
