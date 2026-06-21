@@ -38,10 +38,10 @@ class OrganicSearchPlanner:
 
         # EAN can help, but keep it unquoted and late to avoid over-constraining.
         if product.ean:
-            parts.append(product.ean.strip())
+            parts.append(str(product.ean).strip())
 
         if product.retailer_name:
-            parts.append(product.retailer_name.strip())
+            parts.append(str(product.retailer_name).strip())
 
         # NOTE: country_code is already passed to SerpAPI via 'gl' parameter;
         # adding it to the query string as a literal search term over-constrains
@@ -71,7 +71,7 @@ class OrganicSearchPlanner:
             parts.extend(self._relaxed_title_tokens(product.main_text, max_tokens=6))
 
             if product.retailer_name:
-                parts.append(product.retailer_name.strip())
+                parts.append(str(product.retailer_name).strip())
 
             # NOTE: country_code is already passed via 'gl' parameter; skip literal term.
 
@@ -80,12 +80,12 @@ class OrganicSearchPlanner:
         else:
             # If first search found candidates, second query can be more targeted.
             if product.ean:
-                parts.append(product.ean.strip())
+                parts.append(str(product.ean).strip())
 
             parts.append(self._quote(product.main_text))
 
             if product.retailer_name and not inferred_domain:
-                parts.append(product.retailer_name.strip())
+                parts.append(str(product.retailer_name).strip())
 
             # NOTE: country_code is already passed via 'gl' parameter; skip literal term.
 
@@ -115,16 +115,16 @@ class OrganicSearchPlanner:
             parts.append(QUERY_SITE_OPERATOR.format(domain=inferred_domain))
             parts.append(self._quote(product.main_text))
             if product.ean:
-                parts.append(product.ean.strip())
+                parts.append(str(product.ean).strip())
             parts.extend(("product", "produkt"))
 
         else:
             # No known retailer; search globally with relaxed title
             parts.extend(self._relaxed_title_tokens(product.main_text, max_tokens=8))
             if product.retailer_name:
-                parts.append(product.retailer_name.strip())
+                parts.append(str(product.retailer_name).strip())
             if product.ean:
-                parts.append(product.ean.strip())
+                parts.append(str(product.ean).strip())
             parts.extend(("product", "detail", "shop"))
 
         parts.extend(self._light_exclusions())
