@@ -6,7 +6,7 @@ from typing import Iterable, List
 
 from loguru import logger
 
-from serp_hybrid_url_finder.models import ProductQuery, ProductURLMatch
+from src.serp_hybrid_url_finder.models import ProductQuery, ProductURLMatch
 
 
 class CSVProductIO:

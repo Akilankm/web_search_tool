@@ -5,11 +5,11 @@ from typing import Optional
 
 from loguru import logger
 
-from serp_hybrid_url_finder.ai_evidence_parser import AIMatchEvidenceParser
-from serp_hybrid_url_finder.budget import BudgetTracker
-from serp_hybrid_url_finder.candidate_collector import CandidateCollector
-from serp_hybrid_url_finder.config import PipelineConfig, SerpAPIConfig
-from serp_hybrid_url_finder.constants import (
+from src.serp_hybrid_url_finder.ai_evidence_parser import AIMatchEvidenceParser
+from src.serp_hybrid_url_finder.budget import BudgetTracker
+from src.serp_hybrid_url_finder.candidate_collector import CandidateCollector
+from src.serp_hybrid_url_finder.config import PipelineConfig, SerpAPIConfig
+from src.serp_hybrid_url_finder.constants import (
     AI_REPAIR_QUERY_MAX_CHARS,
     AI_VALIDATION_QUERY_MAX_CHARS,
     CALL_TYPE_AI_MODE,
@@ -29,8 +29,8 @@ from serp_hybrid_url_finder.constants import (
     VALIDATION_NO_MATCH,
     VALIDATION_REJECTED,
 )
-from serp_hybrid_url_finder.identity_verifier import ProductIdentityVerifier
-from serp_hybrid_url_finder.models import (
+from src.serp_hybrid_url_finder.identity_verifier import ProductIdentityVerifier
+from src.serp_hybrid_url_finder.models import (
     AIMatchEvidence,
     MatchVerification,
     OrganicSearchResponse,
@@ -42,10 +42,10 @@ from serp_hybrid_url_finder.models import (
     SerpAIResponse,
     URLCandidate,
 )
-from serp_hybrid_url_finder.query_planner import AIValidationPromptBuilder, OrganicSearchPlanner
-from serp_hybrid_url_finder.ranker import ProductURLRanker
-from serp_hybrid_url_finder.scraper import CrawlScraper
-from serp_hybrid_url_finder.serp_clients import GoogleAIModeClient, GoogleOrganicSearchClient
+from src.serp_hybrid_url_finder.query_planner import AIValidationPromptBuilder, OrganicSearchPlanner
+from src.serp_hybrid_url_finder.ranker import ProductURLRanker
+from src.serp_hybrid_url_finder.scraper import CrawlScraper
+from src.serp_hybrid_url_finder.serp_clients import GoogleAIModeClient, GoogleOrganicSearchClient
 
 
 @dataclass

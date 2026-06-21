@@ -5,13 +5,13 @@ from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse
 
-from serp_hybrid_url_finder.constants import (
+from src.serp_hybrid_url_finder.constants import (
     ORGANIC_DETAIL_TERMS,
     ORGANIC_NOISE_EXCLUSIONS,
     ORGANIC_QUERY_MAX_CHARS,
     QUERY_SITE_OPERATOR,
 )
-from serp_hybrid_url_finder.models import OrganicSearchResponse, ProductQuery
+from src.serp_hybrid_url_finder.models import OrganicSearchResponse, ProductQuery
 
 
 @dataclass(frozen=True)
@@ -209,7 +209,7 @@ class AIValidationPromptBuilder:
         product: ProductQuery,
         candidates_text: str,
     ) -> str:
-        from serp_hybrid_url_finder.constants import (
+        from src.serp_hybrid_url_finder.constants import (
             AI_VALIDATOR_OUTPUT_CONTRACT,
             AI_VALIDATOR_ROLE,
             AI_VALIDATOR_RULES,
@@ -259,7 +259,7 @@ class AIValidationPromptBuilder:
         previous_answer: str,
         rejection_reason: str,
     ) -> str:
-        from serp_hybrid_url_finder.constants import (
+        from src.serp_hybrid_url_finder.constants import (
             AI_REPAIR_TASK,
             AI_VALIDATOR_OUTPUT_CONTRACT,
             AI_VALIDATOR_ROLE,

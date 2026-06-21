@@ -7,8 +7,8 @@ from typing import Any, Dict, Optional
 import requests
 from loguru import logger
 
-from serp_hybrid_url_finder.config import SerpAPIConfig
-from serp_hybrid_url_finder.constants import (
+from src.serp_hybrid_url_finder.config import SerpAPIConfig
+from src.serp_hybrid_url_finder.constants import (
     AI_MODE_NO_MATCH_MARKDOWN,
     AI_STATUS_NO_RESULTS,
     DEFAULT_AI_STATUS,
@@ -53,7 +53,7 @@ from serp_hybrid_url_finder.constants import (
     SERPAPI_SEARCH_URL,
     SERPAPI_TRUE_VALUE,
 )
-from serp_hybrid_url_finder.models import (
+from src.serp_hybrid_url_finder.models import (
     AIReference,
     OrganicSearchResponse,
     OrganicSearchResult,

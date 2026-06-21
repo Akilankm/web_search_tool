@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from serp_hybrid_url_finder.constants import (
+from src.serp_hybrid_url_finder.constants import (
     DEFAULT_LOG_LEVEL,
     LOGURU_FORMAT,
     RICH_BUDGET_PANEL_TITLE,

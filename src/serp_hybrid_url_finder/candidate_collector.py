@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
-from serp_hybrid_url_finder.constants import (
+from src.serp_hybrid_url_finder.constants import (
     AI_FINAL_URL_LINE_REGEX,
     AI_NO_MATCH_VALUE,
     BLOCKED_DOMAINS,
@@ -23,7 +23,7 @@ from serp_hybrid_url_finder.constants import (
     URL_TRAILING_CHARS_TO_STRIP,
     VALID_URL_SCHEMES,
 )
-from serp_hybrid_url_finder.models import OrganicSearchResponse, SerpAIResponse, URLCandidate
+from src.serp_hybrid_url_finder.models import OrganicSearchResponse, SerpAIResponse, URLCandidate
 
 _URL_PATTERN = re.compile(URL_REGEX, re.IGNORECASE)
 _FINAL_URL_PATTERN = re.compile(AI_FINAL_URL_LINE_REGEX, re.IGNORECASE)

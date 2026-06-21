@@ -8,7 +8,7 @@ from urllib.parse import unquote, urlparse
 
 from loguru import logger
 
-from serp_hybrid_url_finder.constants import (
+from src.serp_hybrid_url_finder.constants import (
     CHECK_BRAND_ABSENT,
     CHECK_BRAND_MATCHED,
     CHECK_BRAND_NOT_APPLICABLE,
@@ -40,7 +40,7 @@ from serp_hybrid_url_finder.constants import (
     TITLE_STRONG_MATCH_THRESHOLD,
     TOKEN_REGEX,
 )
-from serp_hybrid_url_finder.models import MatchVerification, ProductQuery, ScrapeResult
+from src.serp_hybrid_url_finder.models import MatchVerification, ProductQuery, ScrapeResult
 
 _TOKEN_PATTERN = re.compile(TOKEN_REGEX)
 _QUANTITY_PATTERN = re.compile(QUANTITY_REGEX, re.IGNORECASE)

@@ -4,12 +4,12 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-from serp_hybrid_url_finder.constants import (
+from src.serp_hybrid_url_finder.constants import (
     AI_MATCH_DECISION_NO_MATCH,
     AI_NO_MATCH_VALUE,
     URL_TRAILING_CHARS_TO_STRIP,
 )
-from serp_hybrid_url_finder.models import AIMatchEvidence
+from src.serp_hybrid_url_finder.models import AIMatchEvidence
 
 
 @dataclass(frozen=True)

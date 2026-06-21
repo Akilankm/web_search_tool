@@ -1,8 +1,8 @@
-from serp_hybrid_url_finder.config import PipelineConfig, SerpAPIConfig
-from serp_hybrid_url_finder.identity_verifier import ProductIdentityVerifier
-from serp_hybrid_url_finder.io_utils import CSVProductIO
-from serp_hybrid_url_finder.logging_utils import RichPrinter, configure_logging
-from serp_hybrid_url_finder.models import (
+from src.serp_hybrid_url_finder.config import PipelineConfig, SerpAPIConfig
+from src.serp_hybrid_url_finder.identity_verifier import ProductIdentityVerifier
+from src.serp_hybrid_url_finder.io_utils import CSVProductIO
+from src.serp_hybrid_url_finder.logging_utils import RichPrinter, configure_logging
+from src.serp_hybrid_url_finder.models import (
     AIMatchEvidence,
     BudgetState,
     ConfidenceBreakdown,
@@ -15,8 +15,8 @@ from serp_hybrid_url_finder.models import (
     ScrapeResult,
     URLCandidate,
 )
-from serp_hybrid_url_finder.pipeline import HybridProductURLFinderPipeline
-from serp_hybrid_url_finder.scraper import CrawlScraper
+from src.serp_hybrid_url_finder.pipeline import HybridProductURLFinderPipeline
+from src.serp_hybrid_url_finder.scraper import CrawlScraper
 
 __all__ = [
     "SerpAPIConfig",

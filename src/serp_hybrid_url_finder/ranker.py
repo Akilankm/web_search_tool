@@ -7,7 +7,7 @@ from urllib.parse import unquote, urlparse
 
 from loguru import logger
 
-from serp_hybrid_url_finder.constants import (
+from src.serp_hybrid_url_finder.constants import (
     AI_DECLARED_FINAL_SOURCE_SCORE,
     AI_EVIDENCE_FIELD_SCORES,
     AI_MATCH_DECISION_SCORES,
@@ -95,7 +95,7 @@ from serp_hybrid_url_finder.constants import (
     ZERO_SCORE,
     ScoreWeights,
 )
-from serp_hybrid_url_finder.models import (
+from src.serp_hybrid_url_finder.models import (
     AIMatchEvidence,
     ConfidenceBreakdown,
     ConfidenceComponent,

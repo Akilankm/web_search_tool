@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from serp_hybrid_url_finder.constants import CALL_TYPE_AI_MODE, CALL_TYPE_ORGANIC
-from serp_hybrid_url_finder.models import BudgetState
+from src.serp_hybrid_url_finder.constants import CALL_TYPE_AI_MODE, CALL_TYPE_ORGANIC
+from src.serp_hybrid_url_finder.models import BudgetState
 
 
 class BudgetExceededError(RuntimeError):

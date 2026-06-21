@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
-from serp_hybrid_url_finder.constants import (
+from src.serp_hybrid_url_finder.constants import (
     CRAWL_HEADLESS_DEFAULT,
     CRAWL_MARKDOWN_EXCERPT_CHARS,
     CRAWL_MAX_HTML_CHARS_FOR_VALIDATION,
@@ -41,8 +41,8 @@ from serp_hybrid_url_finder.constants import (
     TOKEN_REGEX,
     VERIFICATION_TEXT_MAX_CHARS,
 )
-from serp_hybrid_url_finder.markets import MarketProfile, resolve_market_profile
-from serp_hybrid_url_finder.models import ProductQuery, ScrapeResult
+from src.serp_hybrid_url_finder.markets import MarketProfile, resolve_market_profile
+from src.serp_hybrid_url_finder.models import ProductQuery, ScrapeResult
 
 _T = TypeVar("_T")
 

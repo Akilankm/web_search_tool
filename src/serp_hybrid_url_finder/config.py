@@ -6,7 +6,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-from serp_hybrid_url_finder.constants import (
+from src.serp_hybrid_url_finder.constants import (
     ALLOW_GLOBAL_FALLBACK_DEFAULT,
     ALLOW_PROBABLE_AS_FINAL_DEFAULT,
     CRAWL_HEADLESS_DEFAULT,
@@ -35,7 +35,7 @@ from serp_hybrid_url_finder.constants import (
     SERPAPI_API_KEY_ENV,
     ScoreWeights,
 )
-from serp_hybrid_url_finder.markets import MarketProfile
+from src.serp_hybrid_url_finder.markets import MarketProfile
 
 
 
