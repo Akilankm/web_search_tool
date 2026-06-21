@@ -80,6 +80,7 @@ from src.serp_hybrid_url_finder.constants import (
     SCORE_KEY_ORGANIC_CONSENSUS,
     SCORE_KEY_PRODUCT_PAGE_SHAPE,
     SCORE_KEY_RETAILER,
+    SCORE_KEY_RICHNESS,
     SCORE_KEY_SCRAPE,
     SCORE_KEY_SOURCE_TYPE,
     SLUG_REGEX,
