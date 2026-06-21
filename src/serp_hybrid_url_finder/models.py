@@ -1,7 +1,33 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+
+# Sentinel strings from pandas/CSV that should be treated as "no value"
+_BLANK_STRINGS: frozenset[str] = frozenset({"", "none", "nan", "null", "n/a", "na"})
+
+
+def _clean_str(val: Any) -> Optional[str]:
+    """Normalise any pandas-style null (NaN, None, 'None', 'nan', '') to None."""
+    if val is None:
+        return None
+    if isinstance(val, float) and math.isnan(val):
+        return None
+    s = str(val).strip()
+    return None if s.lower() in _BLANK_STRINGS else (s or None)
+
+
+def _clean_ean(val: Any) -> Optional[str]:
+    """Like _clean_str but also strips the trailing .0 pandas adds to numeric EANs."""
+    s = _clean_str(val)
+    if s is None:
+        return None
+    # pandas reads integer EANs as float64 → "196214141070.0" → "196214141070"
+    if s.endswith(".0"):
+        s = s[:-2]
+    return s or None
 
 
 @dataclass(frozen=True)
@@ -35,6 +61,12 @@ class ProductQuery:
             raise ValueError("main_text is mandatory and cannot be empty.")
         if not self.country_code or not self.country_code.strip():
             raise ValueError("country_code is mandatory and cannot be empty.")
+        # Sanitize optional fields so pandas NaN / float EANs / "None" strings
+        # never leak into query strings or comparison logic.
+        object.__setattr__(self, "ean", _clean_ean(self.ean))
+        object.__setattr__(self, "retailer_name", _clean_str(self.retailer_name))
+        object.__setattr__(self, "language_code", _clean_str(self.language_code))
+        object.__setattr__(self, "region", _clean_str(self.region))
 
     def to_dict(self) -> Dict[str, Any]:
         return {

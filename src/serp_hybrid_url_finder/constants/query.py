@@ -12,11 +12,71 @@ ORGANIC_QUERY_MAX_CHARS: Final[int] = 450
 AI_VALIDATION_QUERY_MAX_CHARS: Final[int] = 6500
 AI_REPAIR_QUERY_MAX_CHARS: Final[int] = 6500
 
+# ---------------------------------------------------------------------------
+# Language-aware purchase-intent verbs.
+# Adding the local "buy" verb pushes Google toward commerce pages and away from
+# editorial / review / Wikipedia results. These verbs appear on almost every
+# retailer PDP ("jetzt kaufen", "acheter en ligne", "buy now").
+# ---------------------------------------------------------------------------
+ORGANIC_BUY_TERMS: Final[dict[str, str]] = {
+    "de": "kaufen",
+    "fr": "acheter",
+    "it": "acquistare",
+    "es": "comprar",
+    "nl": "kopen",
+    "pt": "comprar",
+    "pl": "kup",
+    "cs": "koupit",
+    "sk": "kupit",
+    "hu": "venni",
+    "ro": "cumpara",
+    "en": "buy",
+    "ja": "購入",
+    "zh": "购买",
+}
+
+# ---------------------------------------------------------------------------
+# Language-aware PDP URL path hints for the inurl: operator.
+# inurl:produkt matches /produkt/slug, /de/produkt/..., ?produkt=... etc.
+# First entry is used (most language-native); fallback to "_default".
+# ---------------------------------------------------------------------------
+ORGANIC_INURL_PDP_HINTS: Final[dict[str, tuple[str, ...]]] = {
+    "de": ("produkt", "artikel", "product"),
+    "fr": ("produit", "article", "product"),
+    "it": ("prodotto", "articolo", "product"),
+    "nl": ("product", "artikel"),
+    "es": ("producto", "articulo", "product"),
+    "pt": ("produto", "artigo", "product"),
+    "pl": ("produkt", "product"),
+    "cs": ("produkt", "product"),
+    "sk": ("produkt", "product"),
+    "hu": ("termek", "product"),
+    "en": ("product", "item"),
+    "_default": ("product", "produkt"),
+}
+
+# ---------------------------------------------------------------------------
+# Editorial / social sites to soft-exclude.
+# Kept deliberately SHORT — every extra exclusion costs recall on long-tail
+# products. Only definitive non-retailers included.
+# ---------------------------------------------------------------------------
+ORGANIC_EDITORIAL_EXCLUSIONS: Final[tuple[str, ...]] = (
+    "-site:youtube.com",
+    "-site:reddit.com",
+    "-site:wikipedia.org",
+    "-site:facebook.com",
+    "-site:instagram.com",
+    "-filetype:pdf",
+)
+
+# ---------------------------------------------------------------------------
+# Legacy constants — kept for backward compatibility only.
+# New query builders use ORGANIC_BUY_TERMS / ORGANIC_INURL_PDP_HINTS /
+# ORGANIC_EDITORIAL_EXCLUSIONS instead.
+# ---------------------------------------------------------------------------
 ORGANIC_PRODUCT_TERMS: Final[tuple[str, ...]] = (
     "product",
     "produkt",
-    "toy",
-    "toys",
 )
 
 ORGANIC_DETAIL_TERMS: Final[tuple[str, ...]] = (
