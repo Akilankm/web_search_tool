@@ -132,6 +132,7 @@ AI_VALIDATOR_RULES: Final[tuple[str, ...]] = (
     "Reject different product variants, bundles, sizes, colors, or unrelated toys.",
     "Pack size / quantity must match EXACTLY: e.g. '18 KS' (18 pieces) must NOT be matched to '32 KS' (32 pieces). A different count is a different product.",
     "Reject soft-404 or 'product not found' pages even if they load.",
+    "PRODUCT CATEGORY: The final URL must be for a toy/game/collectible product. Reject books, textbooks, stationery, office supplies, or non-toy items.",
     "If none are reliable, return NO_MATCH.",
     "Provide concrete justification and rejection reasons.",
 )
@@ -145,6 +146,7 @@ AI_VALIDATOR_OUTPUT_CONTRACT: Final[tuple[str, ...]] = (
     "RETAILER_EVIDENCE: <matched | weak | not_provided>",
     "COUNTRY_EVIDENCE: <matched | weak | not_provided>",
     "PRODUCT_PAGE_EVIDENCE: <product_detail | category | search | homepage | listing | unknown>",
+    "TOY_CATEGORY_EVIDENCE: <toy_related | non_toy | unknown>",
     "REJECTED_CANDIDATES: <bullet list of rejected candidate number and reason>",
 )
 

@@ -186,7 +186,8 @@ class AIMatchEvidence:
     retailer_evidence: str
     country_evidence: str
     product_page_evidence: str
-    rejected_candidates: str
+    toy_category_evidence: str = "unknown"
+    rejected_candidates: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -198,6 +199,7 @@ class AIMatchEvidence:
             "retailer_evidence": self.retailer_evidence,
             "country_evidence": self.country_evidence,
             "product_page_evidence": self.product_page_evidence,
+            "toy_category_evidence": self.toy_category_evidence,
             "rejected_candidates": self.rejected_candidates,
         }
 

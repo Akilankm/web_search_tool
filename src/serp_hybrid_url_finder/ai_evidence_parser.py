@@ -34,6 +34,7 @@ class AIMatchEvidenceParser:
             retailer_evidence=(self._line_value(markdown, "RETAILER_EVIDENCE") or "not_provided").lower(),
             country_evidence=(self._line_value(markdown, "COUNTRY_EVIDENCE") or "not_provided").lower(),
             product_page_evidence=(self._line_value(markdown, "PRODUCT_PAGE_EVIDENCE") or "unknown").lower(),
+            toy_category_evidence=(self._line_value(markdown, "TOY_CATEGORY_EVIDENCE") or "unknown").lower(),
             rejected_candidates=self._line_value(markdown, "REJECTED_CANDIDATES") or "",
         )
 

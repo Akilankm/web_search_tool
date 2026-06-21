@@ -94,6 +94,7 @@ from src.serp_hybrid_url_finder.constants import (
     VALIDATION_VERIFIED,
     WEAK_COUNTRY_SCORE,
     ZERO_SCORE,
+    SCORE_KEY_TOY_CATEGORY,
     ScoreWeights,
 )
 from src.serp_hybrid_url_finder.models import (
@@ -170,6 +171,7 @@ class ProductURLRanker:
         scrape_score = self._scrape_score(scrape)
         identity_score = self._identity_score(verification)
         richness_score = scrape.richness_score if scrape else 0.0
+        toy_category_score = self._toy_category_score(ai_evidence)
 
         breakdown[SCORE_KEY_ORGANIC_CONSENSUS] = organic_score
         breakdown[SCORE_KEY_AI_EVIDENCE] = ai_score
@@ -183,6 +185,7 @@ class ProductURLRanker:
         breakdown[SCORE_KEY_SCRAPE] = scrape_score
         breakdown[SCORE_KEY_IDENTITY] = identity_score
         breakdown[SCORE_KEY_RICHNESS] = richness_score
+        breakdown[SCORE_KEY_TOY_CATEGORY] = toy_category_score
 
         weights = self.weights
         base_confidence = (
@@ -217,6 +220,10 @@ class ProductURLRanker:
         )
         confidence = round(confidence, CONFIDENCE_ROUND_DIGITS)
 
+        # Apply toy category gate: non-toy products are hard-rejected (confidence = 0)
+        if toy_category_score == ZERO_SCORE:
+            confidence = ZERO_SCORE
+
         validation_status = self._validation_status(confidence, verification)
 
         exact = (
@@ -243,6 +250,7 @@ class ProductURLRanker:
                 SCORE_KEY_RETAILER: retailer_score,
                 SCORE_KEY_COUNTRY: country_score,
                 SCORE_KEY_RICHNESS: richness_score,
+                SCORE_KEY_TOY_CATEGORY: toy_category_score,
             },
             caps_applied=caps_applied,
             verification=verification,
@@ -484,6 +492,24 @@ class ProductURLRanker:
         parsed = urlparse(url)
         full = f"{parsed.path.lower()}?{parsed.query.lower()}"
         return NON_PRODUCT_PENALTY if any(term in full for term in self.non_product_path_keywords) else ZERO_SCORE
+
+    def _toy_category_score(self, ai_evidence: AIMatchEvidence) -> float:
+        """
+        Dynamic toy category validation via AI evidence.
+        
+        Returns:
+            1.0 if AI determined the product is toy-related
+            0.0 if AI determined the product is NOT toy-related (hard rejection)
+            0.5 if toy category is unknown/ambiguous
+        """
+        toy_category = (ai_evidence.toy_category_evidence or "unknown").lower()
+        
+        if toy_category == "toy_related":
+            return PERFECT_SCORE
+        elif toy_category == "non_toy":
+            return ZERO_SCORE  # Hard rejection: non-toy products never pass
+        else:
+            return NEUTRAL_OPTIONAL_SIGNAL_SCORE  # Unknown: neutral, let other signals decide
 
     def _apply_caps(
         self,

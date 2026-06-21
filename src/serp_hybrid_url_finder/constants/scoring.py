@@ -123,6 +123,7 @@ class ScoreWeights:
     scrape: float = 0.10
     identity: float = 0.30
     richness: float = 0.15  # High weight for product team: prioritizes rich extractable content
+    toy_category: float = 0.0  # Gate-like: 0 for non_toy, 1.0 for toy_related, 0.5 for unknown
 
 
 DEFAULT_SCORE_WEIGHTS: Final[ScoreWeights] = ScoreWeights()
@@ -139,3 +140,4 @@ SCORE_KEY_NON_PRODUCT_PENALTY: Final[str] = "non_product_penalty"
 SCORE_KEY_SCRAPE: Final[str] = "scrape_verification"
 SCORE_KEY_IDENTITY: Final[str] = "identity_verification"
 SCORE_KEY_RICHNESS: Final[str] = "richness"
+SCORE_KEY_TOY_CATEGORY: Final[str] = "toy_category"
