@@ -108,7 +108,18 @@ class SerpAPIConfig:
 
 @dataclass(frozen=True)
 class PipelineConfig:
-    """Runtime knobs for the hybrid product URL finder."""
+    """Runtime knobs for the hybrid product URL finder.
+    
+    Search Strategy:
+    - max_organic_calls: 3-tier search (in-country exact, in-country adaptive, global fallback)
+    - max_ai_mode_calls: AI validation + optional repair
+    
+    Identity Verification:
+    - Title match is required (strong/partial)
+    - EAN is optional (strength signal, not a blocker)
+    - Pack size is ignored (irrelevant for product coding)
+    - Richness heavily weighted in ranking (for product team extraction)
+    """
 
     max_organic_calls: int = MAX_ORGANIC_SEARCH_CALLS_PER_PRODUCT
     max_ai_mode_calls: int = MAX_AI_MODE_CALLS_PER_PRODUCT

@@ -24,7 +24,11 @@ serp_config = SerpAPIConfig.from_env(
 )
 
 pipeline_config = PipelineConfig(
-    max_organic_calls=2,
+    # 3-tier search strategy:
+    # 1. Exact identity search (in-country)
+    # 2. Adaptive fallback (in-country)
+    # 3. Global fallback (if in-country yields < 2 candidates or low confidence)
+    max_organic_calls=3,  # Increased from 2 for global fallback
     max_ai_mode_calls=2,
     max_candidates_for_ai=18,
     run_ai_repair=True,
@@ -45,8 +49,8 @@ product = ProductQuery(
     row_id='demo-001',
     main_text='MATCHBOX LESNEY MADE IN ENGLAND #7  - NARANJA',
     country_code='CO',        # required; language auto-resolved from mapping
-    retailer_name='meli',     # optional
-    ean='8018190039368',      # optional
+    retailer_name='meli',     # optional; used for domain inference
+    ean='8018190039368',      # optional; EAN is now a strength signal (not a blocker)
     # language_code=None,     # optional: auto-derived from country_code; can override
     # region=None,            # optional: for multi-language countries (e.g., "Romandy" in CH)
 )
@@ -56,6 +60,11 @@ trace = pipeline.run(product, return_trace=True)
 printer.print_dict(trace.best_match.to_dict())
 
 print('Scrape + identity verification per candidate:')
+# Note: identity_status is based on:
+# - Title match (required: strong/partial)
+# - EAN match (optional: strength signal)
+# - Page richness (images, specs, description)
+# - Pack size is irrelevant (ignored)
 for url, scrape in trace.scrapes.items():
     v = trace.verifications.get(url)
     identity = v.identity_status if v else 'NONE'
