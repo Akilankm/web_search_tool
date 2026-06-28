@@ -1,11 +1,3 @@
-"""Pytest bootstrap.
-
-The project uses PDM with ``distribution = false``, so the ``serp_hybrid_url_finder``
-package is not installed into site-packages. Adding ``src`` to ``sys.path`` lets the
-tests import it directly (this mirrors the ``pythonpath = ["src"]`` pytest setting and
-keeps the suite runnable even when invoked without the project's pytest config).
-"""
-
 from __future__ import annotations
 
 import sys

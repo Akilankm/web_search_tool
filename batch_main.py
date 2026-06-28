@@ -1,225 +1,169 @@
-"""
-Batch processor for product URL finding with parallel workers.
+"""Batch runner for the Exact Product Discovery Harness.
 
-Processes products concurrently using ThreadPoolExecutor for 2-3x speedup.
-With paid SerpAPI account, rate-limiting is not a concern.
+Usage:
+  python batch_main.py --input data/products.xlsx --output outputs/final_submission.csv --workers 4
+
+The runner reads all columns as strings to protect EAN/GTIN identifiers. It
+creates one harness per worker call to avoid shared crawl/browser/session state.
+
+Batch outputs:
+  - final_submission.csv: compact file to submit/share.
+  - review_queue.csv: rows that need human review.
+  - batch_summary.md: human-readable run summary.
+  - output/<row_id>/: markdown evidence packet + trace.json for each product.
 """
 
+from __future__ import annotations
+
+import argparse
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm.auto import tqdm
-from datetime import datetime
-from rich import print
-import pandas as pd
-from rich.traceback import install as install_rich_traceback
+from pathlib import Path
+from typing import Any
 
-from src.serp_hybrid_url_finder import (
+PROJECT_ROOT = Path(__file__).resolve().parent
+SRC_PATH = PROJECT_ROOT / "src"
+if str(SRC_PATH) not in sys.path:
+    sys.path.insert(0, str(SRC_PATH))
+
+import pandas as pd  # noqa: E402
+from rich import print  # noqa: E402
+from tqdm.auto import tqdm  # noqa: E402
+
+from product_evidence_harness import (  # noqa: E402
     CSVProductIO,
-    HybridProductURLFinderPipeline,
-    PipelineConfig,
-    ProductQuery,
-    RichPrinter,
+    HarnessConfig,
+    ProductEvidenceHarness,
     SerpAPIConfig,
     configure_logging,
 )
+from product_evidence_harness.artifacts import ArtifactWriter  # noqa: E402
 
-# Install rich traceback for better error display in concurrent environments
-install_rich_traceback()
 
-configure_logging('INFO')
-printer = RichPrinter()
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run exact-product URL discovery for a batch file.")
+    parser.add_argument("--input", required=True, help="CSV/XLSX with row_id, main_text, country_code, optional ean, retailer_name")
+    parser.add_argument("--output", default="outputs/final_submission.csv", help="Submission-ready final CSV path")
+    parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument("--env-file", default=".env")
+    parser.add_argument("--log-level", default="INFO")
+    return parser.parse_args()
 
-serp_config = SerpAPIConfig.from_env(
-    country_code='CH',
-    no_cache=False,
-)
 
-pipeline_config = PipelineConfig(
-    max_organic_calls=3,
-    max_ai_mode_calls=2,
-    max_candidates_for_ai=18,
-    run_ai_repair=True,
-    repair_confidence_threshold=0.80,
-    scrape_enabled=True,
-    require_scrapable_final=True,
-    max_urls_to_scrape=10,
-    crawl_headless=True,
-    allow_global_fallback=True
-)
+def build_harness(product, env_file: str) -> tuple[ProductEvidenceHarness, HarnessConfig]:
+    config = HarnessConfig.from_env(env_file)
+    serp_config = SerpAPIConfig.from_env(
+        country_code=product.country_code,
+        language_code=product.language_code or "en",
+        env_file=env_file,
+        no_cache=False,
+    )
+    return ProductEvidenceHarness(serp_config=serp_config, config=config), config
 
-pipeline = HybridProductURLFinderPipeline(
-    serp_config=serp_config,
-    pipeline_config=pipeline_config,
-)
 
-# ============================================================================
-# Data Loading
-# ============================================================================
-
-df = pd.read_excel(
-    './data/ORELL_FUESSLI_MONTHLY_O3Q-_Switzerland.xlsx',
-    sheet_name='Sheet1',
-    engine='openpyxl'
-)
-
-print(f"[bold cyan]Loaded {len(df)} products[/bold cyan]")
-print(df.head())
-print(f"Columns: {list(df.columns)}")
-
-# ============================================================================
-# Worker Function
-# ============================================================================
-
-def process_product(index: int, row: pd.Series, pipeline: HybridProductURLFinderPipeline) -> dict:
-    """
-    Process a single product: run pipeline and return results.
-    
-    Args:
-        index: Row index in DataFrame
-        row: Pandas Series with product data
-        pipeline: HybridProductURLFinderPipeline instance
-        
-    Returns:
-        Dictionary with results, or error info on failure
-    """
+def process(product, env_file: str) -> dict[str, Any]:
     try:
-        product = ProductQuery(
-            row_id=f'data{index+1:03d}',
-            main_text=row['MAIN_TEXT'],
-            country_code=row['COUNTRY'],
-            retailer_name=row.get('RETAILER'),  # Use actual retailer from data, not hardcoded 'None'
-            ean=row.get('EAN'),
-        )
-        
-        trace = pipeline.run(product, return_trace=True)
-        
+        harness, config = build_harness(product, env_file)
+        trace = harness.run(product, return_trace=True)
+        row_dir = Path(config.output_dir) / product.row_id
+        row = ArtifactWriter(config.output_dir, country_profiles=harness.country_profiles).final_submission_row(trace.state, product_dir=row_dir)
+        row["status"] = "success"
+        row["error"] = None
+        return row
+    except Exception as exc:
         return {
-            'index': index,
-            'status': 'success',
-            'MAIN_TEXT': row['MAIN_TEXT'],
-            'COUNTRY': row['COUNTRY'],
-            'RETAILER': row.get('RETAILER'),
-            'EAN': row.get('EAN'),
-            'PRODUCT_URL': trace.best_match.product_url,
-            'CONFIDENCE': trace.best_match.confidence,
-            'VALIDATION_STATUS': trace.best_match.validation_status,
-            'IDENTITY_STATUS': trace.best_match.identity_status,
-            'RETAILER_CHECK': trace.best_match.retailer_check,
-            'JUSTIFICATION': trace.best_match.justification,
-            'error': None,
-        }
-    
-    except Exception as e:
-        # Capture error but don't crash the batch
-        return {
-            'index': index,
-            'status': 'error',
-            'MAIN_TEXT': row['MAIN_TEXT'],
-            'COUNTRY': row['COUNTRY'],
-            'RETAILER': row.get('RETAILER'),
-            'EAN': row.get('EAN'),
-            'PRODUCT_URL': None,
-            'CONFIDENCE': 0.0,
-            'VALIDATION_STATUS': 'UNKNOWN',
-            'IDENTITY_STATUS': 'UNKNOWN',
-            'RETAILER_CHECK': 'UNKNOWN',
-            'JUSTIFICATION': f'Error: {str(e)}',
-            'error': str(e),
+            "row_id": product.row_id,
+            "main_text": product.main_text,
+            "country_code": product.country_code,
+            "retailer_name": product.retailer_name,
+            "ean": product.ean,
+            "product_url": None,
+            "verified_exact_url": None,
+            "best_available_url": None,
+            "best_reference_url": None,
+            "url_decision_status": "ERROR",
+            "selection_scope": "ERROR",
+            "is_exact_product_match": False,
+            "is_scrapable": False,
+            "needs_review": True,
+            "confidence": 0.0,
+            "candidate_urls": "",
+            "candidate_count": 0,
+            "scraped_candidate_count": 0,
+            "serp_calls_used": 0,
+            "llm_calls_used": 0,
+            "scrape_calls_used": 0,
+            "final_justification": "Run failed before final decision.",
+            "row_report_path": "",
+            "status": "error",
+            "error": str(exc),
         }
 
 
-# ============================================================================
-# Batch Processing with ThreadPoolExecutor
-# ============================================================================
+def write_batch_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
+    total = len(rows)
+    exact = sum(1 for r in rows if str(r.get("verified_exact_url") or "").strip())
+    needs_review = sum(1 for r in rows if str(r.get("needs_review")).lower() in {"true", "1", "yes"} or r.get("status") == "error")
+    errors = sum(1 for r in rows if r.get("status") == "error")
+    requested_retailer = sum(1 for r in rows if str(r.get("selected_from_requested_retailer")).lower() in {"true", "1", "yes"})
+    country_alt = sum(1 for r in rows if str(r.get("selected_from_other_country_retailer")).lower() in {"true", "1", "yes"})
+    global_fallback = sum(1 for r in rows if str(r.get("selected_from_global_fallback")).lower() in {"true", "1", "yes"})
+    serp_calls = sum(int(float(r.get("serp_calls_used") or 0)) for r in rows)
+    llm_calls = sum(int(float(r.get("llm_calls_used") or 0)) for r in rows)
+    scrapes = sum(int(float(r.get("scrape_calls_used") or 0)) for r in rows)
 
-def process_batch_parallel(df: pd.DataFrame, pipeline: HybridProductURLFinderPipeline, max_workers: int = 2) -> pd.DataFrame:
-    """
-    Process all products in parallel using ThreadPoolExecutor.
-    
-    Args:
-        df: DataFrame with product data
-        pipeline: HybridProductURLFinderPipeline instance
-        max_workers: Number of concurrent worker threads (default 2 for safety)
-        
-    Returns:
-        DataFrame with results
-    """
-    results = []
-    start_time = datetime.now()
-    
-    print(f"\n[bold cyan]Starting batch processing with {max_workers} workers[/bold cyan]")
-    print(f"Total products: {len(df)}")
-    print(f"Start time: {start_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-    
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all tasks
-        futures = {
-            executor.submit(process_product, index, row, pipeline): index
-            for index, row in df.iterrows()
-        }
-        
-        # Process results as they complete
-        with tqdm(total=len(futures), desc="Processing products") as pbar:
-            for future in as_completed(futures):
-                index = futures[future]
-                try:
-                    result = future.result()
-                    results.append(result)
-                    
-                    # Update progress bar with status
-                    if result['status'] == 'success':
-                        pbar.update(1)
-                        pbar.set_postfix({
-                            'success': sum(1 for r in results if r['status'] == 'success'),
-                            'errors': sum(1 for r in results if r['status'] == 'error'),
-                        })
-                    else:
-                        pbar.update(1)
-                        pbar.set_postfix({
-                            'success': sum(1 for r in results if r['status'] == 'success'),
-                            'errors': sum(1 for r in results if r['status'] == 'error'),
-                        })
-                        print(f"\n⚠️  Product {index+1} ({result['MAIN_TEXT'][:50]}): {result['error']}")
-                        
-                except Exception as e:
-                    pbar.update(1)
-                    print(f"\n❌ Worker error on product {index+1}: {str(e)}")
-    
-    # Sort results by original index
-    results.sort(key=lambda x: x['index'])
-    output_df = pd.DataFrame(results)
-    
-    end_time = datetime.now()
-    elapsed = (end_time - start_time).total_seconds()
-    
-    print(f"\n[bold green]✓ Batch processing complete[/bold green]")
-    print(f"End time: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Total time: {elapsed:.1f}s ({elapsed/60:.1f}m)")
-    print(f"Avg time/product: {elapsed/len(df):.1f}s")
-    print(f"Success: {sum(1 for r in results if r['status'] == 'success')}/{len(results)}")
-    
-    return output_df
+    lines = [
+        "# Batch Product URL Discovery Summary",
+        "",
+        "## Outcome Metrics",
+        f"- **Total rows:** `{total}`",
+        f"- **Verified exact URLs:** `{exact}`",
+        f"- **Needs review:** `{needs_review}`",
+        f"- **Errors:** `{errors}`",
+        f"- **Selected from requested retailer:** `{requested_retailer}`",
+        f"- **Selected from same-country alternative retailer:** `{country_alt}`",
+        f"- **Selected from global fallback:** `{global_fallback}`",
+        "",
+        "## Resource Usage",
+        f"- **SerpAPI calls:** `{serp_calls}`",
+        f"- **LLM calls:** `{llm_calls}`",
+        f"- **crawl4ai scrape calls:** `{scrapes}`",
+        "",
+        "## Review Queue",
+        "Rows marked `needs_review=true` are written to `review_queue.csv`.",
+        "",
+        "## Artifact Model",
+        "Each product row has a markdown evidence packet under the configured `PRODUCT_HARNESS_OUTPUT_DIR`.",
+    ]
+    (output_dir / "batch_summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-# ============================================================================
-# Main Execution
-# ============================================================================
+def main() -> None:
+    args = parse_args()
+    configure_logging(args.log_level)
+    products = CSVProductIO.read_products(Path(args.input))
+    print(f"[bold cyan]Loaded {len(products)} products[/bold cyan]")
+    rows: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
+        futures = [executor.submit(process, p, args.env_file) for p in products]
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Processing"):
+            rows.append(future.result())
 
-if __name__ == '__main__':
-    # Process products in parallel with 2 workers
-    output_df = process_batch_parallel(df, pipeline, max_workers=2)
-    
-    # Drop error column from output (keep only the result columns)
-    output_df_clean = output_df.drop(columns=['index', 'status', 'error'], errors='ignore')
-    
-    # Write results to Excel
-    output_file = './data/ORELL_FUESSLI_MONTHLY_O3Q-_Switzerland_output.xlsx'
-    output_df_clean.to_excel(output_file, index=False, engine='openpyxl')
-    print(f"\n[bold cyan]Results written to: {output_file}[/bold cyan]")
-    
-    # Print summary statistics
-    print(f"\n[bold]Summary Statistics:[/bold]")
-    print(f"  Total products: {len(output_df)}")
-    print(f"  Successful: {sum(output_df['status'] == 'success')}")
-    print(f"  Failed: {sum(output_df['status'] == 'error')}")
-    if 'CONFIDENCE' in output_df.columns:
-        print(f"  Avg confidence: {output_df[output_df['status'] == 'success']['CONFIDENCE'].mean():.3f}")
+    out = Path(args.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    df = pd.DataFrame(rows)
+    if "ean" in df.columns:
+        df["ean"] = df["ean"].astype("string")
+    df.to_csv(out, index=False)
+
+    review = df[(df.get("needs_review", True).astype(str).str.lower().isin(["true", "1", "yes"])) | (df.get("status", "").astype(str) == "error")]
+    review.to_csv(out.parent / "review_queue.csv", index=False)
+    write_batch_summary(out.parent, rows)
+
+    print(f"[bold green]Wrote final submission CSV: {out}[/bold green]")
+    print(f"[bold yellow]Wrote review queue: {out.parent / 'review_queue.csv'}[/bold yellow]")
+    print(f"[bold cyan]Wrote batch summary: {out.parent / 'batch_summary.md'}[/bold cyan]")
+
+
+if __name__ == "__main__":
+    main()

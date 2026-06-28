@@ -1,158 +1,310 @@
-# Serp Hybrid Product URL Finder
+# Product Evidence Harness
 
-Notebook-first, importable product URL finder built for **business-grade
-correctness**. For each product it discovers candidate URLs with SerpAPI,
-validates them with Google AI Mode, scrapes the strongest ones with crawl4ai,
-and then **verifies the scraped content is genuinely the requested product**
-before any URL is allowed to be the answer.
+Local Python package for **LLM-guided exact product URL discovery**.
 
-A returned URL is guaranteed to be:
+This is intentionally not an AzureML component yet. It is a local PDM/Python codebase with notebooks and CLI entrypoints.
 
-1. **Consumable** — crawl4ai actually scraped it and it returns real content.
-2. **Correct** — its scraped content matches the requested product identity
-   (same EAN/GTIN, same distinctive title, **same pack-size / variant**), and is
-   not a different variant (e.g. `18 KS` vs `32 KS`), a similar-but-wrong
-   product, or a soft-404 "product not found" page that still returns HTTP 200.
-3. **Auditable** — confidence is decomposed into weighted components with a
-   justification and every cap applied, and any high-confidence result is backed
-   by hard evidence, so it can be submitted for downstream validation.
 
-## Why this matters
+## Local project setup with in-project `.venv`
 
-Scrapability alone is **not** correctness. A page that loads with content can
-still be the wrong variant or a soft-404. This project separates the two:
+This package now includes project-local PDM configuration and setup scripts. PDM uses virtual environments by default, and its in-project setting creates the environment under `<project_root>/.venv`; this repo pins that behavior in `pdm.toml`.
 
 ```text
-scrapable  = the page loads and returns real content        (consumable)
-verified   = the scraped content IS the requested product   (correct)
-returned   = scrapable AND identity-verified                 (safe to use)
+web_search_tool/.venv/
 ```
 
-## Inputs
+Run this first after unzipping the project.
 
-| Field           | Required | Purpose                                              |
-| --------------- | -------- | ---------------------------------------------------- |
-| `main_text`     | **yes**  | Product title/description. Drives discovery + title/pack-size verification. |
-| `country_code`  | **yes**  | Target market (e.g. `CZ`, `DE`, `US`). Drives SerpAPI `gl`, query planning, country scoring. |
-| `retailer_name` | optional | Preferred retailer. Biases selection when provided.  |
-| `ean`           | optional | EAN/GTIN barcode. Strongest identity proof when provided. |
+Linux/macOS/Git Bash:
 
-`main_text` and `country_code` are mandatory. `retailer_name` and `ean` are
-optional and the pipeline works fully without them.
+```bash
+bash scripts/setup_in_project_venv.sh
+```
 
-## Pipeline
+Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/setup_in_project_venv.ps1
+```
+
+The setup script:
 
 ```text
-Organic Search #1  → exact identity candidates
-Organic Search #2  → adaptive recall / retailer-scoped candidates
-AI Mode #1         → validate candidate URLs with evidence + reasons
-crawl4ai scrape    → fetch top candidates in a real browser
-Identity verify    → EAN, pack-size, title tokens, page-type (soft-404) checks
-Ranker             → confidence scoring; identity + scrapability are hard gates
-AI Mode #2         → repair only when nothing verified / a variant conflict
-Final output       → one URL: scraped, identity-verified, justified
+1. configures PDM local settings
+2. creates/uses .venv/ inside the project
+3. installs runtime + notebook + dev dependencies
+4. registers the Jupyter kernel
+5. validates compile + tests
 ```
 
-## Identity verification
+After setup, use commands through PDM so the correct `.venv` interpreter is used:
 
-For every scraped page, `ProductIdentityVerifier` cross-checks four independent
-axes and produces an `identity_status`:
+```bash
+pdm run python main.py --help
+pdm run python batch_main.py --help
+pdm run pytest -q
+```
 
-| Check        | What it proves                                                    |
-| ------------ | ----------------------------------------------------------------- |
-| EAN / GTIN   | Authoritative. A *different* GTIN on the page is a hard reject.    |
-| Pack size    | `18 KS` must not match `32 KS`. A different count is a hard reject. |
-| Title tokens | Distinctive, diacritic-folded token overlap (`ZVÍŘÁTKY`↔`zviratky`). |
-| Page type    | A real product detail page, not a soft-404 / category / homepage. |
+Optional shell activation:
 
-`identity_status` ∈ `VERIFIED | PROBABLE | WEAK | MISMATCH | UNVERIFIED`.
-Only `VERIFIED` (and, if enabled, `PROBABLE`) URLs are eligible to be returned.
+```bash
+eval $(pdm venv activate)
+```
+
+Notebook kernel to select:
+
+```text
+Product Evidence Harness (.venv)
+```
+
+See `docs/LOCAL_VENV_SETUP.md` for full details.
+
+## Core strategy
+
+The current strategy is **retailer-scrapability aware loop engineering**:
+
+```text
+LLM builds product identity and search campaign
+  → SerpAPI performs high-yield search and returns many candidate URLs
+  → crawl4ai scrapes useful candidate pages aggressively because scraping is free/open-source
+  → deterministic extractors and detectors score page type, richness, exactness, EAN, country fit, and variant conflicts
+  → LLM consumes the evidence summary and either adjudicates exact product or repairs the search
+  → requested retailer is escaped if it is not scrape-usable/rich/exact
+  → same-country alternative retailers are searched
+  → global fallback is used only when country evidence fails
+  → final selector returns verified exact URL, best available URL, or reference-only URL honestly
+```
+
+Important policy:
+
+```text
+retailer_name = preferred first evidence source
+scrapability/richness/exactness = acceptance gate
+wrong variant or non-scrapable requested-retailer page must not block a better same-country/global exact URL
+```
+
+## Input contract
+
+| Field | Required | Role |
+|---|---:|---|
+| `main_text` | Yes | Primary product identity text. |
+| `country_code` | Yes | Country-first search market. |
+| `ean` / `gtin` | No | Strong user-provided anchor. Must remain a string. LLM must never invent it. |
+| `retailer_name` | No | Preferred first evidence source only; not a hard final constraint. |
+| `language_code` | No | Optional search language override; otherwise derived from country profile. |
+| `region` | No | Optional market hint. |
+
+EAN/GTIN identifiers are read as strings. If Excel has already converted an EAN into scientific notation, the system will flag `EAN_SCIENTIFIC_NOTATION_LOSS_RISK` and avoid using the corrupted value as exact evidence.
+
+## Active notebooks
+
+Only these notebooks are kept:
+
+```text
+notebooks/01_single_product_harness.ipynb
+notebooks/02_batch_product_harness.ipynb
+```
+
+Removed legacy/non-run notebooks to avoid confusion.
+
+## URL decision semantics
+
+| Field | Meaning |
+|---|---|
+| `product_url` | Final operational URL. Blank if only hard-rejected/reference URLs exist and `PRODUCT_HARNESS_RETURN_REJECTED_REFERENCE_AS_PRODUCT_URL=false`. |
+| `verified_exact_url` | Filled only when exact product is proven from scrape evidence and LLM/detector gates pass. |
+| `best_available_url` | Best useful non-conflicting URL when exact proof is not complete. |
+| `best_reference_url` | Closest rejected/reference URL when only wrong variants or insufficient evidence exist. |
+| `needs_review` | True when the final URL is not verified exact. |
+| `url_decision_status` | Exact/requested-retailer/country-alternative/global/review/failure status. |
+
+Requested-retailer statuses include:
+
+```text
+EXACT_REQUESTED_RETAILER_MATCH
+EXACT_COUNTRY_ALTERNATIVE_RETAILER_MATCH
+EXACT_GLOBAL_FALLBACK
+BEST_AVAILABLE_COUNTRY_NEEDS_REVIEW
+BEST_AVAILABLE_GLOBAL_NEEDS_REVIEW
+NO_VERIFIED_EXACT_URL
+```
 
 ## Output contract
 
-`ProductURLMatch` (and `.to_dict()`) includes, in addition to the URL:
-
-- `validation_status` — `VERIFIED | NEEDS_REVIEW | REJECTED | NO_MATCH`
-- `identity_status`, `ean_check`, `title_check`, `quantity_check`, `page_type_check`
-- `requested_quantity`, `page_quantity`
-- `justification` — consolidated, human-readable evidence (always present)
-- `blocking_reasons` — concrete reasons a candidate was rejected
-- `confidence_breakdown` — every weighted component + every cap applied, with a
-  base→final confidence trace (designed for submission/validation)
-
-High confidence (`>= 0.75`) is only granted when backed by hard justification
-(a confirmed EAN, or a matched pack-size together with a strong title match);
-otherwise it is capped into the `NEEDS_REVIEW` band.
-
-## Install
-
-```bash
-pdm install
-cp ".env copy.example" .env   # or create .env
-# add SERPAPI_API_KEY in .env
-
-# Provision the crawl4ai browser (one time):
-pdm run python -m playwright install chromium
-# or: pdm run crawl4ai-setup
-```
-
-## Notebook usage
+The output is now organized as a proper **search + validation + verification artifact**:
 
 ```text
-notebooks/01_hybrid_product_url_finder.ipynb
+CSV = final operational answer
+Markdown = readable evidence and decision trace
+JSON = compact machine replay/debug trace
 ```
 
+### Row-level artifact packet
+
+Each product row writes:
+
+```text
+output/<row_id>/
+├── final_row.csv
+├── report.md
+├── search_plan.md
+├── candidate_review.md
+├── scrape_evidence.md
+├── retailer_scrapability.md
+├── final_decision.md
+├── decision_trace.md
+└── trace.json
+```
+
+The markdown files record what was planned, searched, scraped, rejected, repaired, and selected. This is an observable decision trace and evidence trail, not hidden chain-of-thought.
+
+### Batch-level outputs
+
+```text
+outputs/
+├── final_submission.csv
+├── review_queue.csv
+└── batch_summary.md
+```
+
+`final_submission.csv` is the business/submission artifact. It contains inputs, candidate URLs, final best URL fields, selected scope, exactness/scrapability flags, resource counters, and `row_report_path` linking to the markdown evidence packet.
+
+### Optional debug CSVs
+
+Detailed diagnostic CSVs are disabled by default. Enable them only for engineering investigation:
+
+```env
+PRODUCT_HARNESS_WRITE_DEBUG_CSVS=true
+```
+
+When enabled, the old-style CSV diagnostics are written under:
+
+```text
+output/<row_id>/debug_csv/
+```
+
+## Cost-aware operating model
+
+Paid/controlled:
+
+```text
+SerpAPI calls
+LLM calls
+```
+
+Free/open-source and used aggressively:
+
+```text
+crawl4ai scraping
+deterministic extraction
+detector scoring
+candidate dedupe/ranking
+```
+
+Recommended defaults in this package favor high-yield SerpAPI and broad scraping:
+
+```env
+PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=3
+PRODUCT_HARNESS_SERP_RESULTS=100
+PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES=1
+PRODUCT_HARNESS_MAX_SCRAPES=180
+PRODUCT_HARNESS_MAX_ITERATIONS=240
+PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT=4
+```
+
+## `.env` essentials
+
+```env
+SERPAPI_API_KEY=your_serpapi_key
+
+PRODUCT_HARNESS_ENABLE_LLM=true
+PRODUCT_HARNESS_ENABLE_LLM_SEARCH_PLANNING=true
+PRODUCT_HARNESS_ENABLE_LLM_SEARCH_FEEDBACK=true
+PRODUCT_HARNESS_ENABLE_LLM_ADJUDICATION=true
+PRODUCT_HARNESS_REQUIRE_LLM_EXACT_MATCH=true
+PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT=4
+PRODUCT_HARNESS_LLM_USE_IMAGES=true
+PRODUCT_HARNESS_LLM_PAYLOAD_REDUCTION=true
+PRODUCT_HARNESS_RESERVE_LLM_CALL_FOR_ADJUDICATION=true
+
+PRODUCT_HARNESS_REQUESTED_RETAILER_FIRST=true
+PRODUCT_HARNESS_REQUESTED_RETAILER_MIN_SCRAPES_FOR_ESCAPE=2
+PRODUCT_HARNESS_REQUESTED_RETAILER_MIN_RICHNESS_FOR_EVIDENCE=0.30
+PRODUCT_HARNESS_RETURN_REJECTED_REFERENCE_AS_PRODUCT_URL=false
+
+PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=3
+PRODUCT_HARNESS_SERP_RESULTS=100
+PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES=1
+PRODUCT_HARNESS_MAX_SCRAPES=180
+PRODUCT_HARNESS_MAX_ITERATIONS=240
+PRODUCT_HARNESS_OUTPUT_DIR=output
+PRODUCT_HARNESS_WRITE_OUTPUTS=true
+PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK=true
+PRODUCT_HARNESS_COUNTRY_FIRST=true
+PRODUCT_HARNESS_GLOBAL_FALLBACK_LANGUAGE=en
+PRODUCT_HARNESS_GLOBAL_FALLBACK_COUNTRY=
+
+AZURE_OPENAI_API_KEY=your_azure_openai_api_key
+AZURE_OPENAI_API_VERSION=2024-02-15-preview
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_DEPLOYMENT=your_vision_enabled_deployment
+LLM_CONSUMER_ID=your_consumer_id
+
+LLM_MAX_TOKENS=1600
+LLM_TEMPERATURE=0.0
+LLM_CONNECT_TIMEOUT=15
+LLM_READ_TIMEOUT=120
+LLM_MAX_RETRIES=3
+```
+
+## Minimal single-product usage
+
 ```python
+from product_evidence_harness import HarnessConfig, ProductEvidenceHarness, ProductQuery, SerpAPIConfig
+
 product = ProductQuery(
-    row_id="demo-001",
-    main_text="FIGURKA BAVYTOY TUBA SE ZVÍŘÁTKY 18 KS",
-    country_code="CZ",        # required
-    retailer_name="Alza",     # optional
-    ean="6922256679066",      # optional
+    row_id="CO-ML-0001",
+    main_text="PUT PRODUCT TEXT HERE",
+    country_code="CO",
+    ean="",  # optional, keep as text
+    retailer_name="Mercado Libre",  # optional preferred-first evidence source
 )
 
-trace = pipeline.run(product, return_trace=True)
-printer.print_match(trace.best_match)
-printer.print_candidates(trace.scored_candidates)
-printer.print_verification(trace.scored_candidates[0])  # identity + breakdown
+serp_config = SerpAPIConfig.from_env(country_code=product.country_code, language_code="es")
+config = HarnessConfig.from_env(".env")
+
+harness = ProductEvidenceHarness(serp_config=serp_config, config=config)
+trace = harness.run(product, return_trace=True)
+
+print(trace.best_match.to_dict())
+print("Inspect:", f"{config.output_dir}/{product.row_id}/")
 ```
 
-## Importable library usage
+## CLI usage
 
-```python
-from serp_hybrid_url_finder import (
-    HybridProductURLFinderPipeline,
-    PipelineConfig,
-    ProductQuery,
-    SerpAPIConfig,
-)
+Single product:
 
-pipeline = HybridProductURLFinderPipeline(
-    serp_config=SerpAPIConfig.from_env(),
-    pipeline_config=PipelineConfig(),
-)
-
-match = pipeline.run(ProductQuery(main_text="LEGO Technic 42100", country_code="DE"))
-print(match.product_url, match.validation_status, match.confidence)
-print(match.justification)
+```bash
+python main.py \
+  --row-id CO-ML-0001 \
+  --main-text "PUT PRODUCT TEXT HERE" \
+  --country-code CO \
+  --retailer-name "Mercado Libre" \
+  --ean "7701234567890"
 ```
 
-## Key configuration (`PipelineConfig`)
+Batch:
 
-| Knob | Default | Meaning |
-| ---- | ------- | ------- |
-| `require_scrapable_final` | `True` | Only return crawl4ai-scrapable URLs. |
-| `require_identity_verified` | `True` | Only return identity-verified URLs. |
-| `allow_probable_as_final` | `True` | Allow `PROBABLE` (review) matches, not just `VERIFIED`. |
-| `high_confidence_requires_justification` | `True` | Cap unjustified high confidence. |
-| `max_urls_to_scrape` | `6` | How many top candidates crawl4ai fetches per product. |
-| `run_ai_repair` | `True` | Spend the 2nd AI Mode call when nothing verifies. |
+```bash
+python batch_main.py \
+  --input data/products.xlsx \
+  --output outputs/product_url_matches.csv \
+  --workers 2
+```
 
-## Important behavior
+## Validation
 
-- crawl4ai + identity verification are the final gates: a URL is only returned
-  after it has been scraped **and** proven to be the exact requested product.
-- A different pack-size / variant, a conflicting GTIN, or a soft-404 page is
-  rejected — the pipeline returns **no URL** rather than a wrong or unverified
-  one. It never fabricates links.
-- Every result carries a justification and an auditable confidence breakdown.
+```bash
+PYTHONPATH=src python -m compileall -q src main.py batch_main.py
+PYTHONPATH=src pytest -q
+```

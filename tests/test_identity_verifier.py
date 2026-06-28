@@ -1,14 +1,8 @@
-"""Tests for product-identity verification verdicts (identity_verifier.py)."""
-
 from __future__ import annotations
 
-from serp_hybrid_url_finder.constants import (
-    IDENTITY_MISMATCH,
-    IDENTITY_UNVERIFIED,
-    IDENTITY_VERIFIED,
-)
-from serp_hybrid_url_finder.identity_verifier import ProductIdentityVerifier
-from serp_hybrid_url_finder.models import ProductQuery, ScrapeResult
+from product_evidence_harness.constants import IDENTITY_MISMATCH, IDENTITY_UNVERIFIED, IDENTITY_VERIFIED
+from product_evidence_harness.contracts import ProductQuery, ScrapeResult
+from product_evidence_harness.identity_verifier import ProductIdentityVerifier
 
 
 def _scrape(url="https://shop.example/p", **overrides) -> ScrapeResult:
@@ -20,6 +14,7 @@ def _scrape(url="https://shop.example/p", **overrides) -> ScrapeResult:
         is_scrapable=True,
         status_code=200,
         final_url=url,
+        looks_like_product_page=True,
     )
     base.update(overrides)
     return ScrapeResult(**base)
@@ -27,11 +22,7 @@ def _scrape(url="https://shop.example/p", **overrides) -> ScrapeResult:
 
 def test_matching_ean_is_verified():
     verifier = ProductIdentityVerifier()
-    product = ProductQuery(
-        main_text="Lego Star Wars X-Wing Starfighter",
-        country_code="US",
-        ean="4002051612345",
-    )
+    product = ProductQuery(main_text="Lego Star Wars X-Wing Starfighter", country_code="US", ean="4002051612345")
     scrape = _scrape(
         page_product_name="Lego Star Wars X-Wing Starfighter",
         title="Lego Star Wars X-Wing Starfighter",
@@ -41,27 +32,40 @@ def test_matching_ean_is_verified():
     assert verifier.verify(product, scrape).identity_status == IDENTITY_VERIFIED
 
 
-def test_conflicting_ean_is_mismatch():
+def test_conflicting_ean_with_exact_text_is_warning_not_mismatch():
     verifier = ProductIdentityVerifier()
-    product = ProductQuery(
-        main_text="Lego Star Wars X-Wing Starfighter",
-        country_code="US",
-        ean="4002051612345",
-    )
+    product = ProductQuery(main_text="Pokemon Mega Entwicklung Wachsendes Chaos Booster DE", country_code="CH", ean="0196214141070")
     scrape = _scrape(
-        page_product_name="Lego Star Wars X-Wing Starfighter",
-        title="Lego Star Wars X-Wing Starfighter",
-        structured_eans=("9999999999999",),  # page authoritatively declares a different GTIN
-        verification_text="Lego Star Wars X-Wing Starfighter",
+        page_product_name="Pokemon Mega Entwicklung Wachsendes Chaos Booster DE",
+        title="Pokemon Mega Entwicklung Wachsendes Chaos Booster DE",
+        structured_eans=("0196214141087",),
+        verification_text="EAN: 0196214141087 Pokemon Mega Entwicklung Wachsendes Chaos Booster DE",
     )
-    assert verifier.verify(product, scrape).identity_status == IDENTITY_MISMATCH
+    verification = verifier.verify(product, scrape)
+    assert verification.identity_status == IDENTITY_VERIFIED
+    assert verification.ean_check == "CONFLICT"
+    assert verification.ean_conflict_is_blocking is False
 
 
-def test_pack_size_conflict_is_mismatch():
+def test_sibling_variant_is_mismatch_even_with_high_title_overlap():
+    verifier = ProductIdentityVerifier()
+    product = ProductQuery(main_text="Pokemon Mega Entwicklung Wachsendes Chaos Booster DE", country_code="CH", ean="0196214141070")
+    scrape = _scrape(
+        page_product_name="Pokemon Mega Entwicklung Wachsendes Chaos Booster Display DE",
+        title="Pokemon Mega Entwicklung Wachsendes Chaos Booster Display DE",
+        structured_eans=("0196214141087",),
+        verification_text="EAN: 0196214141087 Pokemon Mega Entwicklung Wachsendes Chaos Booster Display DE",
+    )
+    verification = verifier.verify(product, scrape)
+    assert verification.identity_status == IDENTITY_MISMATCH
+    assert verification.variant_check == "CONFLICT"
+
+
+def test_pack_size_conflict_is_mismatch_by_default():
     verifier = ProductIdentityVerifier()
     product = ProductQuery(main_text="Acme Coffee Capsules 18 ks", country_code="CZ")
     scrape = _scrape(
-        page_product_name="Acme Coffee Capsules 32 ks",  # 18 ks vs 32 ks
+        page_product_name="Acme Coffee Capsules 32 ks",
         title="Acme Coffee Capsules 32 ks",
         verification_text="Acme Coffee Capsules 32 ks",
     )

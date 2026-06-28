@@ -1,88 +1,71 @@
-from src.serp_hybrid_url_finder import (
-    CSVProductIO,
-    HybridProductURLFinderPipeline,
-    PipelineConfig,
+"""Single-product runner for the Exact Product Discovery Harness.
+
+Usage:
+  python main.py --main-text "LEGO 41731 Heartlake International School" --country-code CH --ean 5702017415352
+
+All credentials and budgets are loaded from .env / environment variables.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+SRC_PATH = PROJECT_ROOT / "src"
+if str(SRC_PATH) not in sys.path:
+    sys.path.insert(0, str(SRC_PATH))
+
+from product_evidence_harness import (  # noqa: E402
+    HarnessConfig,
+    ProductEvidenceHarness,
     ProductQuery,
     RichPrinter,
     SerpAPIConfig,
     configure_logging,
 )
-import asyncio
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm.auto import tqdm
-from datetime import datetime
-from rich import print
 
-configure_logging('INFO')
-printer = RichPrinter()
 
-serp_config = SerpAPIConfig.from_env(
-    country_code='CO',  # Colombia → auto-resolves to Spanish (es)
-    # language_code omitted → auto-derived from country_code via mapping
-    # To override: language_code='es' (explicit), or pass via ProductQuery
-    no_cache=False,
-)
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run exact-product URL discovery for one product row.")
+    parser.add_argument("--row-id", default="single-001")
+    parser.add_argument("--main-text", required=True)
+    parser.add_argument("--country-code", required=True)
+    parser.add_argument("--ean", default=None)
+    parser.add_argument("--retailer-name", default=None)
+    parser.add_argument("--language-code", default=None)
+    parser.add_argument("--env-file", default=".env")
+    parser.add_argument("--log-level", default="INFO")
+    return parser.parse_args()
 
-pipeline_config = PipelineConfig(
-    # 3-tier search strategy:
-    # 1. Exact identity search (in-country)
-    # 2. Adaptive fallback (in-country)
-    # 3. Global fallback (if in-country yields < 2 candidates or low confidence)
-    max_organic_calls=3,  # Increased from 2 for global fallback
-    max_ai_mode_calls=2,
-    max_candidates_for_ai=18,
-    run_ai_repair=True,
-    repair_confidence_threshold=0.80,
-    # crawl4ai scrape verification
-    scrape_enabled=True,
-    require_scrapable_final=True,
-    max_urls_to_scrape=10,
-    crawl_headless=True,
-)
 
-pipeline = HybridProductURLFinderPipeline(
-    serp_config=serp_config,
-    pipeline_config=pipeline_config,
-)
-
-product = ProductQuery(
-    row_id='demo-001',
-    main_text='MATCHBOX LESNEY MADE IN ENGLAND #7  - NARANJA',
-    country_code='CO',        # required; language auto-resolved from mapping
-    retailer_name='meli',     # optional; used for domain inference
-    ean='8018190039368',      # optional; EAN is now a strength signal (not a blocker)
-    # language_code=None,     # optional: auto-derived from country_code; can override
-    # region=None,            # optional: for multi-language countries (e.g., "Romandy" in CH)
-)
-
-trace = pipeline.run(product, return_trace=True)
-
-printer.print_dict(trace.best_match.to_dict())
-
-print('Scrape + identity verification per candidate:')
-# Note: identity_status is based on:
-# - Title match (required: strong/partial)
-# - EAN match (optional: strength signal)
-# - Page richness (images, specs, description)
-# - Pack size is irrelevant (ignored)
-for url, scrape in trace.scrapes.items():
-    v = trace.verifications.get(url)
-    identity = v.identity_status if v else 'NONE'
-    ean = v.ean_check if v else '-'
-    qty = v.quantity_check if v else '-'
-    print(
-        f"- identity={identity:10} ean={ean:9} qty={qty:9} "
-        f"scrapable={scrape.is_scrapable} soft404={scrape.is_soft_404} url={url}"
+def main() -> None:
+    args = parse_args()
+    configure_logging(args.log_level)
+    product = ProductQuery(
+        row_id=args.row_id,
+        main_text=args.main_text,
+        country_code=args.country_code,
+        retailer_name=args.retailer_name,
+        ean=args.ean,
+        language_code=args.language_code,
     )
+    serp_config = SerpAPIConfig.from_env(
+        country_code=product.country_code,
+        language_code=product.language_code or "en",
+        env_file=args.env_file,
+        no_cache=False,
+    )
+    config = HarnessConfig.from_env(args.env_file)
+    harness = ProductEvidenceHarness(serp_config=serp_config, config=config)
+    trace = harness.run(product, return_trace=True)
+    printer = RichPrinter()
+    printer.print_match(trace.best_match)
+    printer.print_scorecards(trace.scored_candidates)
+    print("Per-row artifact packet written under:", config.output_dir)
+    print("Default row files: final_row.csv, report.md, search_plan.md, candidate_review.md, scrape_evidence.md, retailer_scrapability.md, final_decision.md, decision_trace.md, trace.json")
 
-print('\nFinal submission status:', trace.best_match.validation_status)
-print('Identity status        :', trace.best_match.identity_status)
-print('Retailer match         :', trace.best_match.retailer_check,
-      '(requested:', trace.best_match.retailer_name, ')')
-print('Confidence             :', trace.best_match.confidence)
-print('Product URL            :', trace.best_match.product_url)
-print('Justification          :', trace.best_match.justification)
 
-# Full identity + confidence breakdown for the top-ranked candidate (auditable).
-if trace.scored_candidates:
-    printer.print_verification(trace.scored_candidates[0])
+if __name__ == "__main__":
+    main()

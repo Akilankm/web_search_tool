@@ -1,0 +1,535 @@
+{
+  "version": 3,
+  "description": "Country-code controlled language-market priority profiles. This file intentionally contains no static retailer domains. Retailers are discovered dynamically from web search; language distribution only controls country-internal search order and diagnostics.",
+  "countries": {
+    "DEFAULT": {
+      "country_code": "DEFAULT",
+      "country_name": "Default",
+      "tlds": [],
+      "default_language": "en",
+      "languages": [
+        {
+          "language_code": "en",
+          "language_name": "English",
+          "priority": 1,
+          "distribution_weight": 1.0,
+          "country_terms": [],
+          "commerce_terms": [
+            "buy",
+            "shop",
+            "price",
+            "product",
+            "toy"
+          ]
+        }
+      ]
+    },
+    "CZ": {
+      "country_code": "CZ",
+      "country_name": "Czech Republic",
+      "tlds": [
+        ".cz"
+      ],
+      "default_language": "cs",
+      "languages": [
+        {
+          "language_code": "cs",
+          "language_name": "Czech",
+          "priority": 1,
+          "distribution_weight": 0.96,
+          "country_terms": [
+            "Česko",
+            "Česká republika"
+          ],
+          "commerce_terms": [
+            "koupit",
+            "prodej",
+            "cena",
+            "produkt",
+            "hračka",
+            "e-shop"
+          ]
+        },
+        {
+          "language_code": "en",
+          "language_name": "English",
+          "priority": 2,
+          "distribution_weight": 0.04,
+          "country_terms": [
+            "Czech Republic",
+            "Czechia"
+          ],
+          "commerce_terms": [
+            "buy",
+            "shop",
+            "price",
+            "product",
+            "toy"
+          ]
+        }
+      ]
+    },
+    "CH": {
+      "country_code": "CH",
+      "country_name": "Switzerland",
+      "tlds": [
+        ".ch",
+        ".swiss"
+      ],
+      "default_language": "de",
+      "languages": [
+        {
+          "language_code": "de",
+          "language_name": "German",
+          "priority": 1,
+          "distribution_weight": 0.62,
+          "country_terms": [
+            "Schweiz"
+          ],
+          "commerce_terms": [
+            "kaufen",
+            "shop",
+            "preis",
+            "produkt",
+            "spielzeug",
+            "warenkorb"
+          ]
+        },
+        {
+          "language_code": "fr",
+          "language_name": "French",
+          "priority": 2,
+          "distribution_weight": 0.23,
+          "country_terms": [
+            "Suisse"
+          ],
+          "commerce_terms": [
+            "acheter",
+            "boutique",
+            "prix",
+            "produit",
+            "jouet",
+            "panier"
+          ]
+        },
+        {
+          "language_code": "it",
+          "language_name": "Italian",
+          "priority": 3,
+          "distribution_weight": 0.08,
+          "country_terms": [
+            "Svizzera"
+          ],
+          "commerce_terms": [
+            "comprare",
+            "negozio",
+            "prezzo",
+            "prodotto",
+            "giocattolo",
+            "carrello"
+          ]
+        },
+        {
+          "language_code": "rm",
+          "language_name": "Romansh",
+          "priority": 4,
+          "distribution_weight": 0.01,
+          "country_terms": [
+            "Svizra"
+          ],
+          "commerce_terms": [
+            "cumprar",
+            "pretsch",
+            "produt"
+          ]
+        },
+        {
+          "language_code": "en",
+          "language_name": "English",
+          "priority": 5,
+          "distribution_weight": 0.06,
+          "country_terms": [
+            "Switzerland"
+          ],
+          "commerce_terms": [
+            "buy",
+            "shop",
+            "price",
+            "product",
+            "toy"
+          ]
+        }
+      ]
+    },
+    "US": {
+      "country_code": "US",
+      "country_name": "United States",
+      "tlds": [
+        ".com"
+      ],
+      "default_language": "en",
+      "languages": [
+        {
+          "language_code": "en",
+          "language_name": "English",
+          "priority": 1,
+          "distribution_weight": 1.0,
+          "country_terms": [
+            "United States",
+            "USA",
+            "US"
+          ],
+          "commerce_terms": [
+            "buy",
+            "shop",
+            "price",
+            "product",
+            "toy"
+          ]
+        }
+      ]
+    },
+    "CO": {
+      "country_code": "CO",
+      "country_name": "Colombia",
+      "tlds": [
+        ".co",
+        ".com.co"
+      ],
+      "default_language": "es",
+      "languages": [
+        {
+          "language_code": "es",
+          "language_name": "Spanish",
+          "priority": 1,
+          "distribution_weight": 0.96,
+          "country_terms": [
+            "Colombia"
+          ],
+          "commerce_terms": [
+            "comprar",
+            "tienda",
+            "precio",
+            "producto",
+            "juguete",
+            "carrito"
+          ]
+        },
+        {
+          "language_code": "en",
+          "language_name": "English",
+          "priority": 2,
+          "distribution_weight": 0.04,
+          "country_terms": [
+            "Colombia"
+          ],
+          "commerce_terms": [
+            "buy",
+            "shop",
+            "price",
+            "product",
+            "toy"
+          ]
+        }
+      ]
+    },
+    "GB": {
+      "country_code": "GB",
+      "country_name": "United Kingdom",
+      "tlds": [
+        ".co.uk",
+        ".uk"
+      ],
+      "default_language": "en",
+      "languages": [
+        {
+          "language_code": "en",
+          "language_name": "en",
+          "priority": 1,
+          "distribution_weight": 1.0,
+          "country_terms": [
+            "United Kingdom",
+            "UK"
+          ],
+          "commerce_terms": [
+            "buy",
+            "shop",
+            "price",
+            "product",
+            "toy"
+          ]
+        }
+      ]
+    },
+    "DE": {
+      "country_code": "DE",
+      "country_name": "Germany",
+      "tlds": [
+        ".de"
+      ],
+      "default_language": "de",
+      "languages": [
+        {
+          "language_code": "de",
+          "language_name": "de",
+          "priority": 1,
+          "distribution_weight": 1.0,
+          "country_terms": [
+            "Deutschland",
+            "Germany"
+          ],
+          "commerce_terms": [
+            "kaufen",
+            "shop",
+            "preis",
+            "produkt",
+            "spielzeug"
+          ]
+        }
+      ]
+    },
+    "FR": {
+      "country_code": "FR",
+      "country_name": "France",
+      "tlds": [
+        ".fr"
+      ],
+      "default_language": "fr",
+      "languages": [
+        {
+          "language_code": "fr",
+          "language_name": "fr",
+          "priority": 1,
+          "distribution_weight": 1.0,
+          "country_terms": [
+            "France"
+          ],
+          "commerce_terms": [
+            "acheter",
+            "boutique",
+            "prix",
+            "produit",
+            "jouet"
+          ]
+        }
+      ]
+    },
+    "IT": {
+      "country_code": "IT",
+      "country_name": "Italy",
+      "tlds": [
+        ".it"
+      ],
+      "default_language": "it",
+      "languages": [
+        {
+          "language_code": "it",
+          "language_name": "it",
+          "priority": 1,
+          "distribution_weight": 1.0,
+          "country_terms": [
+            "Italia",
+            "Italy"
+          ],
+          "commerce_terms": [
+            "comprare",
+            "negozio",
+            "prezzo",
+            "prodotto",
+            "giocattolo"
+          ]
+        }
+      ]
+    },
+    "ES": {
+      "country_code": "ES",
+      "country_name": "Spain",
+      "tlds": [
+        ".es"
+      ],
+      "default_language": "es",
+      "languages": [
+        {
+          "language_code": "es",
+          "language_name": "es",
+          "priority": 1,
+          "distribution_weight": 1.0,
+          "country_terms": [
+            "España",
+            "Spain"
+          ],
+          "commerce_terms": [
+            "comprar",
+            "tienda",
+            "precio",
+            "producto",
+            "juguete"
+          ]
+        }
+      ]
+    },
+    "PL": {
+      "country_code": "PL",
+      "country_name": "Poland",
+      "tlds": [
+        ".pl"
+      ],
+      "default_language": "pl",
+      "languages": [
+        {
+          "language_code": "pl",
+          "language_name": "pl",
+          "priority": 1,
+          "distribution_weight": 1.0,
+          "country_terms": [
+            "Polska",
+            "Poland"
+          ],
+          "commerce_terms": [
+            "kup",
+            "sklep",
+            "cena",
+            "produkt",
+            "zabawka"
+          ]
+        }
+      ]
+    },
+    "NL": {
+      "country_code": "NL",
+      "country_name": "Netherlands",
+      "tlds": [
+        ".nl"
+      ],
+      "default_language": "nl",
+      "languages": [
+        {
+          "language_code": "nl",
+          "language_name": "nl",
+          "priority": 1,
+          "distribution_weight": 1.0,
+          "country_terms": [
+            "Nederland",
+            "Netherlands"
+          ],
+          "commerce_terms": [
+            "kopen",
+            "winkel",
+            "prijs",
+            "product",
+            "speelgoed"
+          ]
+        }
+      ]
+    },
+    "BE": {
+      "country_code": "BE",
+      "country_name": "Belgium",
+      "tlds": [
+        ".be"
+      ],
+      "default_language": "nl",
+      "languages": [
+        {
+          "language_code": "nl",
+          "language_name": "nl",
+          "priority": 1,
+          "distribution_weight": 1.0,
+          "country_terms": [
+            "België",
+            "Belgique",
+            "Belgium"
+          ],
+          "commerce_terms": [
+            "kopen",
+            "acheter",
+            "prijs",
+            "prix",
+            "product",
+            "produit"
+          ]
+        }
+      ]
+    },
+    "AT": {
+      "country_code": "AT",
+      "country_name": "Austria",
+      "tlds": [
+        ".at"
+      ],
+      "default_language": "de",
+      "languages": [
+        {
+          "language_code": "de",
+          "language_name": "de",
+          "priority": 1,
+          "distribution_weight": 1.0,
+          "country_terms": [
+            "Österreich",
+            "Austria"
+          ],
+          "commerce_terms": [
+            "kaufen",
+            "shop",
+            "preis",
+            "produkt",
+            "spielzeug"
+          ]
+        }
+      ]
+    },
+    "CA": {
+      "country_code": "CA",
+      "country_name": "Canada",
+      "tlds": [
+        ".ca"
+      ],
+      "default_language": "en",
+      "languages": [
+        {
+          "language_code": "en",
+          "language_name": "en",
+          "priority": 1,
+          "distribution_weight": 1.0,
+          "country_terms": [
+            "Canada"
+          ],
+          "commerce_terms": [
+            "buy",
+            "shop",
+            "price",
+            "product",
+            "toy"
+          ]
+        }
+      ]
+    },
+    "AU": {
+      "country_code": "AU",
+      "country_name": "Australia",
+      "tlds": [
+        ".com.au",
+        ".au"
+      ],
+      "default_language": "en",
+      "languages": [
+        {
+          "language_code": "en",
+          "language_name": "en",
+          "priority": 1,
+          "distribution_weight": 1.0,
+          "country_terms": [
+            "Australia"
+          ],
+          "commerce_terms": [
+            "buy",
+            "shop",
+            "price",
+            "product",
+            "toy"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,24 @@
+# Python / PDM
+.venv/
+.pdm-python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Credentials / local config
+.env
+*.local
+
+# Runtime artifacts
+output/
+outputs/
+logs/
+*.log
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
