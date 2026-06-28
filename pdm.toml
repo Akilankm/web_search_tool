@@ -1,7 +1,0 @@
-# Project-local PDM configuration.
-# Keep the virtual environment inside this repository at .venv/ so notebooks,
-# CLI runs, and VS Code/AzureML interactive sessions all use the same interpreter.
-python.use_venv = true
-venv.in_project = true
-venv.with_pip = true
-venv.prompt = "product-evidence-harness-py{python_version}"

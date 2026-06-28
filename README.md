@@ -4,61 +4,6 @@ Local Python package for **LLM-guided exact product URL discovery**.
 
 This is intentionally not an AzureML component yet. It is a local PDM/Python codebase with notebooks and CLI entrypoints.
 
-
-## Local project setup with in-project `.venv`
-
-This package now includes project-local PDM configuration and setup scripts. PDM uses virtual environments by default, and its in-project setting creates the environment under `<project_root>/.venv`; this repo pins that behavior in `pdm.toml`.
-
-```text
-web_search_tool/.venv/
-```
-
-Run this first after unzipping the project.
-
-Linux/macOS/Git Bash:
-
-```bash
-bash scripts/setup_in_project_venv.sh
-```
-
-Windows PowerShell:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/setup_in_project_venv.ps1
-```
-
-The setup script:
-
-```text
-1. configures PDM local settings
-2. creates/uses .venv/ inside the project
-3. installs runtime + notebook + dev dependencies
-4. registers the Jupyter kernel
-5. validates compile + tests
-```
-
-After setup, use commands through PDM so the correct `.venv` interpreter is used:
-
-```bash
-pdm run python main.py --help
-pdm run python batch_main.py --help
-pdm run pytest -q
-```
-
-Optional shell activation:
-
-```bash
-eval $(pdm venv activate)
-```
-
-Notebook kernel to select:
-
-```text
-Product Evidence Harness (.venv)
-```
-
-See `docs/LOCAL_VENV_SETUP.md` for full details.
-
 ## Core strategy
 
 The current strategy is **retailer-scrapability aware loop engineering**:
@@ -308,3 +253,7 @@ python batch_main.py \
 PYTHONPATH=src python -m compileall -q src main.py batch_main.py
 PYTHONPATH=src pytest -q
 ```
+
+## Import path note
+
+This project uses a standard `src/` package layout. In notebooks, add `<repo>/src` to `sys.path`, then import with `product_evidence_harness`. Do not import with `src.product_evidence_harness`. See `docs/IMPORT_PATH_FIX.md`.

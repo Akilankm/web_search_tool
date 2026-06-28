@@ -46,10 +46,3 @@ addopts = "-q"
 
 [tool.setuptools.package-data]
 product_evidence_harness = ["configs/*.json"]
-
-[tool.pdm.scripts]
-validate = "python -m compileall -q src main.py batch_main.py && pytest -q"
-test = "pytest -q"
-register-kernel = "python scripts/register_notebook_kernel.py"
-single = "python main.py"
-batch = "python batch_main.py"
