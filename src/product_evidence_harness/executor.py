@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from loguru import logger
 
 from src.product_evidence_harness.candidate_store import CandidateStore
-from src.product_evidence_harness.contracts import ActionType, AgentAction, ProductSearchState
+from src.product_evidence_harness.contracts import ActionType, AgentAction, ProductSearchState, ScrapeResult
 from src.product_evidence_harness.evidence_extractor import EvidenceExtractor
 from src.product_evidence_harness.identity_verifier import ProductIdentityVerifier
 from src.product_evidence_harness.llm.search_planner import LLMSearchPlanner
@@ -41,6 +41,8 @@ class HarnessExecutor:
         if action.action_type == ActionType.AI_MODE_SEARCH:
             return self._ai(action, state)
         if action.action_type == ActionType.SCRAPE_URL:
+            if action.metadata.get("urls"):
+                return self._scrape_batch(action, state)
             return self._scrape(action, state)
         if action.action_type == ActionType.FINISH:
             state.termination_reason = action.reason
@@ -99,7 +101,6 @@ class HarnessExecutor:
             "reasoning": plan.reasoning,
             "error": plan.error,
         }
-
 
     def _llm_exact_adjudication(self, action: AgentAction, state: ProductSearchState) -> dict:
         if not self.llm_adjudicator:
@@ -164,11 +165,52 @@ class HarnessExecutor:
             raise ValueError("scrape action requires url")
         state.budget.consume_scrape()
         scrape = self.scraper.scrape(action.url, product=state.task)
-        state.scrapes[action.url] = scrape
+        verification = self._record_scrape_result(state, action.url, scrape)
+        self.refresh_scores(state)
+        return {"url": action.url, "scrapable": scrape.is_scrapable, "identity": verification.identity_status, "richness": scrape.richness_score}
+
+    def _scrape_batch(self, action: AgentAction, state: ProductSearchState) -> dict:
+        raw_urls = list(action.metadata.get("urls") or [])
+        urls: list[str] = []
+        seen = set(state.scrapes)
+        for url in raw_urls:
+            if not url or url in seen:
+                continue
+            if not state.budget.can_scrape():
+                break
+            state.budget.consume_scrape()
+            urls.append(str(url))
+            seen.add(str(url))
+
+        if not urls:
+            return {"urls_requested": len(raw_urls), "urls_scraped": 0, "reason": "no_unscraped_urls_or_budget"}
+
+        logger.info("Scraping URL batch | count={} | scope={}", len(urls), action.metadata.get("scope"))
+        if hasattr(self.scraper, "scrape_many"):
+            scrapes = self.scraper.scrape_many(urls, product=state.task)
+        else:
+            scrapes = [self.scraper.scrape(url, product=state.task) for url in urls]
+
+        identities: list[str] = []
+        for url, scrape in zip(urls, scrapes):
+            verification = self._record_scrape_result(state, url, scrape)
+            identities.append(verification.identity_status)
+
+        self.refresh_scores(state)
+        return {
+            "urls_requested": len(raw_urls),
+            "urls_scraped": len(urls),
+            "scrapable_count": sum(1 for s in scrapes if s.is_scrapable),
+            "product_page_count": sum(1 for s in scrapes if s.looks_like_product_page),
+            "identities": identities,
+            "scope": action.metadata.get("scope"),
+        }
+
+    def _record_scrape_result(self, state: ProductSearchState, url: str, scrape: ScrapeResult):
+        state.scrapes[url] = scrape
         evidence = self.evidence_extractor.from_scrape(scrape)
         state.evidence_cards.append(evidence)
         verification = self.verifier.verify(state.task, scrape, identity_graph=state.identity_graph)
-        state.verifications[action.url] = verification
-        state.detector_findings[action.url] = list(verification.detector_findings)
-        self.refresh_scores(state)
-        return {"url": action.url, "scrapable": scrape.is_scrapable, "identity": verification.identity_status, "richness": scrape.richness_score}
+        state.verifications[url] = verification
+        state.detector_findings[url] = list(verification.detector_findings)
+        return verification
