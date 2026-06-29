@@ -55,11 +55,17 @@ logs/
 **/retailer_scrapability.md
 **/final_decision.md
 **/decision_trace.md
+**/quality_assessment.md
+**/enterprise_assessment.json
+**/evidence_graph.json
+**/product_coding_input.json
+**/review_feedback_template.json
 
 # Batch generated artifacts
 final_submission.csv
 review_queue.csv
 batch_summary.md
+metrics.json
 product_url_matches.csv
 
 # Local data files
