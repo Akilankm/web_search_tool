@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from html import unescape
 from typing import Any, Optional
@@ -29,19 +30,103 @@ class CrawlScraper:
     verbose: bool = False
     page_timeout_ms: int = 45000
     min_word_count: int = 20
+    scrape_concurrency: int = 6
+    static_fetch_first: bool = True
+    browser_fallback_only: bool = True
+    static_timeout_seconds: int = 8
 
     def scrape(self, url: str, *, product: Optional[ProductQuery] = None) -> ScrapeResult:
         if not url:
             return self._failed(url, "empty url")
-        logger.info("Scraping URL | url={}", url)
+        logger.info("Scraping URL | url={} | static_first={}", url, self.static_fetch_first)
+
+        if self.static_fetch_first:
+            static_result: ScrapeResult | None = None
+            try:
+                static_result = self._scrape_with_requests(url, product=product, prior_error=None, timeout_seconds=self.static_timeout_seconds)
+                if self._static_result_good_enough(static_result):
+                    return static_result
+                if not self.browser_fallback_only:
+                    return static_result
+                logger.info(
+                    "Static scrape was thin; escalating to crawl4ai | url={} | scrapable={} | product_page={} | richness={} | words={}",
+                    url,
+                    static_result.is_scrapable,
+                    static_result.looks_like_product_page,
+                    static_result.richness_score,
+                    static_result.word_count,
+                )
+            except Exception as exc:
+                logger.warning("Static scrape failed; escalating to crawl4ai | url={} | error={}", url, exc)
+
+            try:
+                browser_result = self._scrape_with_crawl4ai(url, product=product)
+                if browser_result.success or static_result is None:
+                    return browser_result
+                # Preserve the static result if browser failed harder; both paths are
+                # observable via the error field.
+                return self._merge_static_browser_failure(static_result, browser_result)
+            except Exception as exc:
+                logger.warning("crawl4ai failed after static scrape | url={} | error={}", url, exc)
+                if static_result is not None:
+                    return self._merge_error(static_result, f"crawl4ai_error={exc}")
+                return self._failed(url, f"crawl4ai_error={exc}")
+
         try:
             return self._scrape_with_crawl4ai(url, product=product)
         except Exception as exc:
             logger.warning("crawl4ai failed; falling back to requests | url={} | error={}", url, exc)
             try:
-                return self._scrape_with_requests(url, product=product, prior_error=str(exc))
+                return self._scrape_with_requests(url, product=product, prior_error=str(exc), timeout_seconds=max(10, self.page_timeout_ms / 1000))
             except Exception as exc2:
                 return self._failed(url, f"crawl4ai_error={exc}; requests_error={exc2}")
+
+    def scrape_many(self, urls: list[str], *, product: Optional[ProductQuery] = None, max_workers: int | None = None) -> list[ScrapeResult]:
+        """Scrape a URL batch concurrently while preserving input order.
+
+        This intentionally keeps scrape/verification semantics unchanged: each URL
+        still goes through the same ``scrape`` method, including static-first and
+        crawl4ai fallback. The speedup is wall-clock only.
+        """
+        clean_urls = [u for u in dict.fromkeys(urls) if u]
+        if not clean_urls:
+            return []
+        workers = max(1, min(max_workers or self.scrape_concurrency, len(clean_urls)))
+        if workers == 1:
+            return [self.scrape(url, product=product) for url in clean_urls]
+
+        results: dict[int, ScrapeResult] = {}
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(self.scrape, url, product=product): idx for idx, url in enumerate(clean_urls)}
+            for future in as_completed(futures):
+                idx = futures[future]
+                url = clean_urls[idx]
+                try:
+                    results[idx] = future.result()
+                except Exception as exc:
+                    results[idx] = self._failed(url, str(exc))
+        return [results[i] for i in range(len(clean_urls))]
+
+    def _static_result_good_enough(self, result: ScrapeResult) -> bool:
+        if not result.success or not result.reachable or not result.is_scrapable or result.is_soft_404:
+            return False
+        if result.looks_like_product_page and (
+            result.richness_score >= 0.25
+            or bool(result.structured_eans)
+            or bool(result.page_product_name)
+            or result.has_price
+            or result.image_count > 0
+        ):
+            return True
+        return False
+
+    def _merge_error(self, result: ScrapeResult, error: str) -> ScrapeResult:
+        from dataclasses import replace
+
+        return replace(result, error="; ".join(x for x in [result.error, error] if x))
+
+    def _merge_static_browser_failure(self, static_result: ScrapeResult, browser_result: ScrapeResult) -> ScrapeResult:
+        return self._merge_error(static_result, f"browser_fallback_failed={browser_result.error or browser_result.status_code}")
 
     def _scrape_with_crawl4ai(self, url: str, *, product: Optional[ProductQuery]) -> ScrapeResult:
         import nest_asyncio
@@ -77,8 +162,12 @@ class CrawlScraper:
             error=getattr(result, "error_message", None),
         )
 
-    def _scrape_with_requests(self, url: str, *, product: Optional[ProductQuery], prior_error: str | None = None) -> ScrapeResult:
-        response = requests.get(url, timeout=max(10, self.page_timeout_ms / 1000), headers={"User-Agent": "Mozilla/5.0 ProductEvidenceHarness/0.2"})
+    def _scrape_with_requests(self, url: str, *, product: Optional[ProductQuery], prior_error: str | None = None, timeout_seconds: float | None = None) -> ScrapeResult:
+        response = requests.get(
+            url,
+            timeout=timeout_seconds or max(10, self.page_timeout_ms / 1000),
+            headers={"User-Agent": "Mozilla/5.0 ProductEvidenceHarness/0.2"},
+        )
         html = response.text or ""
         text = self._html_to_text(html)
         result = self._build_result(
@@ -286,7 +375,6 @@ class CrawlScraper:
             return float(amount.replace(" ", "").replace(",", ".")), currency
         except Exception:
             return None, currency
-
 
     def _extract_specs(self, html: str, text: str) -> dict[str, str]:
         specs: dict[str, str] = {}
