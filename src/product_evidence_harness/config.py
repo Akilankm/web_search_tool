@@ -109,7 +109,10 @@ class HarnessConfig:
     policy: HarnessPolicy = field(default_factory=HarnessPolicy)
     score_weights: ScoreWeights = DEFAULT_SCORE_WEIGHTS
     max_candidates_for_ai: int = 12
-    max_candidate_pool: int = 60
+    # Keep candidate pool aligned with high-yield SerpAPI calls. With 3 organic
+    # calls and 100 requested results each, a 300-item pool prevents useful lower
+    # ranked candidates from being discarded before crawl4ai can validate them.
+    max_candidate_pool: int = 300
     scrape_enabled: bool = True
     crawl_headless: bool = True
     crawl_verbose: bool = False
@@ -177,6 +180,7 @@ class HarnessConfig:
         return cls(
             budget=budget,
             policy=policy,
+            max_candidate_pool=_env_int("PRODUCT_HARNESS_MAX_CANDIDATE_POOL", 300),
             output_dir=os.getenv("PRODUCT_HARNESS_OUTPUT_DIR", "output"),
             write_outputs=_env_bool("PRODUCT_HARNESS_WRITE_OUTPUTS", True),
             write_markdown_reports=_env_bool("PRODUCT_HARNESS_WRITE_MARKDOWN_REPORTS", True),
