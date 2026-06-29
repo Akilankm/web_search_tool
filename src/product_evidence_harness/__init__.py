@@ -27,6 +27,7 @@ from src.product_evidence_harness.elite import (
     EnterpriseEvidenceAssessment,
     EnterpriseEvidenceEngine,
 )
+from src.product_evidence_harness.feedback import ReviewFeedbackRecord, ReviewFeedbackStore, RetailerDomainMemory
 from src.product_evidence_harness.identity_verifier import ProductIdentityVerifier
 from src.product_evidence_harness.identity import ProductIdentityGraph, ProductIdentityGraphBuilder
 from src.product_evidence_harness.detectors import DetectorFinding, VariantConflictDetector
@@ -52,4 +53,5 @@ __all__ = [
     "CountryProfile", "CountryProfileRegistry", "LanguageProfile",
     "ExactProductLLMAdjudicator", "LLMConfig", "LLMService",
     "EnterpriseEvidenceEngine", "EnterpriseEvidenceAssessment", "ConfidenceBreakdown", "CodingReadiness",
+    "ReviewFeedbackRecord", "ReviewFeedbackStore", "RetailerDomainMemory",
 ]
