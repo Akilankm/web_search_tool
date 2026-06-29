@@ -43,7 +43,7 @@ def test_scrape_many_preserves_input_order(monkeypatch) -> None:
 
     monkeypatch.setattr(scraper, "scrape", fake_scrape)
 
-    results = scraper.scrape_many(urls, product=ProductQuery(main_text="demo", country_code="US"))
+    results = scraper.scrape_many(urls, product=ProductQuery(main_text="demo", country_code="CZ"))
 
     assert [r.url for r in results] == urls
 
@@ -56,14 +56,14 @@ def test_planner_returns_scrape_batch_for_multiple_country_candidates() -> None:
         max_country_scrapes_per_batch=3,
     )
     planner = HarnessPlanner(config=config, query_builder=QueryBuilder(country_profiles=country_profiles), country_profiles=country_profiles)
-    product = ProductQuery(row_id="row-1", main_text="demo product", country_code="US")
+    product = ProductQuery(row_id="row-1", main_text="demo product", country_code="CZ")
     state = ProductSearchState(
         task=product,
         budget=BudgetTracker(max_scrapes=10),
         candidates=[
-            URLCandidate(url="https://example.com/product/1", domain="example.com"),
-            URLCandidate(url="https://example.com/product/2", domain="example.com"),
-            URLCandidate(url="https://example.com/product/3", domain="example.com"),
+            URLCandidate(url="https://example.cz/product/1", domain="example.cz"),
+            URLCandidate(url="https://example.cz/product/2", domain="example.cz"),
+            URLCandidate(url="https://example.cz/product/3", domain="example.cz"),
         ],
     )
 
@@ -72,9 +72,9 @@ def test_planner_returns_scrape_batch_for_multiple_country_candidates() -> None:
     assert action.action_type == ActionType.SCRAPE_URL
     assert action.metadata["batch_size"] == 3
     assert list(action.metadata["urls"]) == [
-        "https://example.com/product/1",
-        "https://example.com/product/2",
-        "https://example.com/product/3",
+        "https://example.cz/product/1",
+        "https://example.cz/product/2",
+        "https://example.cz/product/3",
     ]
 
 
@@ -121,9 +121,9 @@ def test_executor_scrape_batch_records_all_results() -> None:
         ranker=FakeRanker(),
         evidence_extractor=FakeEvidenceExtractor(),
     )
-    product = ProductQuery(row_id="row-1", main_text="demo product", country_code="US")
+    product = ProductQuery(row_id="row-1", main_text="demo product", country_code="CZ")
     state = ProductSearchState(task=product, budget=BudgetTracker(max_scrapes=10))
-    urls = ["https://example.com/product/1", "https://example.com/product/2"]
+    urls = ["https://example.cz/product/1", "https://example.cz/product/2"]
     action = AgentAction(ActionType.SCRAPE_URL, "batch scrape", metadata={"urls": tuple(urls), "scope": "country"})
 
     summary = executor.execute(action, state)
