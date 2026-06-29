@@ -62,13 +62,13 @@ class HarnessPlanner:
                     query=self.query_builder.requested_retailer_search(state.task),
                     metadata={"kind": "requested_retailer_first", "scope": "requested_retailer", "language_code": state.task.language_code, "loop_phase": "requested_retailer_search"},
                 )
-            next_requested = self._next_unscraped_url(state, scope="requested_retailer")
+            next_requested = self._next_unscraped_urls(state, scope="requested_retailer", limit=self.config.max_requested_retailer_scrapes_per_batch)
             if next_requested and not self._requested_retailer_should_escape(state) and state.budget.can_scrape():
-                return AgentAction(
-                    ActionType.SCRAPE_URL,
-                    "scrape requested-retailer candidate to assess product evidence usability",
-                    url=next_requested,
-                    metadata={"scope": "requested_retailer", "loop_phase": "scrape_requested_retailer"},
+                return self._scrape_action(
+                    next_requested,
+                    reason="scrape requested-retailer candidates concurrently to assess product evidence usability",
+                    scope="requested_retailer",
+                    loop_phase="scrape_requested_retailer",
                 )
 
         # 2) Judge scraped promising candidates before continuing. A rejection or
@@ -98,13 +98,14 @@ class HarnessPlanner:
         # 5) Country alternative phase: once requested retailer is unusable/not exact,
         # remove the requested retailer constraint and search other retailers in-country.
         if self._country_alternative_allowed(state):
-            next_country_alt = self._next_unscraped_url(state, scope="country_alternative" if state.task.retailer_name else "country")
+            scope = "country_alternative" if state.task.retailer_name else "country"
+            next_country_alt = self._next_unscraped_urls(state, scope=scope, limit=self.config.max_country_scrapes_per_batch)
             if next_country_alt and state.budget.can_scrape():
-                return AgentAction(
-                    ActionType.SCRAPE_URL,
-                    "scrape same-country candidate so free scrape evidence is mined before spending another search",
-                    url=next_country_alt,
-                    metadata={"scope": "country_alternative" if state.task.retailer_name else "country", "loop_phase": "scrape_country_alternative" if state.task.retailer_name else "scrape_country"},
+                return self._scrape_action(
+                    next_country_alt,
+                    reason="scrape same-country candidates concurrently so free scrape evidence is mined before spending another search",
+                    scope=scope,
+                    loop_phase="scrape_country_alternative" if state.task.retailer_name else "scrape_country",
                 )
 
             planned_country_alt = self._next_planned_query(state, include_global=False, only_scopes={"country", "country_alternative"})
@@ -155,13 +156,13 @@ class HarnessPlanner:
 
         # 8) Global fallback: only after requested-retailer and same-country alternatives
         # have not produced exact scrape-usable evidence.
-        next_global_url = self._next_unscraped_url(state, scope="global")
+        next_global_url = self._next_unscraped_urls(state, scope="global", limit=self.config.max_global_scrapes_per_batch)
         if next_global_url and state.budget.can_scrape():
-            return AgentAction(
-                ActionType.SCRAPE_URL,
-                "scrape global candidate after requested retailer/country evidence failed",
-                url=next_global_url,
-                metadata={"scope": "global", "loop_phase": "scrape_global"},
+            return self._scrape_action(
+                next_global_url,
+                reason="scrape global candidates concurrently after requested retailer/country evidence failed",
+                scope="global",
+                loop_phase="scrape_global",
             )
 
         planned_global = self._next_planned_query(state, include_global=True, only_global=True)
@@ -195,6 +196,15 @@ class HarnessPlanner:
                 "must_include_ean": planned.must_include_ean,
                 "loop_phase": loop_phase,
             },
+        )
+
+    def _scrape_action(self, urls: list[str], *, reason: str, scope: str, loop_phase: str) -> AgentAction:
+        urls = list(dict.fromkeys(urls))
+        return AgentAction(
+            ActionType.SCRAPE_URL,
+            reason,
+            url=urls[0] if urls else None,
+            metadata={"scope": scope, "loop_phase": loop_phase, "urls": tuple(urls), "batch_size": len(urls)},
         )
 
     def _is_verified_usable(self, card) -> bool:
@@ -377,22 +387,31 @@ class HarnessPlanner:
         )
 
     def _next_unscraped_url(self, state: ProductSearchState, *, scope: str) -> str | None:
+        urls = self._next_unscraped_urls(state, scope=scope, limit=1)
+        return urls[0] if urls else None
+
+    def _next_unscraped_urls(self, state: ProductSearchState, *, scope: str, limit: int) -> list[str]:
         scraped = set(state.scrapes)
         ranked = [card.candidate for card in state.scorecards] or state.candidates
+        remaining_budget = max(0, getattr(state.budget, "max_scrapes", 0) - getattr(state.budget, "scrape_used", 0))
+        cap = max(1, min(limit, remaining_budget or limit))
+        urls: list[str] = []
         for candidate in ranked:
-            if candidate.url in scraped:
+            if candidate.url in scraped or candidate.url in urls:
                 continue
             is_country = self.country_profiles.domain_matches_country(candidate.url, state.task.country_code)
             is_requested = candidate_matches_requested_retailer(candidate, state.task.retailer_name)
             if scope == "requested_retailer" and is_requested:
-                return candidate.url
-            if scope == "country_alternative" and is_country and not is_requested:
-                return candidate.url
-            if scope == "country" and is_country:
-                return candidate.url
-            if scope == "global" and not is_country:
-                return candidate.url
-        return None
+                urls.append(candidate.url)
+            elif scope == "country_alternative" and is_country and not is_requested:
+                urls.append(candidate.url)
+            elif scope == "country" and is_country:
+                urls.append(candidate.url)
+            elif scope == "global" and not is_country:
+                urls.append(candidate.url)
+            if len(urls) >= cap:
+                break
+        return urls
 
     def _next_country_language_index(self, state: ProductSearchState) -> int | None:
         done = {
