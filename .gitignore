@@ -1,0 +1,78 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.env
+*.local
+*.secret
+secrets/
+credentials/
+
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.pdm-build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter notebooks and transient state
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+.jupyter/
+.ipython/
+
+# Notebook / local run outputs
+output/
+outputs/
+artifacts/
+results/
+runs/
+logs/
+*.log
+
+# Harness generated row artifacts
+**/final_row.csv
+**/trace.json
+**/debug_state.json
+**/debug_csv/
+**/report.md
+**/search_plan.md
+**/candidate_review.md
+**/scrape_evidence.md
+**/retailer_scrapability.md
+**/final_decision.md
+**/decision_trace.md
+
+# Batch generated artifacts
+final_submission.csv
+review_queue.csv
+batch_summary.md
+product_url_matches.csv
+
+# Local data files
+*.xlsx
+*.xls
+*.csv
+*.parquet
+*.jsonl
+*.sqlite
+*.db
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
