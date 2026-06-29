@@ -105,6 +105,7 @@ class ProductEvidenceHarness:
             llm_calls_used=len(state.llm_call_records),
             state=state,
         )
+        best_match = self._enforce_scrapable_operational_url(best_match, state)
         state.final_result = best_match
         if self.config.write_outputs:
             ArtifactWriter(
@@ -126,6 +127,49 @@ class ProductEvidenceHarness:
         logger.info("Completed harness | row_id={} | status={} | identity={} | confidence={} | url={}", product.row_id, best_match.validation_status, best_match.identity_status, best_match.confidence, best_match.product_url)
         trace = HarnessTrace(state=state, best_match=best_match)
         return trace if return_trace else best_match
+
+    @staticmethod
+    def _enforce_scrapable_operational_url(match: ProductURLMatch, state: ProductSearchState) -> ProductURLMatch:
+        """Keep the submission-facing product_url scrape-safe.
+
+        verified_exact_url is already gated by the selector. This additional gate
+        prevents a weak/non-scrapable best-available candidate from being emitted
+        as the operational product_url. Such URLs remain available as reference
+        evidence for review instead of being submitted as usable product links.
+        """
+        if not match.product_url or match.verified_exact_url:
+            return match
+
+        scrape = state.scrapes.get(match.product_url)
+        scrape_usable = bool(
+            scrape
+            and scrape.scraped
+            and scrape.success
+            and scrape.reachable
+            and scrape.is_scrapable
+            and scrape.looks_like_product_page
+        )
+        if scrape_usable:
+            return match
+
+        reference_url = match.best_reference_url or match.best_available_url or match.product_url
+        reason = "Operational product_url cleared because selected best-available candidate was not scrape-usable product-page evidence."
+        return replace(
+            match,
+            product_url=None,
+            best_available_url=None,
+            best_reference_url=reference_url,
+            reference_url_status=match.reference_url_status or "REFERENCE_ONLY_NOT_SCRAPABLE_OR_UNVERIFIED",
+            url_decision_status="NO_SCRAPABLE_PRODUCT_URL_FOUND",
+            resolution_status="NO_SCRAPABLE_PRODUCT_URL_FOUND",
+            validation_status="UNRESOLVED",
+            is_exact_product_match=False,
+            is_scrapable=False,
+            needs_review=True,
+            confidence=min(match.confidence, 0.20),
+            justification=(match.justification + " | " + reason).strip(" |"),
+            primary_reject_reason=match.primary_reject_reason or "NOT_SCRAPABLE_PRODUCT_PAGE",
+        )
 
 
 # Intentional API break from the old linear implementation. The old name is kept
