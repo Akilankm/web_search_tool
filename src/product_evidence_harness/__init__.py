@@ -21,6 +21,13 @@ from src.product_evidence_harness.contracts import (
     URLCandidate,
 )
 from src.product_evidence_harness.country_profiles import CountryProfile, CountryProfileRegistry, LanguageProfile
+from src.product_evidence_harness.elite import (
+    CodingReadiness,
+    ConfidenceBreakdown,
+    EnterpriseEvidenceAssessment,
+    EnterpriseEvidenceEngine,
+)
+from src.product_evidence_harness.feedback import ReviewFeedbackRecord, ReviewFeedbackStore, RetailerDomainMemory
 from src.product_evidence_harness.identity_verifier import ProductIdentityVerifier
 from src.product_evidence_harness.identity import ProductIdentityGraph, ProductIdentityGraphBuilder
 from src.product_evidence_harness.detectors import DetectorFinding, VariantConflictDetector
@@ -45,4 +52,6 @@ __all__ = [
     "ProductIdentityVerifier", "ProductIdentityGraph", "ProductIdentityGraphBuilder", "DetectorFinding", "VariantConflictDetector", "ProductURLRanker", "RichPrinter", "configure_logging", "CSVProductIO",
     "CountryProfile", "CountryProfileRegistry", "LanguageProfile",
     "ExactProductLLMAdjudicator", "LLMConfig", "LLMService",
+    "EnterpriseEvidenceEngine", "EnterpriseEvidenceAssessment", "ConfidenceBreakdown", "CodingReadiness",
+    "ReviewFeedbackRecord", "ReviewFeedbackStore", "RetailerDomainMemory",
 ]
