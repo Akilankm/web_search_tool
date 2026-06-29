@@ -52,7 +52,7 @@ def test_planner_returns_scrape_batch_for_multiple_country_candidates() -> None:
     country_profiles = CountryProfileRegistry.load()
     config = HarnessConfig(
         budget=HarnessBudgetConfig(max_scrapes=10),
-        enable_llm_search_planning=True,
+        enable_llm_search_planning=False,
         max_country_scrapes_per_batch=3,
     )
     planner = HarnessPlanner(config=config, query_builder=QueryBuilder(country_profiles=country_profiles), country_profiles=country_profiles)
