@@ -11,6 +11,7 @@ from src.product_evidence_harness.candidate_store import CandidateStore
 from src.product_evidence_harness.config import HarnessConfig, SerpAPIConfig
 from src.product_evidence_harness.contracts import HarnessTrace, ProductQuery, ProductSearchState, ProductURLMatch
 from src.product_evidence_harness.country_profiles import CountryProfileRegistry
+from src.product_evidence_harness.elite import EnterpriseEvidenceEngine
 from src.product_evidence_harness.evidence_extractor import EvidenceExtractor
 from src.product_evidence_harness.executor import HarnessExecutor
 from src.product_evidence_harness.identity_verifier import ProductIdentityVerifier
@@ -42,6 +43,7 @@ class ProductEvidenceHarness:
     country_profiles: Optional[CountryProfileRegistry] = None
     llm_adjudicator: Optional[ExactProductLLMAdjudicator] = None
     llm_search_planner: Optional[LLMSearchPlanner] = None
+    enterprise_engine: Optional[EnterpriseEvidenceEngine] = None
 
     def __post_init__(self) -> None:
         self.country_profiles = self.country_profiles or CountryProfileRegistry.load(self.config.country_profile_path)
@@ -64,6 +66,7 @@ class ProductEvidenceHarness:
         self.verifier = self.verifier or ProductIdentityVerifier(policy=effective_policy)
         self.ranker = self.ranker or ProductURLRanker(weights=self.config.score_weights, policy=effective_policy, country_profiles=self.country_profiles)
         self.selector = self.selector or FinalSelector(policy=effective_policy)
+        self.enterprise_engine = self.enterprise_engine or EnterpriseEvidenceEngine()
         if (self.config.enable_llm_search_planning or self.config.enable_llm_search_feedback) and self.llm_search_planner is None:
             self.llm_search_planner = LLMSearchPlanner(config=self.config, query_builder=self.query_builder, country_profiles=self.country_profiles)
         if self.config.enable_llm_adjudication and self.llm_adjudicator is None:
@@ -112,15 +115,16 @@ class ProductEvidenceHarness:
         best_match = self._enforce_scrapable_operational_url(best_match, state)
         state.final_result = best_match
         if self.config.write_outputs:
-            ArtifactWriter(
+            product_dir = ArtifactWriter(
                 self.config.output_dir,
                 write_markdown_reports=self.config.write_markdown_reports,
                 write_trace_json=self.config.write_trace_json,
                 write_debug_csvs=self.config.write_debug_csvs,
                 country_profiles=self.country_profiles,
             ).write_state(state)
+            self.enterprise_engine.write_artifacts(state, product_dir)
         if self.config.write_artifacts and self.config.artifact_dir:
-            ArtifactWriter(
+            product_dir = ArtifactWriter(
                 self.config.artifact_dir,
                 include_debug_json=True,
                 write_markdown_reports=True,
@@ -128,6 +132,7 @@ class ProductEvidenceHarness:
                 write_debug_csvs=True,
                 country_profiles=self.country_profiles,
             ).write_state(state)
+            self.enterprise_engine.write_artifacts(state, product_dir)
         logger.info("Completed harness | row_id={} | status={} | identity={} | confidence={} | url={}", product.row_id, best_match.validation_status, best_match.identity_status, best_match.confidence, best_match.product_url)
         trace = HarnessTrace(state=state, best_match=best_match)
         return trace if return_trace else best_match
