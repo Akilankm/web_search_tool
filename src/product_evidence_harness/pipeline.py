@@ -52,6 +52,10 @@ class ProductEvidenceHarness:
             verbose=self.config.crawl_verbose,
             page_timeout_ms=self.config.crawl_page_timeout_ms,
             min_word_count=self.config.crawl_min_word_count,
+            scrape_concurrency=self.config.scrape_concurrency,
+            static_fetch_first=self.config.static_fetch_first,
+            browser_fallback_only=self.config.browser_fallback_only,
+            static_timeout_seconds=self.config.static_timeout_seconds,
         )
         self.candidate_store = self.candidate_store or CandidateStore(max_pool_size=self.config.max_candidate_pool)
         self.query_builder = self.query_builder or QueryBuilder(country_profiles=self.country_profiles)
