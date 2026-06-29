@@ -16,7 +16,9 @@ Batch outputs:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -38,6 +40,7 @@ from product_evidence_harness import (  # noqa: E402
     configure_logging,
 )
 from product_evidence_harness.artifacts import ArtifactWriter  # noqa: E402
+from product_evidence_harness.elite import EnterpriseEvidenceEngine  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -67,6 +70,11 @@ def process(product, env_file: str) -> dict[str, Any]:
         trace = harness.run(product, return_trace=True)
         row_dir = Path(config.output_dir) / product.row_id
         row = ArtifactWriter(config.output_dir, country_profiles=harness.country_profiles).final_submission_row(trace.state, product_dir=row_dir)
+        row.update(EnterpriseEvidenceEngine().assess(trace.state).final_submission_extras())
+        row["enterprise_assessment_path"] = str(row_dir / "enterprise_assessment.json")
+        row["evidence_graph_path"] = str(row_dir / "evidence_graph.json")
+        row["product_coding_input_path"] = str(row_dir / "product_coding_input.json")
+        row["review_feedback_template_path"] = str(row_dir / "review_feedback_template.json")
         row["status"] = "success"
         row["error"] = None
         return row
@@ -87,6 +95,17 @@ def process(product, env_file: str) -> dict[str, Any]:
             "is_scrapable": False,
             "needs_review": True,
             "confidence": 0.0,
+            "quality_tier": "E",
+            "quality_tier_reason": "Run failed before final decision.",
+            "coding_readiness_status": "NEEDS_REVIEW",
+            "coding_readiness_score": 0.0,
+            "identity_confidence": 0.0,
+            "scrapability_confidence": 0.0,
+            "country_confidence": 0.0,
+            "retailer_confidence": 0.0,
+            "variant_confidence": 0.0,
+            "source_consensus_score": 0.0,
+            "failure_taxonomy": "RUN_ERROR",
             "candidate_urls": "",
             "candidate_count": 0,
             "scraped_candidate_count": 0,
@@ -95,14 +114,33 @@ def process(product, env_file: str) -> dict[str, Any]:
             "scrape_calls_used": 0,
             "final_justification": "Run failed before final decision.",
             "row_report_path": "",
+            "enterprise_assessment_path": "",
+            "evidence_graph_path": "",
+            "product_coding_input_path": "",
+            "review_feedback_template_path": "",
             "status": "error",
             "error": str(exc),
         }
 
 
+def _counter_lines(title: str, counter: Counter) -> list[str]:
+    lines = [f"## {title}", ""]
+    if not counter:
+        lines.append("No values recorded.")
+        lines.append("")
+        return lines
+    lines.extend(["| Value | Count |", "|---|---:|"])
+    for key, count in sorted(counter.items(), key=lambda kv: (-kv[1], str(kv[0]))):
+        lines.append(f"| `{key or 'BLANK'}` | {count} |")
+    lines.append("")
+    return lines
+
+
 def write_batch_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
     total = len(rows)
     exact = sum(1 for r in rows if str(r.get("verified_exact_url") or "").strip())
+    product_url = sum(1 for r in rows if str(r.get("product_url") or "").strip())
+    coding_ready = sum(1 for r in rows if r.get("coding_readiness_status") == "CODING_READY")
     needs_review = sum(1 for r in rows if str(r.get("needs_review")).lower() in {"true", "1", "yes"} or r.get("status") == "error")
     errors = sum(1 for r in rows if r.get("status") == "error")
     requested_retailer = sum(1 for r in rows if str(r.get("selected_from_requested_retailer")).lower() in {"true", "1", "yes"})
@@ -111,13 +149,41 @@ def write_batch_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
     serp_calls = sum(int(float(r.get("serp_calls_used") or 0)) for r in rows)
     llm_calls = sum(int(float(r.get("llm_calls_used") or 0)) for r in rows)
     scrapes = sum(int(float(r.get("scrape_calls_used") or 0)) for r in rows)
+    tier_counts = Counter(str(r.get("quality_tier") or "UNKNOWN") for r in rows)
+    readiness_counts = Counter(str(r.get("coding_readiness_status") or "UNKNOWN") for r in rows)
+    failure_counts: Counter[str] = Counter()
+    for r in rows:
+        for failure in str(r.get("failure_taxonomy") or "").split("|"):
+            if failure:
+                failure_counts[failure] += 1
+
+    metrics = {
+        "total_rows": total,
+        "product_url_count": product_url,
+        "verified_exact_count": exact,
+        "coding_ready_count": coding_ready,
+        "needs_review_count": needs_review,
+        "error_count": errors,
+        "requested_retailer_selected_count": requested_retailer,
+        "country_alternative_selected_count": country_alt,
+        "global_fallback_selected_count": global_fallback,
+        "serp_calls": serp_calls,
+        "llm_calls": llm_calls,
+        "scrape_calls": scrapes,
+        "quality_tiers": dict(tier_counts),
+        "coding_readiness": dict(readiness_counts),
+        "failure_taxonomy": dict(failure_counts),
+    }
+    (output_dir / "metrics.json").write_text(json.dumps(metrics, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     lines = [
         "# Batch Product URL Discovery Summary",
         "",
         "## Outcome Metrics",
         f"- **Total rows:** `{total}`",
+        f"- **Operational product URLs:** `{product_url}`",
         f"- **Verified exact URLs:** `{exact}`",
+        f"- **Coding-ready rows:** `{coding_ready}`",
         f"- **Needs review:** `{needs_review}`",
         f"- **Errors:** `{errors}`",
         f"- **Selected from requested retailer:** `{requested_retailer}`",
@@ -127,14 +193,22 @@ def write_batch_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
         "## Resource Usage",
         f"- **SerpAPI calls:** `{serp_calls}`",
         f"- **LLM calls:** `{llm_calls}`",
-        f"- **crawl4ai scrape calls:** `{scrapes}`",
+        f"- **scrape calls:** `{scrapes}`",
         "",
+    ]
+    lines.extend(_counter_lines("Quality Tier Distribution", tier_counts))
+    lines.extend(_counter_lines("Coding Readiness Distribution", readiness_counts))
+    lines.extend(_counter_lines("Failure Taxonomy", failure_counts))
+    lines.extend([
         "## Review Queue",
         "Rows marked `needs_review=true` are written to `review_queue.csv`.",
         "",
-        "## Artifact Model",
-        "Each product row has a markdown evidence packet under the configured `PRODUCT_HARNESS_OUTPUT_DIR`.",
-    ]
+        "## Enterprise Evidence Artifacts",
+        "Each row now includes `enterprise_assessment.json`, `evidence_graph.json`, `product_coding_input.json`, `review_feedback_template.json`, and `quality_assessment.md`.",
+        "",
+        "## Dashboard Data",
+        "Machine-readable batch metrics are written to `metrics.json`.",
+    ])
     (output_dir / "batch_summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -163,6 +237,7 @@ def main() -> None:
     print(f"[bold green]Wrote final submission CSV: {out}[/bold green]")
     print(f"[bold yellow]Wrote review queue: {out.parent / 'review_queue.csv'}[/bold yellow]")
     print(f"[bold cyan]Wrote batch summary: {out.parent / 'batch_summary.md'}[/bold cyan]")
+    print(f"[bold cyan]Wrote metrics JSON: {out.parent / 'metrics.json'}[/bold cyan]")
 
 
 if __name__ == "__main__":
