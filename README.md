@@ -24,6 +24,8 @@ Input product identity
 
 The older iterative loop is retained only as a legacy/debug fallback when tournament mode is explicitly disabled.
 
+Offline page freezing is intentionally **not** part of this primary architecture. It is an optional, separate workflow available only through `notebooks/03_offline_product_artifact.ipynb`.
+
 ## High-stakes handoff policy
 
 `product_url`, `production_url_ready`, and champion confirmation must not be confused:
@@ -195,12 +197,14 @@ Coding readiness should be treated as complete only when the selected URL is pro
 
 ## Active notebooks
 
+Main discovery notebooks:
+
 ```text
 notebooks/01_single_product_harness.ipynb
 notebooks/02_batch_product_harness.ipynb
 ```
 
-Both notebooks now cover the complete end-to-end tournament workflow:
+Both main notebooks cover the end-to-end tournament workflow:
 
 ```text
 tournament config
@@ -217,6 +221,14 @@ batch winners
 production URL readiness
 product-coding input artifact
 ```
+
+Optional offline artifact notebook:
+
+```text
+notebooks/03_offline_product_artifact.ipynb
+```
+
+This notebook is separate from product discovery. Use it only after a champion URL is already confirmed and an offline, openable local page is required.
 
 ## Minimal single-product usage
 
@@ -255,6 +267,19 @@ python batch_main.py \
   --workers 4
 ```
 
+## Optional offline artifact usage
+
+Offline capture is notebook-only from a user workflow perspective:
+
+```text
+open notebooks/03_offline_product_artifact.ipynb
+paste a confirmed champion URL
+run the capture cells
+open offline/offline_page.html
+```
+
+It is intentionally not part of `main.py`, `batch_main.py`, or the primary discovery notebooks.
+
 ## Validation
 
 ```bash
@@ -272,6 +297,7 @@ docs/TOURNAMENT_CHAMPION_CONTRACT.md
 docs/CHAMPION.md
 docs/PRODUCTION_GRADE_PRODUCT_URL.md
 docs/STRICT_PRODUCT_URL_POLICY.md
+docs/OFFLINE_PRODUCT_ARTIFACT.md
 docs/ELITE_EVIDENCE_ENGINE.md
 docs/TEAM_SHOWCASE_GUIDE.md
 docs/LATENCY_OPTIMIZATION.md
