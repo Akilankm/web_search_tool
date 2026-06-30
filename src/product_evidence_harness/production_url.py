@@ -19,6 +19,7 @@ class ProductionURLAssessment:
     reasons: tuple[str, ...]
     score: float
     critical_product_evidence_complete: bool = False
+    country_acceptable: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -93,8 +94,11 @@ class ProductionURLGate:
         if not exact_product_match:
             reasons.append("URL_NOT_VERIFIED_EXACT_PRODUCT_MATCH")
 
-        if card.country_check not in {"MATCHED", "NOT_PROVIDED"}:
+        country_acceptable = card.country_check in {"MATCHED", "NOT_PROVIDED", "ALTERNATIVE"}
+        if not country_acceptable:
             reasons.append("URL_NOT_COUNTRY_MATCHED")
+        if card.country_check == "ALTERNATIVE":
+            reasons.append("COUNTRY_ALTERNATIVE_GLOBAL_FALLBACK")
         if card.variant_check == "CONFLICT":
             reasons.append("VARIANT_CONFLICT")
         if card.hard_failures:
@@ -105,13 +109,14 @@ class ProductionURLGate:
             and highly_scrapable
             and critical_product_evidence_complete
             and exact_product_match
-            and card.country_check in {"MATCHED", "NOT_PROVIDED"}
+            and country_acceptable
         )
         score = self._score(
             browser_openable=browser_openable,
             highly_scrapable=highly_scrapable,
             exact_product_match=exact_product_match,
             critical_product_evidence_complete=critical_product_evidence_complete,
+            country_acceptable=country_acceptable,
             card=card,
         )
         status = "PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL" if production_ready else self._status(
@@ -119,6 +124,7 @@ class ProductionURLGate:
             highly_scrapable,
             exact_product_match,
             critical_product_evidence_complete,
+            country_acceptable,
             card,
         )
         return ProductionURLAssessment(
@@ -131,6 +137,7 @@ class ProductionURLGate:
             reasons=tuple(dict.fromkeys(reasons)),
             score=score,
             critical_product_evidence_complete=critical_product_evidence_complete,
+            country_acceptable=country_acceptable,
         )
 
     def _critical_product_evidence_complete(self, card: CandidateScorecard) -> bool:
@@ -163,7 +170,8 @@ class ProductionURLGate:
             ready,
             key=lambda pair: (
                 1 if pair[0].retailer_check == "MATCHED" else 0,
-                1 if pair[0].country_check in {"MATCHED", "NOT_PROVIDED"} else 0,
+                1 if pair[0].country_check == "MATCHED" else 0,
+                1 if pair[0].country_check == "ALTERNATIVE" else 0,
                 pair[1].score,
                 pair[0].richness_score,
                 pair[0].final_confidence,
@@ -178,19 +186,19 @@ class ProductionURLGate:
         return None
 
     @staticmethod
-    def _score(*, browser_openable: bool, highly_scrapable: bool, exact_product_match: bool, critical_product_evidence_complete: bool, card: CandidateScorecard) -> float:
+    def _score(*, browser_openable: bool, highly_scrapable: bool, exact_product_match: bool, critical_product_evidence_complete: bool, country_acceptable: bool, card: CandidateScorecard) -> float:
         score = 0.0
         score += 0.20 if browser_openable else 0.0
         score += 0.20 if highly_scrapable else 0.0
         score += 0.20 if critical_product_evidence_complete else 0.0
         score += 0.25 if exact_product_match else 0.0
-        score += 0.08 if card.country_check in {"MATCHED", "NOT_PROVIDED"} else 0.0
+        score += 0.08 if country_acceptable else 0.0
         score += 0.04 if card.retailer_check == "MATCHED" else 0.0
         score += 0.03 * min(1.0, card.richness_score)
         return round(min(1.0, score), 4)
 
     @staticmethod
-    def _status(browser_openable: bool, highly_scrapable: bool, exact_product_match: bool, critical_product_evidence_complete: bool, card: CandidateScorecard) -> str:
+    def _status(browser_openable: bool, highly_scrapable: bool, exact_product_match: bool, critical_product_evidence_complete: bool, country_acceptable: bool, card: CandidateScorecard) -> str:
         if not browser_openable:
             return "PRODUCT_URL_NOT_BROWSER_OPENABLE_NEEDS_REVIEW"
         if not critical_product_evidence_complete:
@@ -199,6 +207,6 @@ class ProductionURLGate:
             return "PRODUCT_URL_NOT_HIGHLY_SCRAPABLE_NEEDS_REVIEW"
         if not exact_product_match:
             return "PRODUCT_URL_NOT_EXACT_MATCH_NEEDS_REVIEW"
-        if card.country_check not in {"MATCHED", "NOT_PROVIDED"}:
+        if not country_acceptable:
             return "PRODUCT_URL_GLOBAL_OR_COUNTRY_MISMATCH_NEEDS_REVIEW"
         return "PRODUCT_URL_NOT_PRODUCTION_READY_NEEDS_REVIEW"
