@@ -1,3 +1,0 @@
-# Offline Capture Optional
-
-Offline capture is optional and run from `notebooks/03_offline_product_artifact.ipynb`.
