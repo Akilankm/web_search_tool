@@ -6,16 +6,36 @@ Offline product artifact capture is an **optional second-stage workflow**. It is
 
 Use it when you want to freeze a confirmed champion URL into a local, openable evidence package that can be inspected or reused without depending on the live retailer page.
 
-The optional flow is:
-
-```text
-confirmed champion URL
-  -> optional live capture once
-  -> validated offline product artifact
-  -> optional downstream scraping/coding from local files only
+```mermaid
+flowchart LR
+    A[Confirmed champion URL] --> B[Notebook 03 only]
+    B --> C[Live capture once]
+    C --> D[Download CSS/images]
+    D --> E[Rewrite local references]
+    E --> F[Disable live scripts/forms/links]
+    F --> G[offline/offline_page.html]
+    F --> H[Validation JSON]
 ```
 
-This avoids relying on the retailer page after discovery for workflows that require reproducibility. A page can change, block, geo-route, expire, or render differently later; a validated offline artifact keeps the captured evidence stable and auditable.
+## Separation of concerns
+
+Offline capture is deliberately isolated from the main product discovery workflow.
+
+| Concern | Owner |
+|---|---|
+| Product discovery and champion selection | `notebooks/01_single_product_harness.ipynb`, `notebooks/02_batch_product_harness.ipynb` |
+| Offline page freezing | `notebooks/03_offline_product_artifact.ipynb` only |
+| Core implementation support | `src/product_evidence_harness/offline_capture.py` |
+
+Offline capture is not wired into:
+
+```text
+main.py
+batch_main.py
+notebooks/01_single_product_harness.ipynb
+notebooks/02_batch_product_harness.ipynb
+top-level product_evidence_harness imports
+```
 
 ## When to use it
 
@@ -30,7 +50,7 @@ you want to avoid repeat live retailer scraping after champion validation
 
 Do not use it when the normal champion URL handoff is sufficient.
 
-## New artifact status
+## Artifact status
 
 The offline capture builder produces this status when the local evidence package is usable:
 
@@ -38,7 +58,7 @@ The offline capture builder produces this status when the local evidence package
 PRODUCTION_READY_OFFLINE_ARTIFACT
 ```
 
-For the optional offline handoff, use rows only when the URL gate and offline artifact gate both pass:
+For optional offline handoff, use rows only when the URL gate and offline artifact gate both pass:
 
 ```text
 production_url_ready = true
@@ -114,49 +134,24 @@ srcset
 
 The artifact is not marked production-ready if such references remain.
 
-## Dedicated notebook
+## User workflow
 
-Offline capture has its own notebook and is intentionally separate from the main discovery notebooks:
+Offline capture is available through one dedicated notebook:
 
 ```text
 notebooks/03_offline_product_artifact.ipynb
 ```
 
-## CLI usage
+Use it as follows:
 
-```bash
-PYTHONPATH=src python scripts/capture_offline_page.py \
-  --url "https://retailer.example/product-page" \
-  --row-id "input-001" \
-  --main-text "Toy product main text" \
-  --country-code "CZ" \
-  --retailer-name "Example Retailer" \
-  --ean "1234567890123"
-```
-
-## Programmatic usage
-
-```python
-from pathlib import Path
-
-from product_evidence_harness import ProductQuery
-from product_evidence_harness.offline_capture import OfflineCaptureConfig, LivePageOfflineArtifactBuilder
-
-product = ProductQuery(
-    row_id="input-001",
-    main_text="Toy product main text",
-    country_code="CZ",
-    retailer_name="Example Retailer",
-    ean="1234567890123",
-)
-
-builder = LivePageOfflineArtifactBuilder(
-    OfflineCaptureConfig(output_dir=Path("outputs/offline_artifacts"))
-)
-artifact = builder.capture_url("https://retailer.example/product-page", product=product)
-
-print(artifact.status)
-print(artifact.offline_html_path)
+```text
+1. Run the normal discovery notebook or batch flow.
+2. Take only a confirmed champion URL.
+3. Open notebooks/03_offline_product_artifact.ipynb.
+4. Paste the champion URL and product metadata.
+5. Run the capture cells.
+6. Open offline/offline_page.html from the generated artifact folder.
+7. Check validation/offline_artifact_validation.json.
 ```
 
 Open the generated file locally:
