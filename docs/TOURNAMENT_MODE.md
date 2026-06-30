@@ -2,7 +2,7 @@
 
 ## Status
 
-Tournament architecture is now the **primary/default** product URL discovery path.
+Tournament architecture is the **primary/default** product URL discovery path.
 
 The legacy iterative loop is retained only as an explicit fallback for debugging or A/B comparison:
 
@@ -22,6 +22,24 @@ find the exact product URL that can be opened in a browser and scraped for compl
 ```
 
 Tournament architecture treats this as a comparative decision problem. A URL is not judged only in isolation; it is compared against other candidates until a champion URL is selected.
+
+## Champion contract
+
+The tournament champion is the primary business answer:
+
+```text
+product_url = tournament_champion_url
+```
+
+Runner-ups are **supporting evidence only**. They can help review the decision, but they must not silently replace the champion in `product_url`.
+
+If the champion is not production-ready, the row remains review-only:
+
+```text
+product_url = tournament champion
+production_url_ready = false
+needs_review = true
+```
 
 ## Architecture
 
@@ -49,7 +67,7 @@ PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS=4
 
 The config clamps this value to a maximum of `4`, even if a higher value is supplied.
 
-Tournament uses Google organic SerpAPI calls for candidate-pool discovery. AI Mode SerpAPI calls are not used inside the tournament discovery path, so the search-credit budget stays bounded.
+Invalid EAN/GTIN values are not injected into tournament search queries. They remain visible in diagnostics through identity verification, but they are not used as exact search anchors.
 
 ## Default configuration
 
@@ -72,7 +90,7 @@ The search fan-out can include:
 
 ```text
 requested retailer search
-EAN / country exact search
+valid EAN / country exact search
 same-country alternative retailer search
 secondary language country search, when available
 global fallback challenger search
@@ -88,11 +106,13 @@ The champion is ranked by:
 
 ```text
 production readiness
-exact product match
+exact product evidence
+title/product identity strength
+variant safety
+requested retailer fit
+country fit
 scrapability
 browser-openability
-country fit
-retailer fit
 confidence
 richness
 ```
@@ -109,7 +129,7 @@ production_url_status = PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL
 needs_review = false
 ```
 
-If no production-ready champion exists, the harness still follows the strict non-empty `product_url` policy and emits the best discovered fallback URL as review-only.
+If the champion does not pass this gate, the champion remains in `product_url`, but the row is review-only.
 
 ## Row artifacts
 
@@ -136,19 +156,20 @@ champion margin
 production readiness status
 ```
 
-## Why this is the primary architecture
+## Review interpretation
 
-Product URL discovery is a relative ranking problem. A candidate that looks acceptable alone may lose against another candidate with stronger EAN, title, variant, country, browser-openability, and scrapability evidence.
-
-Tournament architecture improves the system by using:
+Candidate review tables use explicit roles:
 
 ```text
-broad discovery
-parallel evidence collection
-side-by-side candidate comparison
-production gate enforcement
-artifact-backed decisions
+TOURNAMENT_CHAMPION_PRODUCTION_READY
+TOURNAMENT_CHAMPION_REVIEW_ONLY
+RUNNER_UP_SUPPORTING_EVIDENCE
+REVIEW_ONLY_WEAK_EXACTNESS
+REVIEW_ONLY_NOT_PRODUCT_PAGE_OR_THIN
+REJECTED_HARD_FAILURE
 ```
+
+This avoids ambiguous labels such as `selected/usable candidate`.
 
 ## Operational checklist
 
@@ -156,6 +177,9 @@ For every run, inspect:
 
 ```text
 product_url
+tournament_champion_url
+tournament_runner_up_url
+product_url_is_tournament_champion
 production_url_ready
 production_url_status
 browser_openable
