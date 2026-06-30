@@ -17,14 +17,16 @@ LLM builds product identity and search campaign
   → requested retailer is escaped if it is not scrape-usable/rich/exact
   → same-country alternative retailers are searched
   → global fallback is used only when country evidence fails
-  → final selector returns verified exact URL, best available URL, or reference-only URL honestly
+  → final output always emits the best discovered product_url when any URL candidate exists
+  → verified_exact_url / is_scrapable / needs_review / quality_tier explain correctness and risk
 ```
 
 Important policy:
 
 ```text
 retailer_name = preferred first evidence source
-scrapability/richness/exactness = acceptance gate
+product_url = best discovered URL, never intentionally blank when a URL candidate exists
+scrapability/richness/exactness = correctness and automation-readiness gates
 wrong variant or non-scrapable requested-retailer page must not block a better same-country/global exact URL
 ```
 
@@ -56,23 +58,29 @@ Removed legacy/non-run notebooks to avoid confusion.
 
 | Field | Meaning |
 |---|---|
-| `product_url` | Final operational URL. Blank if only hard-rejected/reference URLs exist and `PRODUCT_HARNESS_RETURN_REJECTED_REFERENCE_AS_PRODUCT_URL=false`. |
+| `product_url` | Best discovered URL. It is populated whenever any candidate/search/scrape URL exists. It may require review. |
 | `verified_exact_url` | Filled only when exact product is proven from scrape evidence and LLM/detector gates pass. |
-| `best_available_url` | Best useful non-conflicting URL when exact proof is not complete. |
-| `best_reference_url` | Closest rejected/reference URL when only wrong variants or insufficient evidence exist. |
-| `needs_review` | True when the final URL is not verified exact. |
+| `best_available_url` | Best useful URL when exact proof is not complete. |
+| `best_reference_url` | Closest/reference URL when selected evidence is weak, non-scrapable, or insufficient. |
+| `is_scrapable` | Whether selected `product_url` was scrape-usable product-page evidence. |
+| `needs_review` | True when the final URL is not verified exact or not coding-ready. |
 | `url_decision_status` | Exact/requested-retailer/country-alternative/global/review/failure status. |
+| `quality_tier` | Enterprise quality tier A/B/C/D/E. |
+| `failure_taxonomy` | Machine-readable reasons for weak/review outcomes. |
 
-Requested-retailer statuses include:
+Requested-retailer/status examples include:
 
 ```text
 EXACT_REQUESTED_RETAILER_MATCH
 EXACT_COUNTRY_ALTERNATIVE_RETAILER_MATCH
 EXACT_GLOBAL_FALLBACK
-BEST_AVAILABLE_COUNTRY_NEEDS_REVIEW
-BEST_AVAILABLE_GLOBAL_NEEDS_REVIEW
-NO_VERIFIED_EXACT_URL
+BEST_AVAILABLE_PRODUCT_URL_NEEDS_REVIEW
+BEST_AVAILABLE_PRODUCT_URL_NOT_SCRAPABLE_NEEDS_REVIEW
+DISCOVERED_CANDIDATE_URL_UNSCRAPED_NEEDS_REVIEW
+STRICT_PRODUCT_URL_REQUIRED_BUT_NO_URL_CANDIDATE_AVAILABLE
 ```
+
+See `docs/STRICT_PRODUCT_URL_POLICY.md` for the strict non-empty product URL policy.
 
 ## Output contract
 
@@ -98,7 +106,12 @@ output/<row_id>/
 ├── retailer_scrapability.md
 ├── final_decision.md
 ├── decision_trace.md
-└── trace.json
+├── trace.json
+├── enterprise_assessment.json
+├── evidence_graph.json
+├── product_coding_input.json
+├── review_feedback_template.json
+└── quality_assessment.md
 ```
 
 The markdown files record what was planned, searched, scraped, rejected, repaired, and selected. This is an observable decision trace and evidence trail, not hidden chain-of-thought.
@@ -109,10 +122,11 @@ The markdown files record what was planned, searched, scraped, rejected, repaire
 outputs/
 ├── final_submission.csv
 ├── review_queue.csv
-└── batch_summary.md
+├── batch_summary.md
+└── metrics.json
 ```
 
-`final_submission.csv` is the business/submission artifact. It contains inputs, candidate URLs, final best URL fields, selected scope, exactness/scrapability flags, resource counters, and `row_report_path` linking to the markdown evidence packet.
+`final_submission.csv` is the business/submission artifact. It contains inputs, candidate URLs, final best URL fields, selected scope, exactness/scrapability flags, enterprise quality fields, resource counters, and `row_report_path` linking to the markdown evidence packet.
 
 ### Optional debug CSVs
 
