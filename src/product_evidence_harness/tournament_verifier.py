@@ -26,13 +26,16 @@ class TournamentProductIdentityVerifier(ProductIdentityVerifier):
             (scrape.word_count or 0) < self.min_thin_page_word_count
             or (scrape.richness_score or 0.0) < self.min_thin_page_richness
         )
+        product_name = (scrape.page_product_name or scrape.title or scrape.h1 or "").strip().lower()
+        generic_names = {"mercado libre", "mercado libre logo image", "logo", "home", "homepage"}
+        meaningful_name = bool(product_name and product_name not in generic_names and "logo image" not in product_name)
         has_product_evidence = bool(
-            scrape.page_product_name
+            meaningful_name
             or scrape.has_price
             or scrape.structured_eans
             or scrape.specs
             or scrape.attributes
-            or scrape.image_count > 0
+            or scrape.image_count > 1
         )
         if thin_or_generic and not has_product_evidence:
             return PAGE_TYPE_NON_PRODUCT
