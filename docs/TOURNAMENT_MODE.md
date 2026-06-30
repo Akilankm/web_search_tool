@@ -30,7 +30,8 @@ Input product identity
   → search fan-out within 4 SerpAPI credits
   → candidate pool
   → cheap preflight ranking
-  → concurrent batch scraping
+  → enforced top-k preflight candidate cut
+  → concurrent batch scraping with max-batch bound
   → evidence extraction
   → deterministic identity / EAN / title / variant / country / retailer checks
   → batch winner selection
@@ -74,6 +75,32 @@ champion_confirmation.required_attempts = 3
 champion_confirmation.required_successes = 3
 ```
 
+## Enforced preflight and batch limits
+
+The tournament engine now enforces the same limits that the docs expose:
+
+```text
+ranked_candidates = all scored candidates sorted by preflight score
+preflight_candidates = ranked_candidates[:PRODUCT_HARNESS_TOURNAMENT_PREFLIGHT_TOP_K]
+batches = chunk(preflight_candidates, PRODUCT_HARNESS_TOURNAMENT_BATCH_SIZE)
+executed_batches = batches[:PRODUCT_HARNESS_TOURNAMENT_MAX_BATCHES]
+```
+
+With defaults, the tournament batch phase can scrape at most:
+
+```text
+min(60, available scrape budget, available preflight candidates)
+```
+
+because:
+
+```text
+PRODUCT_HARNESS_TOURNAMENT_BATCH_SIZE=20
+PRODUCT_HARNESS_TOURNAMENT_MAX_BATCHES=3
+```
+
+Champion confirmation is separate from this batch phase. It uses the selected champion candidate and writes `champion_confirmation.json` / `champion_confirmation.md`.
+
 ## Search strategy
 
 The search fan-out can include:
@@ -90,7 +117,7 @@ Only the first unique queries within the four-credit cap are executed.
 
 ## Champion selection
 
-Each batch produces a winner. Winners are then compared until a production-ready champion candidate is selected.
+Each executed batch produces a winner. Winners are then compared until a production-ready champion candidate is selected.
 
 The champion candidate is ranked by:
 
