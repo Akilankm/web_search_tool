@@ -7,6 +7,7 @@ Use this index when presenting or operating the Product Evidence Harness.
 | Document | Purpose |
 |---|---|
 | `../README.md` | Main project overview for the tournament-first architecture. |
+| `END_TO_END_OPERATIONS.md` | Operational runbook for inputs, env, batch run, artifacts, and handoff. |
 | `TOURNAMENT_MODE.md` | Primary architecture, four-credit SerpAPI cap, champion selection, and artifacts. |
 | `TEAM_SHOWCASE_GUIDE.md` | Team-facing demo script and business explanation. |
 | `PRODUCTION_GRADE_PRODUCT_URL.md` | Exact handoff rules for browser/scraping/product-coding teams. |
@@ -17,7 +18,7 @@ Use this index when presenting or operating the Product Evidence Harness.
 
 ## Primary architecture
 
-Tournament is now the default operating path:
+Tournament is the default operating path:
 
 ```text
 search fan-out within 4 SerpAPI credits
@@ -37,9 +38,15 @@ notebooks/01_single_product_harness.ipynb
 notebooks/02_batch_product_harness.ipynb
 ```
 
-Both notebooks surface:
+Both notebooks now surface the complete tournament workflow:
 
 ```text
+tournament config
+4-credit cap
+champion URL
+runner-up URL
+champion margin
+batch winners
 production_url_ready
 production_url_status
 browser_openable
@@ -47,8 +54,7 @@ highly_scrapable
 exact_product_url_match
 production_url_score
 production_url_reasons
-tournament_bracket.md
-batch_winners.csv
+product_coding_input.json
 ```
 
 ## Production handoff rule
