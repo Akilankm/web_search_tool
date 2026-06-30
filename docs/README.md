@@ -13,7 +13,7 @@ This folder now keeps only current operating documentation. One-off PR notes, re
 | `TOURNAMENT_MODE.md` | Primary architecture, four-credit SerpAPI cap, enforced top-k/batch limits, champion selection, confirmation, and artifacts. |
 | `TOURNAMENT_CHAMPION_CONTRACT.md` | Exact champion contract, including repeated confirmation requirements. |
 | `CHAMPION.md` | Short champion definition and confirmation requirement. |
-| `OFFLINE_PRODUCT_ARTIFACT.md` | Frozen offline webpage artifact contract: local HTML, assets, structured product evidence, and no-network validation. |
+| `OFFLINE_PRODUCT_ARTIFACT.md` | Optional side-module contract for freezing a champion URL into local HTML/assets/evidence. |
 | `TEAM_SHOWCASE_GUIDE.md` | Team-facing demo script and business explanation. |
 | `PRODUCTION_GRADE_PRODUCT_URL.md` | Exact handoff rules for browser/scraping/product-coding teams. |
 | `STRICT_PRODUCT_URL_POLICY.md` | Explains the distinction between emitted URLs, confirmed champions, and review-only candidates. |
@@ -34,7 +34,6 @@ search fan-out within 4 SerpAPI credits
   → production-ready champion candidate
   → champion confirmation gate, default 3 checks
   → production URL gate
-  → offline product artifact capture
 ```
 
 The legacy iterative loop is fallback-only and should be used only for debugging/A-B comparison.
@@ -46,7 +45,7 @@ notebooks/01_single_product_harness.ipynb
 notebooks/02_batch_product_harness.ipynb
 ```
 
-Both notebooks now surface the complete tournament workflow:
+Both notebooks surface the complete tournament workflow:
 
 ```text
 tournament config
@@ -71,7 +70,24 @@ production_url_reasons
 product_coding_input.json
 ```
 
-## Production handoff rule
+## Optional offline artifact notebook
+
+Offline page freezing is intentionally separate from the main notebooks. Use it only when you want to turn a confirmed champion URL into a local, openable artifact:
+
+```text
+notebooks/03_offline_product_artifact.ipynb
+```
+
+That notebook produces:
+
+```text
+offline/offline_page.html
+product_data/structured_product.json
+product_data/content.md
+validation/offline_artifact_validation.json
+```
+
+## Production URL handoff rule
 
 For browser-opening, downstream scraping, and product-coding teams, use only rows where:
 
@@ -85,27 +101,17 @@ needs_review = false
 
 Rows outside this filter can still contain `product_url`, but they are review-only.
 
-## Strongest downstream handoff
+## Optional offline handoff rule
 
-The strongest handoff is not only the live `product_url`. The confirmed champion URL should be frozen into an offline artifact and downstream coding should consume the local evidence package:
+Offline artifact capture is an optional second-stage step, not part of the default discovery/tournament run.
+
+Use it after a champion URL is already confirmed:
 
 ```text
 confirmed champion URL
-  → offline artifact capture
+  → optional offline artifact capture
   → PRODUCTION_READY_OFFLINE_ARTIFACT
-  → product coding from local files
+  → product coding from local files when offline reproducibility is required
 ```
 
-Openable local page:
-
-```text
-offline/offline_page.html
-```
-
-Machine-readable local evidence:
-
-```text
-product_data/structured_product.json
-product_data/content.md
-validation/offline_artifact_validation.json
-```
+The live URL remains provenance. The offline artifact becomes the local evidence package only for workflows that explicitly opt into this step.
