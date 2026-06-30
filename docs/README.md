@@ -13,6 +13,7 @@ This folder now keeps only current operating documentation. One-off PR notes, re
 | `TOURNAMENT_MODE.md` | Primary architecture, four-credit SerpAPI cap, enforced top-k/batch limits, champion selection, confirmation, and artifacts. |
 | `TOURNAMENT_CHAMPION_CONTRACT.md` | Exact champion contract, including repeated confirmation requirements. |
 | `CHAMPION.md` | Short champion definition and confirmation requirement. |
+| `OFFLINE_PRODUCT_ARTIFACT.md` | Frozen offline webpage artifact contract: local HTML, assets, structured product evidence, and no-network validation. |
 | `TEAM_SHOWCASE_GUIDE.md` | Team-facing demo script and business explanation. |
 | `PRODUCTION_GRADE_PRODUCT_URL.md` | Exact handoff rules for browser/scraping/product-coding teams. |
 | `STRICT_PRODUCT_URL_POLICY.md` | Explains the distinction between emitted URLs, confirmed champions, and review-only candidates. |
@@ -33,6 +34,7 @@ search fan-out within 4 SerpAPI credits
   → production-ready champion candidate
   → champion confirmation gate, default 3 checks
   → production URL gate
+  → offline product artifact capture
 ```
 
 The legacy iterative loop is fallback-only and should be used only for debugging/A-B comparison.
@@ -82,3 +84,28 @@ needs_review = false
 ```
 
 Rows outside this filter can still contain `product_url`, but they are review-only.
+
+## Strongest downstream handoff
+
+The strongest handoff is not only the live `product_url`. The confirmed champion URL should be frozen into an offline artifact and downstream coding should consume the local evidence package:
+
+```text
+confirmed champion URL
+  → offline artifact capture
+  → PRODUCTION_READY_OFFLINE_ARTIFACT
+  → product coding from local files
+```
+
+Openable local page:
+
+```text
+offline/offline_page.html
+```
+
+Machine-readable local evidence:
+
+```text
+product_data/structured_product.json
+product_data/content.md
+validation/offline_artifact_validation.json
+```
