@@ -211,6 +211,7 @@ It is intentionally not part of `main.py`, `batch_main.py`, or notebooks `01`/`0
 | `docs/BUSINESS_OVERVIEW.md` | Leadership/business value explanation. |
 | `docs/NOTEBOOK_GATEWAY.md` | Notebook-first user journey. |
 | `docs/VISUAL_PIPELINE_GUIDE.md` | Graphical architecture and non-linear flow. |
+| `docs/CODEBASE_FUNCTIONALITY_MAP.md` | Maps business capabilities to code areas and notebooks. |
 | `docs/DECISION_CONTRACTS.md` | Meaning of output fields/statuses. |
 | `docs/ARTIFACT_GUIDE.md` | Output files, row artifacts, and audit trail. |
 | `docs/ASSUMPTIONS_AND_CONSTRAINTS.md` | Explicit assumptions, limits, and risk boundaries. |
