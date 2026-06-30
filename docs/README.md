@@ -1,93 +1,58 @@
 # Documentation Index
 
-Use this index when presenting or operating the Product Evidence Harness.
+This documentation is organized for adoption. Start with the business story, then use notebooks as the execution gateway, then inspect decision contracts and artifacts.
 
-This folder now keeps only current operating documentation. One-off PR notes, retrospective patch summaries, and stale implementation-history documents have been removed from the active docs tree.
+```mermaid
+flowchart TD
+    A[README.md] --> B[Business Overview]
+    A --> C[Notebook Gateway]
+    C --> D[Notebook 00: Start here]
+    C --> E[Notebook 01: Single product]
+    C --> F[Notebook 02: Batch run]
+    C --> G[Notebook 03: Optional offline capture]
+    B --> H[Adoption Playbook]
+    E --> I[Decision Contracts]
+    F --> J[Artifact Guide]
+    G --> K[Offline Product Artifact]
+```
 
 ## Start here
 
-| Document | Purpose |
-|---|---|
-| `../README.md` | Main project overview for the tournament-first architecture and champion confirmation gate. |
-| `END_TO_END_OPERATIONS.md` | Operational runbook for inputs, env, batch run, artifacts, champion confirmation, enforced preflight/batch limits, and handoff. |
-| `TOURNAMENT_MODE.md` | Primary architecture, four-credit SerpAPI cap, enforced top-k/batch limits, champion selection, confirmation, and artifacts. |
-| `TOURNAMENT_CHAMPION_CONTRACT.md` | Exact champion contract, including repeated confirmation requirements. |
-| `CHAMPION.md` | Short champion definition and confirmation requirement. |
-| `OFFLINE_PRODUCT_ARTIFACT.md` | Optional side-module contract for freezing a champion URL into local HTML/assets/evidence. |
-| `TEAM_SHOWCASE_GUIDE.md` | Team-facing demo script and business explanation. |
-| `PRODUCTION_GRADE_PRODUCT_URL.md` | Exact handoff rules for browser/scraping/product-coding teams. |
-| `STRICT_PRODUCT_URL_POLICY.md` | Explains the distinction between emitted URLs, confirmed champions, and review-only candidates. |
-| `ELITE_EVIDENCE_ENGINE.md` | Evidence graph, quality tiers, coding readiness, metrics, and review artifacts. |
-| `LATENCY_OPTIMIZATION.md` | Static-first and concurrent scrape speedup controls. |
-| `IMPORT_PATH_FIX.md` | Notebook/import path guidance. |
+| Document | Purpose | Primary audience |
+|---|---|---|
+| `../README.md` | Root business + technical entrypoint. | Everyone |
+| `BUSINESS_OVERVIEW.md` | Leadership-facing value explanation. | Leadership, managers |
+| `NOTEBOOK_GATEWAY.md` | Notebook-first usage map. | Everyone |
+| `VISUAL_PIPELINE_GUIDE.md` | Graphical explanation of the non-linear pipeline. | Managers, engineers, reviewers |
+| `DECISION_CONTRACTS.md` | Output field/status meaning and handoff rules. | Operations, downstream teams |
+| `ARTIFACT_GUIDE.md` | Output files, audit trail, and row artifact interpretation. | Analysts, reviewers, engineers |
+| `ASSUMPTIONS_AND_CONSTRAINTS.md` | Input assumptions, external limits, and reliability boundaries. | Leadership, governance, engineers |
+| `ADOPTION_PLAYBOOK.md` | Demo, rollout, and standardization playbook. | Managers, champions, delivery leads |
+| `OFFLINE_PRODUCT_ARTIFACT.md` | Optional notebook-only offline capture contract. | Audit/evidence users |
+
+## Notebook-first gateway
+
+| Notebook | Purpose | Linked docs |
+|---|---|---|
+| `../notebooks/00_notebook_gateway.ipynb` | Start here; decide the right notebook path. | `NOTEBOOK_GATEWAY.md`, `BUSINESS_OVERVIEW.md` |
+| `../notebooks/01_single_product_harness.ipynb` | Demonstrate one product end-to-end. | `VISUAL_PIPELINE_GUIDE.md`, `DECISION_CONTRACTS.md`, `ARTIFACT_GUIDE.md` |
+| `../notebooks/02_batch_product_harness.ipynb` | Run many products and produce business outputs. | `ARTIFACT_GUIDE.md`, `DECISION_CONTRACTS.md`, `ADOPTION_PLAYBOOK.md` |
+| `../notebooks/03_offline_product_artifact.ipynb` | Optional offline page capture after champion confirmation. | `OFFLINE_PRODUCT_ARTIFACT.md`, `ASSUMPTIONS_AND_CONSTRAINTS.md` |
 
 ## Primary architecture
 
-Tournament is the default operating path:
-
-```text
-search fan-out within 4 SerpAPI credits
-  → candidate pool
-  → top-k preflight candidate cut
-  → bounded batch scrape
-  → batch winners
-  → production-ready champion candidate
-  → champion confirmation gate, default 3 checks
-  → production URL gate
+```mermaid
+flowchart LR
+    A[Product input] --> B[Search fan-out]
+    B --> C[Candidate tournament]
+    C --> D[Evidence extraction]
+    D --> E[Identity / country / scrapability checks]
+    E --> F[Champion confirmation]
+    F --> G[Production URL gate]
+    G --> H[CSV + artifacts + product coding evidence]
 ```
 
-The legacy iterative loop is fallback-only and should be used only for debugging/A-B comparison.
-
-## Active notebooks
-
-```text
-notebooks/01_single_product_harness.ipynb
-notebooks/02_batch_product_harness.ipynb
-```
-
-Both notebooks surface the complete tournament workflow:
-
-```text
-tournament config
-4-credit cap
-preflight top-k
-max tournament batches
-champion URL
-runner-up URL
-champion margin
-champion confirmation attempts
-champion confirmation successes
-champion_confirmation.json
-champion_confirmation.md
-batch winners
-production_url_ready
-production_url_status
-browser_openable
-highly_scrapable
-exact_product_url_match
-production_url_score
-production_url_reasons
-product_coding_input.json
-```
-
-## Optional offline artifact notebook
-
-Offline page freezing is intentionally separate from the main notebooks. Use it only when you want to turn a confirmed champion URL into a local, openable artifact:
-
-```text
-notebooks/03_offline_product_artifact.ipynb
-```
-
-That notebook produces:
-
-```text
-offline/offline_page.html
-product_data/structured_product.json
-product_data/content.md
-validation/offline_artifact_validation.json
-```
-
-## Production URL handoff rule
+## Production handoff rule
 
 For browser-opening, downstream scraping, and product-coding teams, use only rows where:
 
@@ -99,19 +64,17 @@ champion_confirmation.success_count = champion_confirmation.required_successes
 needs_review = false
 ```
 
-Rows outside this filter can still contain `product_url`, but they are review-only.
+Rows outside this filter can still contain useful evidence, but they are review-only.
 
 ## Optional offline handoff rule
 
-Offline artifact capture is an optional second-stage step, not part of the default discovery/tournament run.
-
-Use it after a champion URL is already confirmed:
+Offline artifact capture is an optional second-stage notebook workflow, not part of the default discovery/tournament run.
 
 ```text
 confirmed champion URL
-  → optional offline artifact capture
+  → notebooks/03_offline_product_artifact.ipynb
   → PRODUCTION_READY_OFFLINE_ARTIFACT
-  → product coding from local files when offline reproducibility is required
+  → offline/offline_page.html
 ```
 
 The live URL remains provenance. The offline artifact becomes the local evidence package only for workflows that explicitly opt into this step.
