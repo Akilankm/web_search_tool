@@ -39,9 +39,9 @@ from product_evidence_harness import (  # noqa: E402
     SerpAPIConfig,
     configure_logging,
 )
-from product_evidence_harness.artifacts import ArtifactWriter  # noqa: E402
-from product_evidence_harness.elite import EnterpriseEvidenceEngine  # noqa: E402
 from product_evidence_harness.production_url import ProductionURLGate  # noqa: E402
+from product_evidence_harness.tournament_artifacts import TournamentArtifactWriter  # noqa: E402
+from product_evidence_harness.tournament_enterprise import TournamentEnterpriseEvidenceEngine  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -70,8 +70,8 @@ def process(product, env_file: str) -> dict[str, Any]:
         harness, config = build_harness(product, env_file)
         trace = harness.run(product, return_trace=True)
         row_dir = Path(config.output_dir) / product.row_id
-        row = ArtifactWriter(config.output_dir, country_profiles=harness.country_profiles).final_submission_row(trace.state, product_dir=row_dir)
-        row.update(EnterpriseEvidenceEngine().assess(trace.state).final_submission_extras())
+        row = TournamentArtifactWriter(config.output_dir, country_profiles=harness.country_profiles).final_submission_row(trace.state, product_dir=row_dir)
+        row.update(TournamentEnterpriseEvidenceEngine().assess(trace.state).final_submission_extras())
         production_assessment = ProductionURLGate().assess_url_in_state(trace.state, row.get("product_url") or "")
         if production_assessment:
             row.update({
