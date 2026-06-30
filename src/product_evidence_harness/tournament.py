@@ -174,10 +174,17 @@ class CandidateTournamentEngine:
             setattr(state, "tournament_result", result)
             return result
 
-        logger.info("Tournament mode | row_id={} | max_serp_credits={}", state.task.row_id, self.config.max_serp_credits)
+        logger.info(
+            "Tournament mode | row_id={} | max_serp_credits={} | preflight_top_k={} | batch_size={} | max_batches={}",
+            state.task.row_id,
+            self.config.max_serp_credits,
+            self.config.preflight_top_k,
+            self.config.batch_size,
+            self.config.max_batches,
+        )
         executed = self._execute_searches(state)
         state.scorecards = self.ranker.score(product=state.task, candidates=state.candidates, scrapes=state.scrapes, verifications=state.verifications)
-        ranked_candidates = self._rank_all_candidates(state.scorecards)
+        ranked_candidates = self._rank_all_candidates(state.scorecards)[: max(0, self.config.preflight_top_k)]
 
         rounds: list[TournamentRound] = []
         for batch_index, batch in enumerate(self._batches(ranked_candidates), start=1):
@@ -320,7 +327,10 @@ class CandidateTournamentEngine:
 
     def _batches(self, cards: list[CandidateScorecard]) -> list[list[CandidateScorecard]]:
         size = max(1, self.config.batch_size)
-        return [cards[i:i + size] for i in range(0, len(cards), size)]
+        max_batches = max(0, self.config.max_batches)
+        if max_batches == 0:
+            return []
+        return [cards[i:i + size] for i in range(0, len(cards), size)][:max_batches]
 
     def _scrape_batch(self, state: ProductSearchState, urls: list[str], *, batch_index: int) -> None:
         todo: list[str] = []
