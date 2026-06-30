@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from src.product_evidence_harness.contracts import ProductQuery, ProductSearchState, URLCandidate
 from src.product_evidence_harness.country_profiles import CountryProfileRegistry, LanguageProfile
+from src.product_evidence_harness.gtin import normalize_gtin
 
 
 @dataclass(frozen=True)
@@ -48,8 +49,9 @@ class QueryBuilder:
         lp = languages[idx]
 
         parts: list[str] = []
-        if task.ean:
-            parts.append(task.ean)
+        ean = self._valid_ean(task)
+        if ean:
+            parts.append(ean)
 
         if repair and state:
             parts.extend(self._repair_clues(state))
@@ -87,8 +89,9 @@ class QueryBuilder:
 
     def global_fallback(self, task: ProductQuery, *, include_retailer: bool = False) -> str:
         parts: list[str] = []
-        if task.ean:
-            parts.append(task.ean)
+        ean = self._valid_ean(task)
+        if ean:
+            parts.append(ean)
         parts.extend(self._quoted_text_variants(task.main_text, max_variants=2))
         if include_retailer and task.retailer_name:
             parts.append(task.retailer_name)
@@ -99,8 +102,9 @@ class QueryBuilder:
     def repair_from_state(self, state: ProductSearchState, *, global_fallback: bool = False, include_retailer: bool = False) -> str:
         task = state.task
         parts: list[str] = []
-        if task.ean:
-            parts.append(self._quote(task.ean))
+        ean = self._valid_ean(task)
+        if ean:
+            parts.append(self._quote(ean))
         parts.extend(self._repair_clues(state) or self._distinctive_tokens(task.main_text, max_tokens=7))
         parts.extend(self._repair_negatives(state))
         if include_retailer and task.retailer_name:
@@ -129,8 +133,9 @@ class QueryBuilder:
         """
         task = state.task
         parts: list[str] = []
-        if task.ean:
-            parts.append(self._quote(task.ean))
+        ean = self._valid_ean(task)
+        if ean:
+            parts.append(self._quote(ean))
 
         domains: list[str] = []
         for card in state.scorecards:
@@ -174,7 +179,7 @@ class QueryBuilder:
             *language_lines,
             f"country_terms: {country_terms}",
             f"retailer_name: {task.retailer_name or 'not_provided'}",
-            f"ean_gtin: {task.ean or 'not_provided'}",
+            f"ean_gtin: {self._valid_ean(task) or 'not_provided'}",
             f"global_fallback_allowed: {str(allow_global_fallback)}",
         ]))
 
@@ -205,7 +210,7 @@ class QueryBuilder:
             *language_lines,
             f"country_terms: {country_terms}",
             f"retailer_name: {task.retailer_name or 'not_provided'}",
-            f"ean_gtin: {task.ean or 'not_provided'}",
+            f"ean_gtin: {self._valid_ean(task) or 'not_provided'}",
             f"global_fallback_allowed: {str(allow_global_fallback)}",
             "",
             "CANDIDATES:",
@@ -336,27 +341,22 @@ class QueryBuilder:
         t = re.sub(r"\b(\d+(?:[.,]\d+)?)\s+(mm|cm|m|inch|in|ml|l|g|kg)\b", r"\1\2", t, flags=re.I)
         return " ".join(t.split())
 
+    def _valid_ean(self, task: ProductQuery) -> str | None:
+        return normalize_gtin(task.ean)
+
     def _quote(self, text: str) -> str:
         return f'"{text.strip().replace(chr(34), "")}"'
 
-    def _distinctive_tokens(self, text: str, *, max_tokens: int) -> list[str]:
-        stop = {"with", "from", "and", "the", "toy", "toys", "figure", "figurka", "set", "pack", "pcs", "ks"}
-        tokens = [t for t in re.findall(r"[a-zA-Z0-9À-ž]+", text or "") if len(t) >= 3 and t.lower() not in stop]
-        model = [t for t in tokens if re.search(r"[A-Za-z]", t) and re.search(r"\d", t)]
-        rest = [t for t in tokens if t not in model]
-        seen: set[str] = set()
-        out: list[str] = []
-        for token in model + rest:
-            key = token.lower()
-            if key not in seen:
-                seen.add(key)
-                out.append(token)
-            if len(out) >= max_tokens:
-                break
-        return out
-
     def _truncate(self, query: str) -> str:
-        query = " ".join(str(query).split())
-        if len(query) <= self.max_query_chars:
-            return query
-        return query[: self.max_query_chars].rsplit(" ", 1)[0]
+        query = " ".join((query or "").split())
+        return query[: self.max_query_chars].strip()
+
+    def _distinctive_tokens(self, text: str, *, max_tokens: int = 8) -> list[str]:
+        tokens = []
+        for token in re.findall(r"[A-Za-zÀ-ž0-9]+", self._segment_compact_text(text or "")):
+            if len(token) < 3:
+                continue
+            if token.lower() in {"the", "and", "for", "with", "product", "item"}:
+                continue
+            tokens.append(token)
+        return list(dict.fromkeys(tokens))[:max_tokens]
