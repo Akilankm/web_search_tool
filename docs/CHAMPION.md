@@ -1,14 +1,14 @@
 # Champion
 
-The tournament champion is the main selected URL only when it passes all production gates.
+The champion is the URL the system is trying to find for every valid product input.
 
 A champion must be browser-openable, highly scrapable, exact-product matched, and rich enough for downstream product coding.
 
 Tournament mode works through the ranked candidate pool from the four-credit search set and continues batch scraping until it finds a production-ready champion or reaches the available candidate or scrape budget.
 
-Runner-up URLs are used for comparison only.
+Runner-up URLs are comparison evidence only.
 
-If no URL passes the production gate, there is no champion. In that case `product_url` stays empty and the best weak URL is kept only as a review candidate.
+A review candidate is not the final target. It is only the strongest non-champion candidate seen so far.
 
 Invalid GTIN values are not used to build search queries.
 
