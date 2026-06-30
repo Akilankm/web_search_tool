@@ -61,6 +61,14 @@ PRODUCT_HARNESS_TOURNAMENT_MAX_BATCHES=3
 
 The code clamps `PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS` to a maximum of `4`.
 
+Tournament scrape volume is also bounded by the enforced preflight and batch controls:
+
+```text
+preflight candidates considered = top PRODUCT_HARNESS_TOURNAMENT_PREFLIGHT_TOP_K ranked candidates
+max tournament batch candidates scraped = PRODUCT_HARNESS_TOURNAMENT_BATCH_SIZE × PRODUCT_HARNESS_TOURNAMENT_MAX_BATCHES
+default max tournament batch candidates scraped = 20 × 3 = 60
+```
+
 Champion confirmation is currently implemented as a fixed post-selection gate:
 
 ```text
@@ -197,6 +205,8 @@ Both notebooks now cover the complete end-to-end tournament workflow:
 ```text
 tournament config
 4-credit SerpAPI cap
+preflight top-k
+max tournament batches
 champion URL
 runner-up URL
 champion margin
@@ -255,6 +265,7 @@ PYTHONPATH=src pytest -q
 ## Related docs
 
 ```text
+docs/README.md
 docs/END_TO_END_OPERATIONS.md
 docs/TOURNAMENT_MODE.md
 docs/TOURNAMENT_CHAMPION_CONTRACT.md
