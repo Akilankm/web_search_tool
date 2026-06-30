@@ -2,15 +2,43 @@
 
 ## Purpose
 
-The tournament champion is the business-selected URL.
+The tournament champion is the production-usable business URL.
 
 ```text
-product_url = tournament champion URL
+product_url = tournament champion URL only when a true champion exists
 runner_up_url = supporting/debug evidence only
-production_url_ready = whether the champion is safe for handoff
+best_review_candidate_url = best weak candidate when no champion exists
 ```
 
-This means the system no longer replaces the tournament champion with a weaker runner-up simply because the runner-up is more scrapeable. The champion remains the URL everyone should inspect.
+A true champion is not just the highest-scoring candidate. It must pass the production evidence gate.
+
+## Champion eligibility
+
+A URL can become `tournament_champion_url` only when it is:
+
+```text
+browser-openable
+highly scrapable
+exact-product matched
+rich enough for product coding
+critical product details extracted
+country acceptable
+not a homepage/search/listing/soft-404 page
+not a conflicting variant
+```
+
+In this project, scrapable means the page exposes actual product evidence, not just reachable HTML.
+
+Critical product evidence includes product name plus multiple useful details such as:
+
+```text
+brand or manufacturer
+description
+specs or attributes
+images
+GTIN/EAN when present
+price or availability signal
+```
 
 ## Handoff rule
 
@@ -22,13 +50,22 @@ production_url_status = PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL
 needs_review = false
 ```
 
-If the champion is not production-ready, the row remains review-only:
+## No-champion behavior
+
+If no URL passes the champion gates, the system must not pretend that a champion exists.
+
+Expected output:
 
 ```text
-product_url = tournament champion
+tournament_champion_url = empty
+product_url = empty
+best_review_candidate_url = populated when a review candidate exists
 needs_review = true
 verified_exact_url = empty
+production_url_ready = false
 ```
+
+This keeps the main URL field clean for downstream browser, scraper, and coding teams.
 
 ## Runner-up interpretation
 
@@ -49,19 +86,11 @@ Do not use runner-ups as production handoff URLs unless a future review explicit
 
 Invalid EAN/GTIN values are not used in search queries or LLM prompts. They remain visible as input evidence and diagnostics, but they are not treated as exact identity anchors.
 
-Example:
-
-```text
-7800270000000
-```
-
-This fails GTIN checksum validation, so it is ignored for search construction and exact EAN matching.
-
 ## Coding readiness rule
 
-A row cannot be `CODING_READY` unless the selected champion is production-ready and exact.
+A row cannot be `CODING_READY` unless a production-ready exact champion exists.
 
-If the champion has useful scrape evidence but is not production-ready exact, the coding status is downgraded to:
+If only a review candidate exists, the coding status must be downgraded to:
 
 ```text
 CODING_PARTIAL
@@ -83,15 +112,3 @@ Expected values after a requested-retailer tournament query:
 requested_retailer_attempted = true
 requested_retailer_scrapability_status != NOT_ATTEMPTED
 ```
-
-## Operational interpretation
-
-For a row like MercadoLibre requested, Colombia country, and a MercadoLibre Argentina champion:
-
-```text
-product_url = MercadoLibre tournament champion
-needs_review = true if wrong country or not production-ready
-runner_up_url = supporting comparison only
-```
-
-That is expected tournament behavior.
