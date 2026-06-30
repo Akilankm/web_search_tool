@@ -41,6 +41,7 @@ from product_evidence_harness import (  # noqa: E402
 )
 from product_evidence_harness.artifacts import ArtifactWriter  # noqa: E402
 from product_evidence_harness.elite import EnterpriseEvidenceEngine  # noqa: E402
+from product_evidence_harness.production_url import ProductionURLGate  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -71,6 +72,27 @@ def process(product, env_file: str) -> dict[str, Any]:
         row_dir = Path(config.output_dir) / product.row_id
         row = ArtifactWriter(config.output_dir, country_profiles=harness.country_profiles).final_submission_row(trace.state, product_dir=row_dir)
         row.update(EnterpriseEvidenceEngine().assess(trace.state).final_submission_extras())
+        production_assessment = ProductionURLGate().assess_url_in_state(trace.state, row.get("product_url") or "")
+        if production_assessment:
+            row.update({
+                "production_url_ready": production_assessment.production_ready,
+                "production_url_status": production_assessment.status,
+                "browser_openable": production_assessment.browser_openable,
+                "highly_scrapable": production_assessment.highly_scrapable,
+                "exact_product_url_match": production_assessment.exact_product_match,
+                "production_url_score": production_assessment.score,
+                "production_url_reasons": "|".join(production_assessment.reasons),
+            })
+        else:
+            row.update({
+                "production_url_ready": False,
+                "production_url_status": "PRODUCT_URL_NOT_ASSESSED_OR_NO_SCORECARD",
+                "browser_openable": False,
+                "highly_scrapable": False,
+                "exact_product_url_match": False,
+                "production_url_score": 0.0,
+                "production_url_reasons": "NO_SCORECARD_FOR_SELECTED_PRODUCT_URL",
+            })
         row["enterprise_assessment_path"] = str(row_dir / "enterprise_assessment.json")
         row["evidence_graph_path"] = str(row_dir / "evidence_graph.json")
         row["product_coding_input_path"] = str(row_dir / "product_coding_input.json")
@@ -95,6 +117,13 @@ def process(product, env_file: str) -> dict[str, Any]:
             "is_scrapable": False,
             "needs_review": True,
             "confidence": 0.0,
+            "production_url_ready": False,
+            "production_url_status": "RUN_ERROR",
+            "browser_openable": False,
+            "highly_scrapable": False,
+            "exact_product_url_match": False,
+            "production_url_score": 0.0,
+            "production_url_reasons": "RUN_ERROR",
             "quality_tier": "E",
             "quality_tier_reason": "Run failed before final decision.",
             "coding_readiness_status": "NEEDS_REVIEW",
@@ -140,6 +169,10 @@ def write_batch_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
     total = len(rows)
     exact = sum(1 for r in rows if str(r.get("verified_exact_url") or "").strip())
     product_url = sum(1 for r in rows if str(r.get("product_url") or "").strip())
+    production_ready = sum(1 for r in rows if str(r.get("production_url_ready")).lower() in {"true", "1", "yes"})
+    browser_openable = sum(1 for r in rows if str(r.get("browser_openable")).lower() in {"true", "1", "yes"})
+    highly_scrapable = sum(1 for r in rows if str(r.get("highly_scrapable")).lower() in {"true", "1", "yes"})
+    exact_product_url = sum(1 for r in rows if str(r.get("exact_product_url_match")).lower() in {"true", "1", "yes"})
     coding_ready = sum(1 for r in rows if r.get("coding_readiness_status") == "CODING_READY")
     needs_review = sum(1 for r in rows if str(r.get("needs_review")).lower() in {"true", "1", "yes"} or r.get("status") == "error")
     errors = sum(1 for r in rows if r.get("status") == "error")
@@ -151,6 +184,7 @@ def write_batch_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
     scrapes = sum(int(float(r.get("scrape_calls_used") or 0)) for r in rows)
     tier_counts = Counter(str(r.get("quality_tier") or "UNKNOWN") for r in rows)
     readiness_counts = Counter(str(r.get("coding_readiness_status") or "UNKNOWN") for r in rows)
+    production_counts = Counter(str(r.get("production_url_status") or "UNKNOWN") for r in rows)
     failure_counts: Counter[str] = Counter()
     for r in rows:
         for failure in str(r.get("failure_taxonomy") or "").split("|"):
@@ -160,6 +194,10 @@ def write_batch_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
     metrics = {
         "total_rows": total,
         "product_url_count": product_url,
+        "production_ready_product_url_count": production_ready,
+        "browser_openable_product_url_count": browser_openable,
+        "highly_scrapable_product_url_count": highly_scrapable,
+        "exact_product_url_match_count": exact_product_url,
         "verified_exact_count": exact,
         "coding_ready_count": coding_ready,
         "needs_review_count": needs_review,
@@ -172,6 +210,7 @@ def write_batch_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
         "scrape_calls": scrapes,
         "quality_tiers": dict(tier_counts),
         "coding_readiness": dict(readiness_counts),
+        "production_url_status": dict(production_counts),
         "failure_taxonomy": dict(failure_counts),
     }
     (output_dir / "metrics.json").write_text(json.dumps(metrics, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -182,6 +221,10 @@ def write_batch_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
         "## Outcome Metrics",
         f"- **Total rows:** `{total}`",
         f"- **Operational product URLs:** `{product_url}`",
+        f"- **Production-ready product URLs:** `{production_ready}`",
+        f"- **Browser-openable product URLs:** `{browser_openable}`",
+        f"- **Highly scrapable product URLs:** `{highly_scrapable}`",
+        f"- **Exact product URL matches:** `{exact_product_url}`",
         f"- **Verified exact URLs:** `{exact}`",
         f"- **Coding-ready rows:** `{coding_ready}`",
         f"- **Needs review:** `{needs_review}`",
@@ -196,6 +239,7 @@ def write_batch_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
         f"- **scrape calls:** `{scrapes}`",
         "",
     ]
+    lines.extend(_counter_lines("Production URL Status Distribution", production_counts))
     lines.extend(_counter_lines("Quality Tier Distribution", tier_counts))
     lines.extend(_counter_lines("Coding Readiness Distribution", readiness_counts))
     lines.extend(_counter_lines("Failure Taxonomy", failure_counts))
