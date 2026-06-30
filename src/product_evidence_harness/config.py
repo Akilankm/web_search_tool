@@ -93,15 +93,15 @@ class HarnessPolicy:
 
 @dataclass(frozen=True)
 class HarnessBudgetConfig:
-    max_organic_searches: int = 3
-    max_ai_mode_searches: int = 1
+    max_organic_searches: int = 4
+    max_ai_mode_searches: int = 0
     max_scrapes: int = 180
     max_iterations: int = 240
 
 
 @dataclass(frozen=True)
 class TournamentConfig:
-    enabled: bool = False
+    enabled: bool = True
     max_serp_credits: int = 4
     candidate_pool: int = 150
     preflight_top_k: int = 60
@@ -118,7 +118,8 @@ class TournamentConfig:
         # Hard safety cap requested by business: tournament mode must not exceed 4 SerpAPI searches per product.
         max_serp = max(0, min(4, max_serp))
         return cls(
-            enabled=_env_bool("PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE", False),
+            # Tournament is now the primary/default architecture. Set this env flag to false only for legacy debugging.
+            enabled=_env_bool("PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE", True),
             max_serp_credits=max_serp,
             candidate_pool=_env_int("PRODUCT_HARNESS_TOURNAMENT_CANDIDATE_POOL", 150),
             preflight_top_k=_env_int("PRODUCT_HARNESS_TOURNAMENT_PREFLIGHT_TOP_K", 60),
