@@ -1,38 +1,38 @@
 # Product Evidence Harness
 
-Local Python package for **LLM-guided exact product URL discovery, production URL validation, and product-coding evidence handoff**.
+Local Python package for **tournament-first exact product URL discovery, production URL validation, and product-coding evidence handoff**.
 
-This is intentionally not an AzureML component yet. It is a local PDM/Python codebase with notebooks and CLI entrypoints.
+This is intentionally not an AzureML component. It is a local PDM/Python codebase with notebooks and CLI entrypoints.
 
-## Core strategy
+## Primary architecture
 
-The current strategy is **retailer-scrapability-aware loop engineering**:
+The primary operating model is now **candidate tournament selection**:
 
 ```text
-LLM builds product identity and search campaign
-  → SerpAPI performs high-yield search and returns many candidate URLs
-  → crawl4ai/static scraping validates useful candidate pages
-  → deterministic extractors and detectors score page type, richness, exactness, EAN, country fit, and variant conflicts
-  → LLM adjudicates exact product or repairs the search when enabled
-  → requested retailer is tried first
-  → same-country alternative retailers are searched when requested retailer is weak/blocked/wrong
-  → global fallback is used when country evidence fails
-  → optional tournament mode compares batches and selects a champion URL under a 4-credit SerpAPI cap
-  → production-grade exact/scrapable/browser-openable URL is promoted when available
-  → strict non-empty product_url fallback is used when any URL candidate exists
-  → production_url_ready / browser_openable / highly_scrapable / exact_product_url_match explain team handoff safety
+Input product identity
+  → SerpAPI search fan-out, hard-capped at 4 search credits per product
+  → broad candidate URL pool
+  → cheap preflight ranking
+  → concurrent batch scraping
+  → deterministic identity, EAN, title, variant, country, retailer, and page-quality checks
+  → batch winners
+  → champion URL
+  → production URL gate
+  → evidence artifacts and product-coding handoff
 ```
+
+The older iterative loop is retained only as a legacy/debug fallback when tournament mode is explicitly disabled.
 
 ## High-stakes handoff policy
 
-`product_url` has two business meanings that must not be confused:
+`product_url` and `production_url_ready` must not be confused:
 
 ```text
-product_url = best discovered URL emitted by the harness
-production_url_ready = whether product_url is safe for browser-opening and downstream scraping/coding
+product_url = best discovered/champion URL emitted by the harness
+production_url_ready = whether product_url is safe for browser-opening, downstream scraping, and product coding
 ```
 
-For the browser team, scraping team, and product-coding handoff, use only rows where:
+For browser, scraping, and product-coding teams, use only rows where:
 
 ```text
 production_url_ready = true
@@ -40,11 +40,11 @@ production_url_status = PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL
 needs_review = false
 ```
 
-Rows that fail this gate can still have a `product_url`, but they are **review-only** and should not be treated as production-ready evidence.
+Rows that fail this gate can still have `product_url`, but they are **review-only**.
 
-## Tournament mode
+## Tournament defaults
 
-Tournament mode is optional and designed for faster, higher-quality exact product URL selection.
+Tournament mode is the default.
 
 ```env
 PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE=true
@@ -55,27 +55,7 @@ PRODUCT_HARNESS_TOURNAMENT_BATCH_SIZE=20
 PRODUCT_HARNESS_TOURNAMENT_MAX_BATCHES=3
 ```
 
-The tournament path:
-
-```text
-search fan-out within 4 SerpAPI credits
-  → candidate pool
-  → cheap preflight ranking
-  → batch scrape
-  → batch winners
-  → champion URL
-  → production URL gate
-```
-
-When enabled, row folders include:
-
-```text
-tournament_bracket.json
-tournament_bracket.md
-batch_winners.csv
-```
-
-See `docs/TOURNAMENT_MODE.md`.
+The code clamps `PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS` to a maximum of `4`.
 
 ## Input contract
 
@@ -83,46 +63,25 @@ See `docs/TOURNAMENT_MODE.md`.
 |---|---:|---|
 | `main_text` | Yes | Primary product identity text. |
 | `country_code` | Yes | Country-first search market. |
-| `ean` / `gtin` | No | Strong user-provided anchor. Must remain a string. LLM must never invent it. |
+| `ean` / `gtin` | No | Strong user-provided anchor. Must remain a string. |
 | `retailer_name` | No | Preferred first evidence source only; not a hard final constraint. |
-| `language_code` | No | Optional search language override; otherwise derived from country profile. |
+| `language_code` | No | Optional search language override. |
 | `region` | No | Optional market hint. |
 
 EAN/GTIN identifiers are read as strings. If Excel has already converted an EAN into scientific notation, the system flags `EAN_SCIENTIFIC_NOTATION_LOSS_RISK` and avoids using the corrupted value as exact evidence.
-
-## Active notebooks
-
-```text
-notebooks/01_single_product_harness.ipynb
-notebooks/02_batch_product_harness.ipynb
-```
-
-Both notebooks expose the production URL handoff fields:
-
-```text
-production_url_ready
-production_url_status
-browser_openable
-highly_scrapable
-exact_product_url_match
-production_url_score
-production_url_reasons
-```
 
 ## URL decision semantics
 
 | Field | Meaning |
 |---|---|
-| `product_url` | Best discovered URL. Populated whenever any candidate/search/scrape URL exists. |
+| `product_url` | Best discovered/champion URL. Populated whenever any candidate/search/scrape URL exists. |
 | `production_url_ready` | True only when `product_url` is browser-openable, highly scrapable, and exact-product verified. |
 | `production_url_status` | Final handoff/readiness class for the selected `product_url`. |
 | `browser_openable` | Whether the selected page is expected to open in a normal browser. |
 | `highly_scrapable` | Whether the selected page is product-page-like, scrape-usable, and evidence-rich. |
 | `exact_product_url_match` | Whether the selected URL is verified as the exact product, not a sibling/variant. |
 | `verified_exact_url` | Strict exact URL. Filled only when exact product proof passes final gates. |
-| `is_scrapable` | Whether selected `product_url` had scrape-usable product-page evidence. |
 | `needs_review` | True when the final URL is not production-safe or not coding-ready. |
-| `url_decision_status` | Exact/requested-retailer/country-alternative/global/review/failure status. |
 | `quality_tier` | Enterprise quality tier A/B/C/D/E. |
 | `failure_taxonomy` | Machine-readable reasons for weak/review outcomes. |
 
@@ -170,8 +129,6 @@ output/<row_id>/
 └── batch_winners.csv
 ```
 
-Tournament artifacts are written only when tournament mode is enabled.
-
 ### Batch-level outputs
 
 ```text
@@ -182,11 +139,11 @@ outputs/
 └── metrics.json
 ```
 
-`final_submission.csv` is the main business/submission artifact. For production handoff, filter by `production_url_ready=true` and `needs_review=false`.
+`final_submission.csv` is the main business artifact. For production handoff, filter by `production_url_ready=true` and `needs_review=false`.
 
 ## Product-coding handoff
 
-The most important downstream file is:
+The main downstream file is:
 
 ```text
 output/<row_id>/product_coding_input.json
@@ -206,40 +163,14 @@ coding_readiness_status
 review_flags
 ```
 
-## Cost-aware operating model
-
-Paid/controlled:
+## Active notebooks
 
 ```text
-SerpAPI calls
-LLM calls
+notebooks/01_single_product_harness.ipynb
+notebooks/02_batch_product_harness.ipynb
 ```
 
-Free/open-source and used aggressively:
-
-```text
-crawl4ai/static scraping
-deterministic extraction
-detector scoring
-candidate dedupe/ranking
-```
-
-Recommended defaults favor high-yield search and broad scraping:
-
-```env
-PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=3
-PRODUCT_HARNESS_SERP_RESULTS=100
-PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES=1
-PRODUCT_HARNESS_MAX_SCRAPES=180
-PRODUCT_HARNESS_MAX_ITERATIONS=240
-PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT=4
-PRODUCT_HARNESS_SCRAPE_CONCURRENCY=6
-PRODUCT_HARNESS_STATIC_FETCH_FIRST=true
-PRODUCT_HARNESS_BROWSER_FALLBACK_ONLY=true
-PRODUCT_HARNESS_CRAWL_PAGE_TIMEOUT_MS=20000
-```
-
-In tournament mode, the SerpAPI search budget is hard-capped at 4 organic search credits per product by `PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS`.
+Both notebooks surface the production handoff fields and tournament artifacts.
 
 ## Minimal single-product usage
 
@@ -266,20 +197,7 @@ print(match.product_url)
 print(production.to_dict() if production else "No production assessment")
 ```
 
-## CLI usage
-
-Single product:
-
-```bash
-python main.py \
-  --row-id CO-ML-0001 \
-  --main-text "PUT PRODUCT TEXT HERE" \
-  --country-code CO \
-  --retailer-name "Mercado Libre" \
-  --ean "7701234567890"
-```
-
-Batch:
+## Batch usage
 
 ```bash
 python batch_main.py \

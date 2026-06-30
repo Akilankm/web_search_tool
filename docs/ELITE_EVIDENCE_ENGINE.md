@@ -1,17 +1,19 @@
 # Elite Evidence Engine
 
-This repository remains a local/PDM Python package. This enhancement does **not** convert the harness into an AzureML component.
+This repository remains a local/PDM Python package. It is not an AzureML component.
 
 ## Purpose
 
-The Product Evidence Harness produces enterprise-grade evidence artifacts for product coding, not only a URL decision. The evidence layer keeps the existing search/scrape/verification/selection logic intact and adds observable synthesis for quality, coding readiness, failure taxonomy, and product URL handoff.
+The Product Evidence Harness is now tournament-first. The evidence layer turns the tournament champion and runner-up evidence into enterprise artifacts for product coding, quality review, and governance.
+
+The evidence system does not replace tournament selection. It explains and packages it.
 
 ## Production URL handoff
 
 The key operational distinction is:
 
 ```text
-product_url = best discovered URL emitted by the harness
+product_url = best discovered/champion URL emitted by the harness
 production_url_ready = whether product_url is safe for browser-opening and downstream scraping/coding
 ```
 
@@ -25,12 +27,15 @@ needs_review = false
 
 Rows that fail this gate can still have `product_url`, but they are review-only.
 
-## Added enterprise outputs
+## Row outputs
 
 Each row folder includes:
 
 ```text
 output/<row_id>/
+├── tournament_bracket.json
+├── tournament_bracket.md
+├── batch_winners.csv
 ├── enterprise_assessment.json
 ├── evidence_graph.json
 ├── product_coding_input.json
@@ -38,11 +43,9 @@ output/<row_id>/
 └── quality_assessment.md
 ```
 
-These are written in addition to existing row artifacts such as `final_row.csv`, `report.md`, `decision_trace.md`, and `trace.json`.
-
 ## Enterprise concepts
 
-### 1. Evidence graph
+### 1. Tournament evidence graph
 
 `evidence_graph.json` models the row as connected evidence:
 
@@ -52,19 +55,25 @@ input product
   -> candidate URLs
   -> scrape evidence
   -> deterministic identity verification
+  -> batch winners / champion URL
   -> LLM adjudication when enabled
 ```
 
-### 2. Source reliability
+### 2. Production URL readiness
 
-Each candidate receives a source reliability estimate based on source/domain type:
+Batch outputs expose:
 
-- manufacturer-like domains
-- retailer/domain evidence
-- marketplace evidence
-- aggregator/reference evidence
+```text
+production_url_ready
+production_url_status
+browser_openable
+highly_scrapable
+exact_product_url_match
+production_url_score
+production_url_reasons
+```
 
-This is supporting metadata, not a replacement for scraping or verification.
+This is the handoff contract for teams that manually open or scrape product URLs.
 
 ### 3. Confidence decomposition
 
@@ -81,25 +90,7 @@ coding_readiness_confidence
 final_confidence
 ```
 
-### 4. Production URL readiness
-
-Batch outputs expose:
-
-```text
-production_url_ready
-production_url_status
-browser_openable
-highly_scrapable
-exact_product_url_match
-production_url_score
-production_url_reasons
-```
-
-This is the handoff contract for teams that manually open or scrape product URLs.
-
-### 5. Quality tiers
-
-Rows are assigned a quality tier:
+### 4. Quality tiers
 
 | Tier | Meaning | Recommended action |
 |---|---|---|
@@ -109,7 +100,7 @@ Rows are assigned a quality tier:
 | D | Reference-only or weak evidence | Do not auto-submit |
 | E | No usable URL/evidence or runtime error | Manual escalation |
 
-### 6. Failure taxonomy
+### 5. Failure taxonomy
 
 Rows expose machine-readable failure tags such as:
 
@@ -129,7 +120,7 @@ PRODUCT_URL_NOT_EXACT_MATCH_NEEDS_REVIEW
 PRODUCT_URL_NOT_HIGHLY_SCRAPABLE_NEEDS_REVIEW
 ```
 
-### 7. Coding readiness
+### 6. Product-coding handoff
 
 `product_coding_input.json` gives downstream product feature coding a clean payload:
 
@@ -145,7 +136,7 @@ coding_readiness_status
 review_flags
 ```
 
-The coding readiness status is one of:
+Coding readiness status:
 
 ```text
 CODING_READY
@@ -154,33 +145,25 @@ URL_ONLY_NOT_CODING_READY
 NEEDS_REVIEW
 ```
 
-### 8. Review feedback template
-
-`review_feedback_template.json` captures human review corrections in a structured way. Future work can use reviewed records to tune ranking, retailer-domain intelligence, variant rules, and benchmark metrics.
-
 ## Batch-level metrics
 
-Batch runs write:
+`outputs/metrics.json` and `outputs/batch_summary.md` include:
 
 ```text
-outputs/metrics.json
+operational product URL count
+production-ready product URL count
+browser-openable product URL count
+highly scrapable product URL count
+exact product URL match count
+verified exact URL count
+coding-ready count
+needs-review count
+quality-tier distribution
+coding-readiness distribution
+production URL status distribution
+failure-taxonomy distribution
+SerpAPI / LLM / scrape call counts
 ```
-
-The batch summary includes:
-
-- operational product URL count
-- production-ready product URL count
-- browser-openable product URL count
-- highly scrapable product URL count
-- exact product URL match count
-- verified exact URL count
-- coding-ready count
-- needs-review count
-- quality-tier distribution
-- coding-readiness distribution
-- production URL status distribution
-- failure-taxonomy distribution
-- SerpAPI / LLM / scrape call counts
 
 ## Product-coding interpretation
 
@@ -192,24 +175,3 @@ production_url_ready=false                                      -> review-only, 
 Tier C                                                        -> human review before coding
 Tier D/E                                                      -> do not auto-code from URL alone
 ```
-
-## Notebooks
-
-The notebooks are updated to surface production handoff fields:
-
-```text
-notebooks/01_single_product_harness.ipynb
-notebooks/02_batch_product_harness.ipynb
-```
-
-Use them to demonstrate both the ready handoff set and the review-only fallback set.
-
-## What this does not do yet
-
-This is not an AzureML component and does not train a model. It lays the local package foundation for:
-
-- benchmark dashboards
-- feedback-driven rule tuning
-- per-retailer memory/cache
-- rulebook-aware feature evidence extraction
-- future AzureML packaging if/when needed
