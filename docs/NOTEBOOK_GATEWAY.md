@@ -5,7 +5,7 @@
 The notebooks are the official gateway into the system. Users should not start by reading Python files.
 
 ```text
-Notebook first -> evidence artifacts -> decision contracts -> codebase internals only when needed
+Notebook first -> concise review artifacts -> decision contracts -> codebase internals only when needed
 ```
 
 ```mermaid
@@ -13,10 +13,12 @@ flowchart LR
     A[User wants to understand or run the system] --> B{Use case}
     B -->|Try one product| C[01_single_product_harness.ipynb]
     B -->|Run a file/batch| D[02_batch_product_harness.ipynb]
-    B -->|Freeze a confirmed page offline| E[03_offline_product_artifact.ipynb]
-    C --> F[Champion URL + row artifacts]
-    D --> G[Final CSV + review queue + metrics]
-    E --> H[Offline HTML + local assets + validation]
+    B -->|Review row artifact| E[04_review_artifact_reader.ipynb]
+    B -->|Freeze a confirmed page offline| F[03_offline_product_artifact.ipynb]
+    C --> G[Concise row packet]
+    D --> H[Final CSV + review queue + row packets]
+    E --> I[What / why / how decision view]
+    F --> J[Offline HTML + local assets + validation]
 ```
 
 ## Notebook map
@@ -24,8 +26,9 @@ flowchart LR
 | Notebook | Primary user | Business purpose | What it proves | Key outputs |
 |---|---|---|---|---|
 | `notebooks/00_notebook_gateway.ipynb` | Everyone | Landing page and guided route | Which notebook to use and why | Notebook decision map |
-| `notebooks/01_single_product_harness.ipynb` | Analyst, manager, demo user | End-to-end single product proof | Search, tournament, champion, production gate | `product_url`, champion confirmation, row artifact folder |
-| `notebooks/02_batch_product_harness.ipynb` | Operations, delivery team | Scale the process over many rows | Batch-ready output and review queue | `final_submission.csv`, `review_queue.csv`, `metrics.json` |
+| `notebooks/01_single_product_harness.ipynb` | Analyst, manager, demo user | End-to-end single product proof | Search, tournament, champion, production gate | `review_summary.md`, `candidate_decisions.csv`, `product_coding_input.json` |
+| `notebooks/02_batch_product_harness.ipynb` | Operations, delivery team | Scale the process over many rows | Batch-ready output and review queue | `final_submission.csv`, `review_queue.csv`, row review packets |
+| `notebooks/04_review_artifact_reader.ipynb` | Reviewers, managers | Read a row artifact without opening many files | Decision, checks, selected/rejected candidates | Notebook-rendered review from `review_decision.json` and `candidate_decisions.csv` |
 | `notebooks/03_offline_product_artifact.ipynb` | Audit/evidence user | Optional offline capture after champion confirmation | Live page can be frozen locally | `offline/offline_page.html`, local assets, validation JSON |
 
 ## Notebook 01: single product harness
@@ -42,7 +45,7 @@ flowchart TD
     F --> G[Champion candidate]
     G --> H[Champion confirmation]
     H --> I[Production URL gate]
-    I --> J[Row artifact packet]
+    I --> J[Concise row packet]
 ```
 
 Best for:
@@ -51,7 +54,7 @@ Best for:
 leadership demo
 single product debugging
 explaining why one URL won
-showing row-level evidence artifacts
+showing concise row-level evidence artifacts
 ```
 
 ## Notebook 02: batch product harness
@@ -65,9 +68,10 @@ flowchart TD
     C --> D[Final submission CSV]
     C --> E[Review queue]
     C --> F[Batch metrics]
-    C --> G[Row artifact folders]
+    C --> G[Concise row artifact folders]
     D --> H[Business handoff]
     E --> I[Human review]
+    G --> J[Notebook 04 review reader]
 ```
 
 Best for:
@@ -77,6 +81,31 @@ batch operations
 manager reporting
 coverage/quality metrics
 review queue generation
+```
+
+## Notebook 04: concise review artifact reader
+
+Use this when the row folder exists and the team wants a clean, notebook-rendered view.
+
+```mermaid
+flowchart TD
+    A[Row artifact folder] --> B[review_decision.json]
+    A --> C[candidate_decisions.csv]
+    B --> D[Decision snapshot]
+    B --> E[Gate checks]
+    B --> F[Why selected]
+    B --> G[How decided]
+    B --> H[AI/model summary]
+    C --> I[Selected/rejected candidate table]
+```
+
+Best for:
+
+```text
+team review
+manager walkthrough
+reducing file browsing
+explaining what was accepted/rejected and why
 ```
 
 ## Notebook 03: optional offline product artifact
@@ -110,12 +139,14 @@ network-independent product evidence
 | I want to understand the system quickly. | `00_notebook_gateway.ipynb` |
 | I want to prove the system on one product. | `01_single_product_harness.ipynb` |
 | I want to run many rows. | `02_batch_product_harness.ipynb` |
+| I want to review a row without opening many files. | `04_review_artifact_reader.ipynb` |
 | I already have a confirmed champion URL and need a frozen local page. | `03_offline_product_artifact.ipynb` |
 
 ## What not to do
 
 ```text
 Do not start with src/ internals.
+Do not open every artifact file by default.
 Do not use Notebook 03 for discovery.
 Do not treat review-only URLs as production-ready.
 Do not bypass champion confirmation for automated handoff.
@@ -127,5 +158,5 @@ Do not confuse best_available_url with product_url.
 The notebook experience should communicate this clearly:
 
 ```text
-The system is easy to try, but the decisions are enterprise-grade.
+The system is easy to try, the review packet is concise, and the decisions are enterprise-grade.
 ```
