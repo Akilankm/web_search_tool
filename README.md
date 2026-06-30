@@ -17,6 +17,7 @@ LLM builds product identity and search campaign
   → requested retailer is tried first
   → same-country alternative retailers are searched when requested retailer is weak/blocked/wrong
   → global fallback is used when country evidence fails
+  → optional tournament mode compares batches and selects a champion URL under a 4-credit SerpAPI cap
   → production-grade exact/scrapable/browser-openable URL is promoted when available
   → strict non-empty product_url fallback is used when any URL candidate exists
   → production_url_ready / browser_openable / highly_scrapable / exact_product_url_match explain team handoff safety
@@ -40,6 +41,41 @@ needs_review = false
 ```
 
 Rows that fail this gate can still have a `product_url`, but they are **review-only** and should not be treated as production-ready evidence.
+
+## Tournament mode
+
+Tournament mode is optional and designed for faster, higher-quality exact product URL selection.
+
+```env
+PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE=true
+PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS=4
+PRODUCT_HARNESS_TOURNAMENT_CANDIDATE_POOL=150
+PRODUCT_HARNESS_TOURNAMENT_PREFLIGHT_TOP_K=60
+PRODUCT_HARNESS_TOURNAMENT_BATCH_SIZE=20
+PRODUCT_HARNESS_TOURNAMENT_MAX_BATCHES=3
+```
+
+The tournament path:
+
+```text
+search fan-out within 4 SerpAPI credits
+  → candidate pool
+  → cheap preflight ranking
+  → batch scrape
+  → batch winners
+  → champion URL
+  → production URL gate
+```
+
+When enabled, row folders include:
+
+```text
+tournament_bracket.json
+tournament_bracket.md
+batch_winners.csv
+```
+
+See `docs/TOURNAMENT_MODE.md`.
 
 ## Input contract
 
@@ -128,8 +164,13 @@ output/<row_id>/
 ├── evidence_graph.json
 ├── product_coding_input.json
 ├── review_feedback_template.json
-└── quality_assessment.md
+├── quality_assessment.md
+├── tournament_bracket.json
+├── tournament_bracket.md
+└── batch_winners.csv
 ```
+
+Tournament artifacts are written only when tournament mode is enabled.
 
 ### Batch-level outputs
 
@@ -198,6 +239,8 @@ PRODUCT_HARNESS_BROWSER_FALLBACK_ONLY=true
 PRODUCT_HARNESS_CRAWL_PAGE_TIMEOUT_MS=20000
 ```
 
+In tournament mode, the SerpAPI search budget is hard-capped at 4 organic search credits per product by `PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS`.
+
 ## Minimal single-product usage
 
 ```python
@@ -255,6 +298,7 @@ PYTHONPATH=src pytest -q
 ## Related docs
 
 ```text
+docs/TOURNAMENT_MODE.md
 docs/PRODUCTION_GRADE_PRODUCT_URL.md
 docs/STRICT_PRODUCT_URL_POLICY.md
 docs/ELITE_EVIDENCE_ENGINE.md
