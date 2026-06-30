@@ -17,8 +17,8 @@ The notebooks are the gateway into the system. Users should start here, not insi
 | Notebook | Use when | Business outcome |
 |---|---|---|
 | `notebooks/00_notebook_gateway.ipynb` | You are new to the repo. | Understand which notebook to use and how the system works. |
-| `notebooks/01_single_product_harness.ipynb` | You want to prove the full system on one product. | Champion URL, confirmation, production gate, row artifacts. |
-| `notebooks/02_batch_product_harness.ipynb` | You want to run many products. | Final CSV, review queue, metrics, row artifacts. |
+| `notebooks/01_single_product_harness.ipynb` | You want to prove the full system on one product. | Champion URL, confirmation, production gate, concise review artifacts. |
+| `notebooks/02_batch_product_harness.ipynb` | You want to run many products. | Final CSV, review queue, metrics, concise row artifacts. |
 | `notebooks/03_offline_product_artifact.ipynb` | You already have a confirmed champion URL and need offline evidence. | Local `offline_page.html`, local assets, validation JSON. |
 
 ```mermaid
@@ -28,8 +28,8 @@ flowchart LR
     C -->|One product demo| D[01 Single Product]
     C -->|Batch operation| E[02 Batch Harness]
     C -->|Optional offline capture| F[03 Offline Artifact]
-    D --> G[Champion URL + row artifacts]
-    E --> H[Final CSV + review queue + metrics]
+    D --> G[Concise review summary]
+    E --> H[Final CSV + review queue + concise row artifacts]
     F --> I[Offline HTML + local evidence]
 ```
 
@@ -41,7 +41,7 @@ flowchart LR
 | Search rank is treated as truth. | Search is only a candidate source, not final proof. |
 | Wrong variants/listings can slip through. | Identity, EAN, title, quantity, and variant checks. |
 | Scraping issues are discovered too late. | Scrapability and browser-readiness are checked before handoff. |
-| Decisions are hard to defend. | Markdown, JSON, CSV, and metrics artifacts explain the decision. |
+| Decisions are hard to defend. | Concise review artifacts explain what was selected, rejected, why, and how. |
 | Automation hides uncertainty. | Weak cases go to review queue with failure taxonomy. |
 
 ## Primary architecture
@@ -65,7 +65,7 @@ flowchart TD
     M --> N{Production ready?}
     N -->|Yes| O[final_submission.csv]
     N -->|No| P[review_queue.csv]
-    O --> Q[product_coding_input.json]
+    O --> Q[review_summary.md + product_coding_input.json]
 ```
 
 The older iterative loop is retained only as a legacy/debug fallback when tournament mode is explicitly disabled.
@@ -103,6 +103,10 @@ PRODUCT_HARNESS_TOURNAMENT_CANDIDATE_POOL=150
 PRODUCT_HARNESS_TOURNAMENT_PREFLIGHT_TOP_K=60
 PRODUCT_HARNESS_TOURNAMENT_BATCH_SIZE=20
 PRODUCT_HARNESS_TOURNAMENT_MAX_BATCHES=3
+PRODUCT_HARNESS_WRITE_REVIEW_PACK=true
+PRODUCT_HARNESS_WRITE_MARKDOWN_REPORTS=false
+PRODUCT_HARNESS_WRITE_TRACE_JSON=false
+PRODUCT_HARNESS_WRITE_DEBUG_CSVS=false
 ```
 
 The code clamps `PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS` to a maximum of `4`.
@@ -122,7 +126,7 @@ champion_confirmation.required_attempts = 3
 champion_confirmation.required_successes = 3
 ```
 
-These checks are not extra SerpAPI searches. They are post-selection confirmations recorded in row artifacts.
+These checks are not extra SerpAPI searches. They are post-selection confirmations summarized in the concise review artifacts.
 
 ## Input contract
 
@@ -142,8 +146,11 @@ EAN/GTIN identifiers are read as strings. Invalid/corrupted values are retained 
 
 ```text
 CSV = final operational answer
-Markdown = readable evidence and decision trace
-JSON = machine-readable replay/debug/product-coding evidence
+review_summary.md = reviewer-first what / why / how decision summary
+review_decision.json = same decision in machine-readable form
+candidate_decisions.csv = top candidate accept/reject table
+product_coding_input.json = downstream coding evidence
+Deep markdown/trace/debug files = opt-in engineering diagnostics
 Notebook = user-facing execution gateway
 ```
 
@@ -157,30 +164,28 @@ outputs/
 └── metrics.json
 ```
 
-### Row-level artifact packet
+### Default row-level artifact packet
 
 ```text
 output/<row_id>/
 ├── final_row.csv
-├── report.md
-├── search_plan.md
-├── candidate_review.md
-├── scrape_evidence.md
-├── retailer_scrapability.md
-├── final_decision.md
-├── decision_trace.md
-├── trace.json
-├── enterprise_assessment.json
-├── evidence_graph.json
-├── product_coding_input.json
-├── review_feedback_template.json
-├── quality_assessment.md
-├── tournament_bracket.json
-├── tournament_bracket.md
-├── champion_confirmation.json
-├── champion_confirmation.md
-└── batch_winners.csv
+├── review_summary.md
+├── review_decision.json
+├── candidate_decisions.csv
+└── product_coding_input.json
 ```
+
+### Optional deep artifact packet
+
+Enable these only when engineering/debug audit requires them:
+
+```env
+PRODUCT_HARNESS_WRITE_MARKDOWN_REPORTS=true
+PRODUCT_HARNESS_WRITE_TRACE_JSON=true
+PRODUCT_HARNESS_WRITE_DEBUG_CSVS=true
+```
+
+That opt-in path can write detailed search plans, scrape evidence, trace JSON, tournament brackets, enterprise evidence graphs, and debug CSVs.
 
 ## Optional offline artifact
 
@@ -214,6 +219,7 @@ It is intentionally not part of `main.py`, `batch_main.py`, or notebooks `01`/`0
 | `docs/CODEBASE_FUNCTIONALITY_MAP.md` | Maps business capabilities to code areas and notebooks. |
 | `docs/DECISION_CONTRACTS.md` | Meaning of output fields/statuses. |
 | `docs/ARTIFACT_GUIDE.md` | Output files, row artifacts, and audit trail. |
+| `docs/CONCISE_REVIEW_ARTIFACTS.md` | Reviewer-first artifact strategy and file contract. |
 | `docs/ASSUMPTIONS_AND_CONSTRAINTS.md` | Explicit assumptions, limits, and risk boundaries. |
 | `docs/ADOPTION_PLAYBOOK.md` | How to demo, roll out, and standardize the repo. |
 | `docs/OFFLINE_PRODUCT_ARTIFACT.md` | Optional offline capture contract. |
@@ -244,6 +250,7 @@ production = ProductionURLGate().assess_url_in_state(trace.state, match.product_
 print(match.product_url)
 print(production.to_dict() if production else "No production assessment")
 print(confirmation.to_dict() if confirmation else "No champion confirmation")
+print("Review artifact: output/<row_id>/review_summary.md")
 ```
 
 ## Batch usage
