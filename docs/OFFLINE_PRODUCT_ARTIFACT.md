@@ -17,6 +17,26 @@ confirmed champion URL
 
 This avoids relying on the retailer page after discovery for workflows that require reproducibility. A page can change, block, geo-route, expire, or render differently later; a validated offline artifact keeps the captured evidence stable and auditable.
 
+## Separation of concerns
+
+Offline capture is deliberately isolated:
+
+| Concern | Owner |
+|---|---|
+| Product discovery and champion selection | `notebooks/01_single_product_harness.ipynb` and `notebooks/02_batch_product_harness.ipynb` |
+| Offline page freezing | `notebooks/03_offline_product_artifact.ipynb` only |
+| Core implementation support | `src/product_evidence_harness/offline_capture.py` |
+
+Offline capture is not wired into:
+
+```text
+main.py
+batch_main.py
+notebooks/01_single_product_harness.ipynb
+notebooks/02_batch_product_harness.ipynb
+top-level product_evidence_harness imports
+```
+
 ## When to use it
 
 Use offline capture when:
@@ -114,49 +134,24 @@ srcset
 
 The artifact is not marked production-ready if such references remain.
 
-## Dedicated notebook
+## User workflow
 
-Offline capture has its own notebook and is intentionally separate from the main discovery notebooks:
+Offline capture is available through one dedicated notebook:
 
 ```text
 notebooks/03_offline_product_artifact.ipynb
 ```
 
-## CLI usage
+Use it as follows:
 
-```bash
-PYTHONPATH=src python scripts/capture_offline_page.py \
-  --url "https://retailer.example/product-page" \
-  --row-id "input-001" \
-  --main-text "Toy product main text" \
-  --country-code "CZ" \
-  --retailer-name "Example Retailer" \
-  --ean "1234567890123"
-```
-
-## Programmatic usage
-
-```python
-from pathlib import Path
-
-from product_evidence_harness import ProductQuery
-from product_evidence_harness.offline_capture import OfflineCaptureConfig, LivePageOfflineArtifactBuilder
-
-product = ProductQuery(
-    row_id="input-001",
-    main_text="Toy product main text",
-    country_code="CZ",
-    retailer_name="Example Retailer",
-    ean="1234567890123",
-)
-
-builder = LivePageOfflineArtifactBuilder(
-    OfflineCaptureConfig(output_dir=Path("outputs/offline_artifacts"))
-)
-artifact = builder.capture_url("https://retailer.example/product-page", product=product)
-
-print(artifact.status)
-print(artifact.offline_html_path)
+```text
+1. Run the normal discovery notebook or batch flow.
+2. Take only a confirmed champion URL.
+3. Open notebooks/03_offline_product_artifact.ipynb.
+4. Paste the champion URL and product metadata.
+5. Run the capture cells.
+6. Open offline/offline_page.html from the generated artifact folder.
+7. Check validation/offline_artifact_validation.json.
 ```
 
 Open the generated file locally:
