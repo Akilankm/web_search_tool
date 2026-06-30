@@ -10,7 +10,15 @@ from loguru import logger
 
 from src.product_evidence_harness.candidate_store import CandidateStore
 from src.product_evidence_harness.config import TournamentConfig
-from src.product_evidence_harness.contracts import CandidateScorecard, OrganicSearchResponse, ProductSearchState, ScrapeResult
+from src.product_evidence_harness.contracts import (
+    ActionType,
+    AgentAction,
+    AgentActionRecord,
+    CandidateScorecard,
+    OrganicSearchResponse,
+    ProductSearchState,
+    ScrapeResult,
+)
 from src.product_evidence_harness.evidence_extractor import EvidenceExtractor
 from src.product_evidence_harness.identity_verifier import ProductIdentityVerifier
 from src.product_evidence_harness.production_url import ProductionURLAssessment, ProductionURLGate
@@ -110,7 +118,7 @@ class CandidateTournamentEngine:
         for batch_index, batch in enumerate(self._batches(preflight), start=1):
             if batch_index > self.config.max_batches:
                 break
-            self._scrape_batch(state, [c.candidate.url for c in batch])
+            self._scrape_batch(state, [c.candidate.url for c in batch], batch_index=batch_index)
             state.scorecards = self.ranker.score(product=state.task, candidates=state.candidates, scrapes=state.scrapes, verifications=state.verifications)
             batch_urls = {c.candidate.url for c in batch}
             refreshed = [c for c in state.scorecards if c.candidate.url in batch_urls]
@@ -176,6 +184,7 @@ class CandidateTournamentEngine:
             state.organic_responses.append(response)
             state.candidates = self.candidate_store.merge_organic(state.candidates, response)[: self.config.candidate_pool]
             executed.append(item)
+            self._record_search_action(state, item, response, iteration=len(executed))
             if len(state.candidates) >= self.config.candidate_pool:
                 break
         return executed
@@ -184,7 +193,7 @@ class CandidateTournamentEngine:
         task = state.task
         raw: list[TournamentQuery] = []
         if task.retailer_name:
-            raw.append(TournamentQuery(self.query_builder.requested_retailer_search(task), "country", task.language_code, "requested_retailer"))
+            raw.append(TournamentQuery(self.query_builder.requested_retailer_search(task), "requested_retailer", task.language_code, "requested_retailer"))
         if task.ean:
             raw.append(TournamentQuery(self.query_builder.country_language_search(task, language_index=0, include_retailer=False), "country", task.language_code, "ean_country"))
         raw.append(TournamentQuery(self.query_builder.country_alternative_search(task, language_index=0), "country", task.language_code, "country_alternatives"))
@@ -205,20 +214,39 @@ class CandidateTournamentEngine:
         country_code = None if item.scope == "global" else state.task.country_code
         return self.organic_client.search(item.query, product=state.task, scope=item.scope, language_code=item.language_code, country_code=country_code)
 
+    def _record_search_action(self, state: ProductSearchState, item: TournamentQuery, response: OrganicSearchResponse, *, iteration: int) -> None:
+        state.actions_taken.append(AgentActionRecord(
+            iteration=iteration,
+            action=AgentAction(
+                action_type=ActionType.ORGANIC_SEARCH,
+                reason=item.reason,
+                query=item.query,
+                metadata={
+                    "scope": item.scope,
+                    "loop_phase": "tournament_search",
+                    "reason": item.reason,
+                    "language_code": item.language_code,
+                },
+            ),
+            success=response.status.lower() not in {"no results", "error", "failed"},
+            output_summary={"result_count": len(response.results), "status": response.status, "scope": item.scope, "reason": item.reason},
+            error=None if response.results else response.raw.get("error") if isinstance(response.raw, dict) else None,
+        ))
+
     def _preflight(self, cards: list[CandidateScorecard]) -> list[CandidateScorecard]:
         return sorted(cards, key=self._preflight_key, reverse=True)[: self.config.preflight_top_k]
 
     @staticmethod
     def _preflight_key(card: CandidateScorecard) -> tuple[float, ...]:
         url = card.candidate.url.lower()
-        product_like = 1.0 if any(x in url for x in ("/product", "/produkt", "/p/", "/dp/", "sku")) else 0.0
+        product_like = 1.0 if any(x in url for x in ("/product", "/produkt", "/p/", "/dp/", "sku", "articulo.mercadolibre", "/itm/")) else 0.0
         return (card.ean_score, card.title_score, card.country_score, card.retailer_score, product_like, card.organic_score, card.final_confidence)
 
     def _batches(self, cards: list[CandidateScorecard]) -> list[list[CandidateScorecard]]:
         size = max(1, self.config.batch_size)
         return [cards[i:i + size] for i in range(0, len(cards), size)]
 
-    def _scrape_batch(self, state: ProductSearchState, urls: list[str]) -> None:
+    def _scrape_batch(self, state: ProductSearchState, urls: list[str], *, batch_index: int) -> None:
         todo: list[str] = []
         for url in urls:
             if url in state.scrapes:
@@ -232,6 +260,16 @@ class CandidateTournamentEngine:
         scrapes = self.scraper.scrape_many(todo, product=state.task) if hasattr(self.scraper, "scrape_many") else [self.scraper.scrape(url, product=state.task) for url in todo]
         for url, scrape in zip(todo, scrapes):
             self._record_scrape(state, url, scrape)
+        state.actions_taken.append(AgentActionRecord(
+            iteration=1000 + batch_index,
+            action=AgentAction(
+                action_type=ActionType.SCRAPE_URL,
+                reason="tournament_batch_scrape",
+                metadata={"scope": "tournament", "loop_phase": "tournament_scrape", "batch_index": batch_index, "url_count": len(todo)},
+            ),
+            success=any(s.success for s in scrapes),
+            output_summary={"url_count": len(todo), "success_count": sum(1 for s in scrapes if s.success), "batch_index": batch_index},
+        ))
 
     def _record_scrape(self, state: ProductSearchState, url: str, scrape: ScrapeResult) -> None:
         state.scrapes[url] = scrape
@@ -248,7 +286,23 @@ class CandidateTournamentEngine:
 
     @staticmethod
     def _winner_key(card: CandidateScorecard, a: ProductionURLAssessment) -> tuple[float, ...]:
-        return (float(a.production_ready), float(a.exact_product_match), float(a.highly_scrapable), float(a.browser_openable), float(card.country_check in {"MATCHED", "NOT_PROVIDED"}), a.score, card.final_confidence, card.richness_score)
+        # Champion means best business URL. Production-readiness is preferred, but
+        # if no candidate is production-ready, identity/title/retailer evidence can
+        # still make a non-production-ready URL the champion for review.
+        return (
+            float(a.production_ready),
+            float(a.exact_product_match),
+            float(card.exact_product_check == "EXACT_MATCH"),
+            float(card.retailer_check == "MATCHED"),
+            float(card.country_check in {"MATCHED", "NOT_PROVIDED"}),
+            card.title_score,
+            card.identity_score,
+            float(a.highly_scrapable),
+            float(a.browser_openable),
+            a.score,
+            card.final_confidence,
+            card.richness_score,
+        )
 
     def _best_pair(self, champion: CandidateScorecard | None, champ_a: ProductionURLAssessment | None, challenger: CandidateScorecard, chall_a: ProductionURLAssessment) -> tuple[CandidateScorecard, ProductionURLAssessment]:
         if champion is None or champ_a is None:
