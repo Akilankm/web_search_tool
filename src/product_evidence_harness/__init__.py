@@ -39,6 +39,13 @@ from src.product_evidence_harness.tournament_pipeline import (
     HybridProductURLFinderPipeline,
     ProductEvidenceHarness,
 )
+from src.product_evidence_harness.offline_capture import (
+    LivePageOfflineArtifactBuilder,
+    OfflineArtifactValidation,
+    OfflineAssetRecord,
+    OfflineCaptureConfig,
+    OfflineProductArtifact,
+)
 from src.product_evidence_harness.production_url import ProductionURLAssessment, ProductionURLGate
 from src.product_evidence_harness.ranker import ProductURLRanker
 from src.product_evidence_harness.scraper import CrawlScraper
@@ -56,4 +63,5 @@ __all__ = [
     "EnterpriseEvidenceEngine", "EnterpriseEvidenceAssessment", "ConfidenceBreakdown", "CodingReadiness",
     "ReviewFeedbackRecord", "ReviewFeedbackStore", "RetailerDomainMemory",
     "ProductionURLGate", "ProductionURLAssessment",
+    "LivePageOfflineArtifactBuilder", "OfflineArtifactValidation", "OfflineAssetRecord", "OfflineCaptureConfig", "OfflineProductArtifact",
 ]
