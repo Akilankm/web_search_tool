@@ -26,6 +26,25 @@ class FakeOrganicClient:
         return OrganicSearchResponse(query=query, search_id="fake", status="Success", results=results)
 
 
+class ManyResultsOrganicClient:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def search(self, query: str, **kwargs) -> OrganicSearchResponse:
+        self.calls.append(query)
+        results = [
+            OrganicSearchResult(
+                url=f"https://catalog.example.com/product/candidate-{i}",
+                title=f"Generic candidate {i}",
+                snippet="Generic toy listing without exact product evidence",
+                position=i + 1,
+                query=query,
+            )
+            for i in range(12)
+        ]
+        return OrganicSearchResponse(query=query, search_id="many", status="Success", results=results)
+
+
 class FakeScraper:
     def scrape_many(self, urls, *, product=None):
         return [self.scrape(url, product=product) for url in urls]
@@ -150,3 +169,41 @@ def test_tournament_records_requested_retailer_scope_for_metrics() -> None:
         and a.action.metadata.get("scope") == "requested_retailer"
         for a in state.actions_taken
     )
+
+
+def test_tournament_enforces_preflight_top_k_and_max_batches() -> None:
+    product = ProductQuery(
+        row_id="row-limits",
+        main_text="Generic Toy Product",
+        country_code="US",
+        retailer_name="",
+        ean="",
+    )
+    state = ProductSearchState(task=product, budget=BudgetTracker(max_organic=4, max_ai_mode=0, max_scrapes=50))
+    engine = CandidateTournamentEngine(
+        config=TournamentConfig(
+            enabled=True,
+            max_serp_credits=1,
+            candidate_pool=20,
+            preflight_top_k=5,
+            batch_size=2,
+            max_batches=2,
+            early_stop=False,
+        ),
+        query_builder=QueryBuilder(),
+        organic_client=ManyResultsOrganicClient(),
+        candidate_store=CandidateStore(max_pool_size=20),
+        scraper=FakeScraper(),
+        verifier=FakeVerifier(),
+        ranker=ProductURLRanker(policy=HarnessPolicy()),
+        evidence_extractor=EvidenceExtractor(),
+        production_gate=ProductionURLGate(),
+    )
+
+    result = engine.run(state)
+
+    assert result.search_credits_used == 1
+    assert result.preflight_candidate_count == 5
+    assert len(result.rounds) == 2
+    assert result.scraped_candidate_count == 4
+    assert len(state.scrapes) == 4
