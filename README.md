@@ -1,34 +1,45 @@
 # Product Evidence Harness
 
-Local Python package for **LLM-guided exact product URL discovery**.
+Local Python package for **LLM-guided exact product URL discovery, production URL validation, and product-coding evidence handoff**.
 
 This is intentionally not an AzureML component yet. It is a local PDM/Python codebase with notebooks and CLI entrypoints.
 
 ## Core strategy
 
-The current strategy is **retailer-scrapability aware loop engineering**:
+The current strategy is **retailer-scrapability-aware loop engineering**:
 
 ```text
 LLM builds product identity and search campaign
   → SerpAPI performs high-yield search and returns many candidate URLs
-  → crawl4ai scrapes useful candidate pages aggressively because scraping is free/open-source
+  → crawl4ai/static scraping validates useful candidate pages
   → deterministic extractors and detectors score page type, richness, exactness, EAN, country fit, and variant conflicts
-  → LLM consumes the evidence summary and either adjudicates exact product or repairs the search
-  → requested retailer is escaped if it is not scrape-usable/rich/exact
-  → same-country alternative retailers are searched
-  → global fallback is used only when country evidence fails
-  → final output always emits the best discovered product_url when any URL candidate exists
-  → verified_exact_url / is_scrapable / needs_review / quality_tier explain correctness and risk
+  → LLM adjudicates exact product or repairs the search when enabled
+  → requested retailer is tried first
+  → same-country alternative retailers are searched when requested retailer is weak/blocked/wrong
+  → global fallback is used when country evidence fails
+  → production-grade exact/scrapable/browser-openable URL is promoted when available
+  → strict non-empty product_url fallback is used when any URL candidate exists
+  → production_url_ready / browser_openable / highly_scrapable / exact_product_url_match explain team handoff safety
 ```
 
-Important policy:
+## High-stakes handoff policy
+
+`product_url` has two business meanings that must not be confused:
 
 ```text
-retailer_name = preferred first evidence source
-product_url = best discovered URL, never intentionally blank when a URL candidate exists
-scrapability/richness/exactness = correctness and automation-readiness gates
-wrong variant or non-scrapable requested-retailer page must not block a better same-country/global exact URL
+product_url = best discovered URL emitted by the harness
+production_url_ready = whether product_url is safe for browser-opening and downstream scraping/coding
 ```
+
+For the browser team, scraping team, and product-coding handoff, use only rows where:
+
+```text
+production_url_ready = true
+production_url_status = PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL
+needs_review = false
+```
+
+Rows that fail this gate can still have a `product_url`, but they are **review-only** and should not be treated as production-ready evidence.
 
 ## Input contract
 
@@ -41,55 +52,61 @@ wrong variant or non-scrapable requested-retailer page must not block a better s
 | `language_code` | No | Optional search language override; otherwise derived from country profile. |
 | `region` | No | Optional market hint. |
 
-EAN/GTIN identifiers are read as strings. If Excel has already converted an EAN into scientific notation, the system will flag `EAN_SCIENTIFIC_NOTATION_LOSS_RISK` and avoid using the corrupted value as exact evidence.
+EAN/GTIN identifiers are read as strings. If Excel has already converted an EAN into scientific notation, the system flags `EAN_SCIENTIFIC_NOTATION_LOSS_RISK` and avoids using the corrupted value as exact evidence.
 
 ## Active notebooks
-
-Only these notebooks are kept:
 
 ```text
 notebooks/01_single_product_harness.ipynb
 notebooks/02_batch_product_harness.ipynb
 ```
 
-Removed legacy/non-run notebooks to avoid confusion.
+Both notebooks expose the production URL handoff fields:
+
+```text
+production_url_ready
+production_url_status
+browser_openable
+highly_scrapable
+exact_product_url_match
+production_url_score
+production_url_reasons
+```
 
 ## URL decision semantics
 
 | Field | Meaning |
 |---|---|
-| `product_url` | Best discovered URL. It is populated whenever any candidate/search/scrape URL exists. It may require review. |
-| `verified_exact_url` | Filled only when exact product is proven from scrape evidence and LLM/detector gates pass. |
-| `best_available_url` | Best useful URL when exact proof is not complete. |
-| `best_reference_url` | Closest/reference URL when selected evidence is weak, non-scrapable, or insufficient. |
-| `is_scrapable` | Whether selected `product_url` was scrape-usable product-page evidence. |
-| `needs_review` | True when the final URL is not verified exact or not coding-ready. |
+| `product_url` | Best discovered URL. Populated whenever any candidate/search/scrape URL exists. |
+| `production_url_ready` | True only when `product_url` is browser-openable, highly scrapable, and exact-product verified. |
+| `production_url_status` | Final handoff/readiness class for the selected `product_url`. |
+| `browser_openable` | Whether the selected page is expected to open in a normal browser. |
+| `highly_scrapable` | Whether the selected page is product-page-like, scrape-usable, and evidence-rich. |
+| `exact_product_url_match` | Whether the selected URL is verified as the exact product, not a sibling/variant. |
+| `verified_exact_url` | Strict exact URL. Filled only when exact product proof passes final gates. |
+| `is_scrapable` | Whether selected `product_url` had scrape-usable product-page evidence. |
+| `needs_review` | True when the final URL is not production-safe or not coding-ready. |
 | `url_decision_status` | Exact/requested-retailer/country-alternative/global/review/failure status. |
 | `quality_tier` | Enterprise quality tier A/B/C/D/E. |
 | `failure_taxonomy` | Machine-readable reasons for weak/review outcomes. |
 
-Requested-retailer/status examples include:
+Important status values:
 
 ```text
-EXACT_REQUESTED_RETAILER_MATCH
-EXACT_COUNTRY_ALTERNATIVE_RETAILER_MATCH
-EXACT_GLOBAL_FALLBACK
-BEST_AVAILABLE_PRODUCT_URL_NEEDS_REVIEW
-BEST_AVAILABLE_PRODUCT_URL_NOT_SCRAPABLE_NEEDS_REVIEW
-DISCOVERED_CANDIDATE_URL_UNSCRAPED_NEEDS_REVIEW
+PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL
+PRODUCT_URL_NOT_BROWSER_OPENABLE_NEEDS_REVIEW
+PRODUCT_URL_NOT_HIGHLY_SCRAPABLE_NEEDS_REVIEW
+PRODUCT_URL_NOT_EXACT_MATCH_NEEDS_REVIEW
+PRODUCT_URL_GLOBAL_OR_COUNTRY_MISMATCH_NEEDS_REVIEW
 STRICT_PRODUCT_URL_REQUIRED_BUT_NO_URL_CANDIDATE_AVAILABLE
 ```
 
-See `docs/STRICT_PRODUCT_URL_POLICY.md` for the strict non-empty product URL policy.
-
 ## Output contract
-
-The output is now organized as a proper **search + validation + verification artifact**:
 
 ```text
 CSV = final operational answer
 Markdown = readable evidence and decision trace
-JSON = compact machine replay/debug trace
+JSON = compact machine replay/debug trace and product-coding handoff
 ```
 
 ### Row-level artifact packet
@@ -114,8 +131,6 @@ output/<row_id>/
 └── quality_assessment.md
 ```
 
-The markdown files record what was planned, searched, scraped, rejected, repaired, and selected. This is an observable decision trace and evidence trail, not hidden chain-of-thought.
-
 ### Batch-level outputs
 
 ```text
@@ -126,20 +141,28 @@ outputs/
 └── metrics.json
 ```
 
-`final_submission.csv` is the business/submission artifact. It contains inputs, candidate URLs, final best URL fields, selected scope, exactness/scrapability flags, enterprise quality fields, resource counters, and `row_report_path` linking to the markdown evidence packet.
+`final_submission.csv` is the main business/submission artifact. For production handoff, filter by `production_url_ready=true` and `needs_review=false`.
 
-### Optional debug CSVs
+## Product-coding handoff
 
-Detailed diagnostic CSVs are disabled by default. Enable them only for engineering investigation:
-
-```env
-PRODUCT_HARNESS_WRITE_DEBUG_CSVS=true
-```
-
-When enabled, the old-style CSV diagnostics are written under:
+The most important downstream file is:
 
 ```text
-output/<row_id>/debug_csv/
+output/<row_id>/product_coding_input.json
+```
+
+It includes:
+
+```text
+selected_url
+verified_exact_url
+supporting_urls
+selected_page_evidence
+brand/manufacturer/description/specs/images/EAN evidence
+identity_verification
+quality_tier
+coding_readiness_status
+review_flags
 ```
 
 ## Cost-aware operating model
@@ -154,13 +177,13 @@ LLM calls
 Free/open-source and used aggressively:
 
 ```text
-crawl4ai scraping
+crawl4ai/static scraping
 deterministic extraction
 detector scoring
 candidate dedupe/ranking
 ```
 
-Recommended defaults in this package favor high-yield SerpAPI and broad scraping:
+Recommended defaults favor high-yield search and broad scraping:
 
 ```env
 PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=3
@@ -169,74 +192,35 @@ PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES=1
 PRODUCT_HARNESS_MAX_SCRAPES=180
 PRODUCT_HARNESS_MAX_ITERATIONS=240
 PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT=4
-```
-
-## `.env` essentials
-
-```env
-SERPAPI_API_KEY=your_serpapi_key
-
-PRODUCT_HARNESS_ENABLE_LLM=true
-PRODUCT_HARNESS_ENABLE_LLM_SEARCH_PLANNING=true
-PRODUCT_HARNESS_ENABLE_LLM_SEARCH_FEEDBACK=true
-PRODUCT_HARNESS_ENABLE_LLM_ADJUDICATION=true
-PRODUCT_HARNESS_REQUIRE_LLM_EXACT_MATCH=true
-PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT=4
-PRODUCT_HARNESS_LLM_USE_IMAGES=true
-PRODUCT_HARNESS_LLM_PAYLOAD_REDUCTION=true
-PRODUCT_HARNESS_RESERVE_LLM_CALL_FOR_ADJUDICATION=true
-
-PRODUCT_HARNESS_REQUESTED_RETAILER_FIRST=true
-PRODUCT_HARNESS_REQUESTED_RETAILER_MIN_SCRAPES_FOR_ESCAPE=2
-PRODUCT_HARNESS_REQUESTED_RETAILER_MIN_RICHNESS_FOR_EVIDENCE=0.30
-PRODUCT_HARNESS_RETURN_REJECTED_REFERENCE_AS_PRODUCT_URL=false
-
-PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=3
-PRODUCT_HARNESS_SERP_RESULTS=100
-PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES=1
-PRODUCT_HARNESS_MAX_SCRAPES=180
-PRODUCT_HARNESS_MAX_ITERATIONS=240
-PRODUCT_HARNESS_OUTPUT_DIR=output
-PRODUCT_HARNESS_WRITE_OUTPUTS=true
-PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK=true
-PRODUCT_HARNESS_COUNTRY_FIRST=true
-PRODUCT_HARNESS_GLOBAL_FALLBACK_LANGUAGE=en
-PRODUCT_HARNESS_GLOBAL_FALLBACK_COUNTRY=
-
-AZURE_OPENAI_API_KEY=your_azure_openai_api_key
-AZURE_OPENAI_API_VERSION=2024-02-15-preview
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_DEPLOYMENT=your_vision_enabled_deployment
-LLM_CONSUMER_ID=your_consumer_id
-
-LLM_MAX_TOKENS=1600
-LLM_TEMPERATURE=0.0
-LLM_CONNECT_TIMEOUT=15
-LLM_READ_TIMEOUT=120
-LLM_MAX_RETRIES=3
+PRODUCT_HARNESS_SCRAPE_CONCURRENCY=6
+PRODUCT_HARNESS_STATIC_FETCH_FIRST=true
+PRODUCT_HARNESS_BROWSER_FALLBACK_ONLY=true
+PRODUCT_HARNESS_CRAWL_PAGE_TIMEOUT_MS=20000
 ```
 
 ## Minimal single-product usage
 
 ```python
-from product_evidence_harness import HarnessConfig, ProductEvidenceHarness, ProductQuery, SerpAPIConfig
+from product_evidence_harness import HarnessConfig, ProductEvidenceHarness, ProductQuery, SerpAPIConfig, ProductionURLGate
 
 product = ProductQuery(
     row_id="CO-ML-0001",
     main_text="PUT PRODUCT TEXT HERE",
     country_code="CO",
-    ean="",  # optional, keep as text
-    retailer_name="Mercado Libre",  # optional preferred-first evidence source
+    ean="",
+    retailer_name="Mercado Libre",
 )
 
-serp_config = SerpAPIConfig.from_env(country_code=product.country_code, language_code="es")
 config = HarnessConfig.from_env(".env")
-
+serp_config = SerpAPIConfig.from_env(country_code=product.country_code, language_code="es")
 harness = ProductEvidenceHarness(serp_config=serp_config, config=config)
 trace = harness.run(product, return_trace=True)
 
-print(trace.best_match.to_dict())
-print("Inspect:", f"{config.output_dir}/{product.row_id}/")
+match = trace.best_match
+production = ProductionURLGate().assess_url_in_state(trace.state, match.product_url or "")
+
+print(match.product_url)
+print(production.to_dict() if production else "No production assessment")
 ```
 
 ## CLI usage
@@ -257,8 +241,8 @@ Batch:
 ```bash
 python batch_main.py \
   --input data/products.xlsx \
-  --output outputs/product_url_matches.csv \
-  --workers 2
+  --output outputs/final_submission.csv \
+  --workers 4
 ```
 
 ## Validation
@@ -266,6 +250,17 @@ python batch_main.py \
 ```bash
 PYTHONPATH=src python -m compileall -q src main.py batch_main.py
 PYTHONPATH=src pytest -q
+```
+
+## Related docs
+
+```text
+docs/PRODUCTION_GRADE_PRODUCT_URL.md
+docs/STRICT_PRODUCT_URL_POLICY.md
+docs/ELITE_EVIDENCE_ENGINE.md
+docs/TEAM_SHOWCASE_GUIDE.md
+docs/LATENCY_OPTIMIZATION.md
+docs/IMPORT_PATH_FIX.md
 ```
 
 ## Import path note
