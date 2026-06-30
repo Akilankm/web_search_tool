@@ -6,7 +6,7 @@ This is intentionally not an AzureML component. It is a local PDM/Python codebas
 
 ## Primary architecture
 
-The primary operating model is now **candidate tournament selection**:
+The primary operating model is **candidate tournament selection**:
 
 ```text
 Input product identity
@@ -61,6 +61,7 @@ The code clamps `PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS` to a maximum of `4
 
 | Field | Required | Role |
 |---|---:|---|
+| `row_id` | Recommended | Stable product/row identifier. |
 | `main_text` | Yes | Primary product identity text. |
 | `country_code` | Yes | Country-first search market. |
 | `ean` / `gtin` | No | Strong user-provided anchor. Must remain a string. |
@@ -170,7 +171,18 @@ notebooks/01_single_product_harness.ipynb
 notebooks/02_batch_product_harness.ipynb
 ```
 
-Both notebooks surface the production handoff fields and tournament artifacts.
+Both notebooks now cover the complete end-to-end tournament workflow:
+
+```text
+tournament config
+4-credit SerpAPI cap
+champion URL
+runner-up URL
+champion margin
+batch winners
+production URL readiness
+product-coding input artifact
+```
 
 ## Minimal single-product usage
 
@@ -216,6 +228,7 @@ PYTHONPATH=src pytest -q
 ## Related docs
 
 ```text
+docs/END_TO_END_OPERATIONS.md
 docs/TOURNAMENT_MODE.md
 docs/PRODUCTION_GRADE_PRODUCT_URL.md
 docs/STRICT_PRODUCT_URL_POLICY.md
