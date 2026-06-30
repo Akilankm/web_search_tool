@@ -4,7 +4,7 @@
 
 This runbook is the operational entry point for running the Product Evidence Harness end to end.
 
-The system is now tournament-first:
+The system is tournament-first:
 
 ```text
 Input CSV/XLSX
@@ -14,7 +14,7 @@ Input CSV/XLSX
   → Cheap preflight ranking
   → Concurrent batch scraping
   → Batch winner selection
-  → Champion URL selection
+  → Production-ready champion selection
   → Production URL gate
   → Evidence artifacts and product-coding handoff
 ```
@@ -26,7 +26,7 @@ Input CSV/XLSX
 | `row_id` | Recommended | Stable row/product identifier. |
 | `main_text` | Yes | Primary product identity text. |
 | `country_code` | Yes | Target market/country. |
-| `ean` / `gtin` | No | Keep as text. Do not allow Excel scientific notation. |
+| `ean` / `gtin` | No | Keep as text. Invalid GTINs are ignored for search construction. |
 | `retailer_name` | No | Preferred first source, not a hard final constraint. |
 | `language_code` | No | Optional language override. |
 | `region` | No | Optional region/market hint. |
@@ -48,6 +48,31 @@ PRODUCT_HARNESS_WRITE_OUTPUTS=true
 ```
 
 The code clamps `PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS` to a maximum of `4`.
+
+## Champion rule
+
+A tournament champion exists only when a URL passes all production evidence gates:
+
+```text
+browser-openable
+highly scrapable
+exact-product matched
+critical product details extracted
+country acceptable
+not a conflicting variant
+```
+
+Scrapable means product details can actually be extracted for downstream coding. It does not mean only HTTP reachability.
+
+If no URL passes these gates:
+
+```text
+product_url = empty
+tournament_champion_url = empty
+best_review_candidate_url = populated when available
+needs_review = true
+production_url_ready = false
+```
 
 ## Run validation
 
@@ -95,15 +120,17 @@ Only hand off URLs to browser/scraping/product-coding teams when:
 production_url_ready = true
 production_url_status = PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL
 needs_review = false
+product_url is not empty
 ```
 
-Rows outside this filter may still have `product_url`, but they are review-only.
+Rows outside this filter may have a review candidate, but they are not production handoff rows.
 
 ## Key final_submission.csv columns
 
 | Column | Meaning |
 |---|---|
-| `product_url` | Champion/best discovered URL. |
+| `product_url` | Production-ready tournament champion URL only. Empty when no champion exists. |
+| `best_available_url` | Best review candidate when no champion exists. |
 | `production_url_ready` | True only when URL is handoff-ready. |
 | `production_url_status` | Production-readiness class. |
 | `browser_openable` | Whether URL is expected to open in browser. |
@@ -126,9 +153,9 @@ search credit limit
 raw candidate count
 preflight candidate count
 scraped candidate count
-champion URL
+champion URL, only when production-ready
+best review candidate URL when no champion exists
 runner-up URL
-champion margin
 champion production-readiness status
 queries used
 batch winners
@@ -145,31 +172,18 @@ notebooks/01_single_product_harness.ipynb
 notebooks/02_batch_product_harness.ipynb
 ```
 
-Both notebooks now show:
-
-```text
-tournament config
-4-credit cap
-champion URL
-runner-up URL
-champion margin
-batch winners
-production URL readiness
-product-coding input artifact
-```
-
 ## Review workflow
 
 1. Run the batch.
 2. Filter production-ready rows.
 3. Hand off only production-ready URLs.
 4. Use `review_queue.csv` for non-production rows.
-5. Inspect `tournament_bracket.md` and `batch_winners.csv` for why the URL won or failed.
-6. Use `product_coding_input.json` as the downstream feature-coding payload.
+5. Inspect `tournament_bracket.md` and `batch_winners.csv` for why no champion was found or why a champion won.
+6. Use `product_coding_input.json` only as production coding input when the row is production-ready; otherwise use it for review only.
 
 ## Do not use
 
-Do not treat `product_url` alone as production-ready. Always use the production gate fields.
+Do not treat a review candidate as production-ready.
 
 Do not manually edit EAN values in Excel as numbers. They must remain strings.
 

@@ -10,7 +10,15 @@ from loguru import logger
 
 from src.product_evidence_harness.candidate_store import CandidateStore
 from src.product_evidence_harness.config import TournamentConfig
-from src.product_evidence_harness.contracts import CandidateScorecard, OrganicSearchResponse, ProductSearchState, ScrapeResult
+from src.product_evidence_harness.contracts import (
+    ActionType,
+    AgentAction,
+    AgentActionRecord,
+    CandidateScorecard,
+    OrganicSearchResponse,
+    ProductSearchState,
+    ScrapeResult,
+)
 from src.product_evidence_harness.evidence_extractor import EvidenceExtractor
 from src.product_evidence_harness.identity_verifier import ProductIdentityVerifier
 from src.product_evidence_harness.production_url import ProductionURLAssessment, ProductionURLGate
@@ -55,10 +63,16 @@ class TournamentResult:
     scraped_candidate_count: int
     champion_url: str | None = None
     champion_score: float = 0.0
-    champion_status: str = "NO_CHAMPION"
+    champion_status: str = "NO_PRODUCTION_READY_CHAMPION"
     champion_production_ready: bool = False
     runner_up_url: str | None = None
     champion_margin: float = 0.0
+    best_review_candidate_url: str | None = None
+    best_review_candidate_score: float = 0.0
+    best_review_candidate_status: str = "NO_REVIEW_CANDIDATE"
+    search_exhausted: bool = False
+    candidate_pool_exhausted: bool = False
+    scrape_budget_exhausted: bool = False
     queries: tuple[TournamentQuery, ...] = ()
     rounds: tuple[TournamentRound, ...] = ()
 
@@ -76,6 +90,12 @@ class TournamentResult:
             "champion_production_ready": self.champion_production_ready,
             "runner_up_url": self.runner_up_url,
             "champion_margin": self.champion_margin,
+            "best_review_candidate_url": self.best_review_candidate_url,
+            "best_review_candidate_score": self.best_review_candidate_score,
+            "best_review_candidate_status": self.best_review_candidate_status,
+            "search_exhausted": self.search_exhausted,
+            "candidate_pool_exhausted": self.candidate_pool_exhausted,
+            "scrape_budget_exhausted": self.scrape_budget_exhausted,
             "queries": [q.to_dict() for q in self.queries],
             "rounds": [r.to_dict() for r in self.rounds],
         }
@@ -102,21 +122,17 @@ class CandidateTournamentEngine:
         logger.info("Tournament mode | row_id={} | max_serp_credits={}", state.task.row_id, self.config.max_serp_credits)
         executed = self._execute_searches(state)
         state.scorecards = self.ranker.score(product=state.task, candidates=state.candidates, scrapes=state.scrapes, verifications=state.verifications)
-        preflight = self._preflight(state.scorecards)
+        ranked_candidates = self._rank_all_candidates(state.scorecards)
 
-        champion: CandidateScorecard | None = None
-        champion_assessment: ProductionURLAssessment | None = None
         rounds: list[TournamentRound] = []
-        for batch_index, batch in enumerate(self._batches(preflight), start=1):
-            if batch_index > self.config.max_batches:
+        for batch_index, batch in enumerate(self._batches(ranked_candidates), start=1):
+            if not state.budget.can_scrape():
                 break
-            self._scrape_batch(state, [c.candidate.url for c in batch])
+            self._scrape_batch(state, [c.candidate.url for c in batch], batch_index=batch_index)
             state.scorecards = self.ranker.score(product=state.task, candidates=state.candidates, scrapes=state.scrapes, verifications=state.verifications)
             batch_urls = {c.candidate.url for c in batch}
             refreshed = [c for c in state.scorecards if c.candidate.url in batch_urls]
             winner, assessment = self._winner(refreshed)
-            if winner and assessment:
-                champion, champion_assessment = self._best_pair(champion, champion_assessment, winner, assessment)
             runner_up = self._runner_up(refreshed, winner.candidate.url if winner else None)
             runner_score = self.production_gate.assess_card(runner_up).score if runner_up else 0.0
             margin = round((assessment.score if assessment else 0.0) - runner_score, 4)
@@ -129,30 +145,41 @@ class CandidateTournamentEngine:
                 runner_up_url=runner_up.candidate.url if runner_up else None,
                 margin=margin,
             ))
-            if self.config.early_stop and champion_assessment and champion_assessment.production_ready and margin >= self.config.early_stop_margin:
+            ready_card, ready_assessment = self.production_gate.best_production_card(state)
+            if ready_card and ready_assessment and ready_assessment.production_ready:
                 state.termination_reason = "tournament_production_ready_champion_found"
-                break
+                if not self.config.early_stop or margin >= self.config.early_stop_margin:
+                    break
 
-        overall_runner = self._runner_up(state.scorecards, champion.candidate.url if champion else None)
-        runner_score = self.production_gate.assess_card(overall_runner).score if overall_runner else 0.0
+        champion_card, champion_assessment = self.production_gate.best_production_card(state)
+        review_card, review_assessment = self._winner(state.scorecards)
+        runner_up = self._runner_up(state.scorecards, champion_card.candidate.url if champion_card else review_card.candidate.url if review_card else None)
+        runner_score = self.production_gate.assess_card(runner_up).score if runner_up else 0.0
+        champion_score = champion_assessment.score if champion_assessment else 0.0
         result = TournamentResult(
             enabled=True,
             search_credit_limit=self.config.max_serp_credits,
             search_credits_used=len(executed),
             raw_candidate_count=len(state.candidates),
-            preflight_candidate_count=len(preflight),
+            preflight_candidate_count=len(ranked_candidates),
             scraped_candidate_count=len(state.scrapes),
-            champion_url=champion.candidate.url if champion else None,
-            champion_score=champion_assessment.score if champion_assessment else 0.0,
-            champion_status=champion_assessment.status if champion_assessment else "NO_CHAMPION",
-            champion_production_ready=champion_assessment.production_ready if champion_assessment else False,
-            runner_up_url=overall_runner.candidate.url if overall_runner else None,
-            champion_margin=round((champion_assessment.score if champion_assessment else 0.0) - runner_score, 4),
+            champion_url=champion_card.candidate.url if champion_card else None,
+            champion_score=champion_score,
+            champion_status=champion_assessment.status if champion_assessment else "NO_PRODUCTION_READY_CHAMPION",
+            champion_production_ready=bool(champion_assessment and champion_assessment.production_ready),
+            runner_up_url=runner_up.candidate.url if runner_up else None,
+            champion_margin=round(champion_score - runner_score, 4) if champion_card else 0.0,
+            best_review_candidate_url=review_card.candidate.url if review_card else None,
+            best_review_candidate_score=review_assessment.score if review_assessment else 0.0,
+            best_review_candidate_status=review_assessment.status if review_assessment else "NO_REVIEW_CANDIDATE",
+            search_exhausted=len(executed) >= self.config.max_serp_credits or not state.budget.can_search_organic(),
+            candidate_pool_exhausted=len(state.scrapes) >= len(ranked_candidates),
+            scrape_budget_exhausted=not state.budget.can_scrape(),
             queries=tuple(executed),
             rounds=tuple(rounds),
         )
         setattr(state, "tournament_result", result)
-        logger.info("Tournament done | row_id={} | champion={} | status={} | serp_used={}", state.task.row_id, result.champion_url, result.champion_status, result.search_credits_used)
+        logger.info("Tournament done | row_id={} | champion={} | status={} | review_candidate={} | serp_used={} | scraped={}/{}", state.task.row_id, result.champion_url, result.champion_status, result.best_review_candidate_url, result.search_credits_used, result.scraped_candidate_count, result.preflight_candidate_count)
         return result
 
     def write_artifacts(self, result: TournamentResult, product_dir: Path) -> None:
@@ -176,17 +203,15 @@ class CandidateTournamentEngine:
             state.organic_responses.append(response)
             state.candidates = self.candidate_store.merge_organic(state.candidates, response)[: self.config.candidate_pool]
             executed.append(item)
-            if len(state.candidates) >= self.config.candidate_pool:
-                break
+            self._record_search_action(state, item, response, iteration=len(executed))
         return executed
 
     def _queries(self, state: ProductSearchState) -> list[TournamentQuery]:
         task = state.task
         raw: list[TournamentQuery] = []
         if task.retailer_name:
-            raw.append(TournamentQuery(self.query_builder.requested_retailer_search(task), "country", task.language_code, "requested_retailer"))
-        if task.ean:
-            raw.append(TournamentQuery(self.query_builder.country_language_search(task, language_index=0, include_retailer=False), "country", task.language_code, "ean_country"))
+            raw.append(TournamentQuery(self.query_builder.requested_retailer_search(task), "requested_retailer", task.language_code, "requested_retailer"))
+        raw.append(TournamentQuery(self.query_builder.country_language_search(task, language_index=0, include_retailer=False), "country", task.language_code, "country_identity"))
         raw.append(TournamentQuery(self.query_builder.country_alternative_search(task, language_index=0), "country", task.language_code, "country_alternatives"))
         if self.query_builder.country_language_count(task) > 1:
             meta = self.query_builder.country_language_metadata(task, 1)
@@ -205,20 +230,34 @@ class CandidateTournamentEngine:
         country_code = None if item.scope == "global" else state.task.country_code
         return self.organic_client.search(item.query, product=state.task, scope=item.scope, language_code=item.language_code, country_code=country_code)
 
-    def _preflight(self, cards: list[CandidateScorecard]) -> list[CandidateScorecard]:
-        return sorted(cards, key=self._preflight_key, reverse=True)[: self.config.preflight_top_k]
+    def _record_search_action(self, state: ProductSearchState, item: TournamentQuery, response: OrganicSearchResponse, *, iteration: int) -> None:
+        state.actions_taken.append(AgentActionRecord(
+            iteration=iteration,
+            action=AgentAction(
+                action_type=ActionType.ORGANIC_SEARCH,
+                reason=item.reason,
+                query=item.query,
+                metadata={"scope": item.scope, "loop_phase": "tournament_search", "reason": item.reason, "language_code": item.language_code},
+            ),
+            success=response.status.lower() not in {"no results", "error", "failed"},
+            output_summary={"result_count": len(response.results), "status": response.status, "scope": item.scope, "reason": item.reason},
+            error=None if response.results else response.raw.get("error") if isinstance(response.raw, dict) else None,
+        ))
+
+    def _rank_all_candidates(self, cards: list[CandidateScorecard]) -> list[CandidateScorecard]:
+        return sorted(cards, key=self._preflight_key, reverse=True)
 
     @staticmethod
     def _preflight_key(card: CandidateScorecard) -> tuple[float, ...]:
         url = card.candidate.url.lower()
-        product_like = 1.0 if any(x in url for x in ("/product", "/produkt", "/p/", "/dp/", "sku")) else 0.0
+        product_like = 1.0 if any(x in url for x in ("/product", "/produkt", "/p/", "/dp/", "sku", "articulo.mercadolibre", "/itm/", "/item/")) else 0.0
         return (card.ean_score, card.title_score, card.country_score, card.retailer_score, product_like, card.organic_score, card.final_confidence)
 
     def _batches(self, cards: list[CandidateScorecard]) -> list[list[CandidateScorecard]]:
         size = max(1, self.config.batch_size)
         return [cards[i:i + size] for i in range(0, len(cards), size)]
 
-    def _scrape_batch(self, state: ProductSearchState, urls: list[str]) -> None:
+    def _scrape_batch(self, state: ProductSearchState, urls: list[str], *, batch_index: int) -> None:
         todo: list[str] = []
         for url in urls:
             if url in state.scrapes:
@@ -232,6 +271,12 @@ class CandidateTournamentEngine:
         scrapes = self.scraper.scrape_many(todo, product=state.task) if hasattr(self.scraper, "scrape_many") else [self.scraper.scrape(url, product=state.task) for url in todo]
         for url, scrape in zip(todo, scrapes):
             self._record_scrape(state, url, scrape)
+        state.actions_taken.append(AgentActionRecord(
+            iteration=1000 + batch_index,
+            action=AgentAction(action_type=ActionType.SCRAPE_URL, reason="tournament_batch_scrape", metadata={"scope": "tournament", "loop_phase": "tournament_scrape", "batch_index": batch_index, "url_count": len(todo)}),
+            success=any(s.success for s in scrapes),
+            output_summary={"url_count": len(todo), "success_count": sum(1 for s in scrapes if s.success), "batch_index": batch_index},
+        ))
 
     def _record_scrape(self, state: ProductSearchState, url: str, scrape: ScrapeResult) -> None:
         state.scrapes[url] = scrape
@@ -248,12 +293,19 @@ class CandidateTournamentEngine:
 
     @staticmethod
     def _winner_key(card: CandidateScorecard, a: ProductionURLAssessment) -> tuple[float, ...]:
-        return (float(a.production_ready), float(a.exact_product_match), float(a.highly_scrapable), float(a.browser_openable), float(card.country_check in {"MATCHED", "NOT_PROVIDED"}), a.score, card.final_confidence, card.richness_score)
-
-    def _best_pair(self, champion: CandidateScorecard | None, champ_a: ProductionURLAssessment | None, challenger: CandidateScorecard, chall_a: ProductionURLAssessment) -> tuple[CandidateScorecard, ProductionURLAssessment]:
-        if champion is None or champ_a is None:
-            return challenger, chall_a
-        return (challenger, chall_a) if self._winner_key(challenger, chall_a) > self._winner_key(champion, champ_a) else (champion, champ_a)
+        return (
+            float(a.production_ready),
+            float(a.browser_openable),
+            float(a.highly_scrapable),
+            float(a.critical_product_evidence_complete),
+            float(a.exact_product_match),
+            float(card.country_check in {"MATCHED", "NOT_PROVIDED"}),
+            float(card.retailer_check == "MATCHED"),
+            a.score,
+            card.richness_score,
+            card.title_score,
+            card.final_confidence,
+        )
 
     def _runner_up(self, cards: list[CandidateScorecard], champion_url: str | None) -> CandidateScorecard | None:
         rest = [c for c in cards if c.candidate.url != champion_url]
@@ -261,7 +313,23 @@ class CandidateTournamentEngine:
 
     @staticmethod
     def _markdown(result: TournamentResult) -> str:
-        lines = ["# Candidate Tournament Bracket", "", f"- **SerpAPI credits:** `{result.search_credits_used}/{result.search_credit_limit}`", f"- **Champion:** {result.champion_url or ''}", f"- **Champion status:** `{result.champion_status}`", f"- **Production ready:** `{result.champion_production_ready}`", f"- **Runner up:** {result.runner_up_url or ''}", f"- **Margin:** `{result.champion_margin}`", "", "## Queries"]
+        lines = [
+            "# Candidate Tournament Bracket",
+            "",
+            f"- **SerpAPI credits:** `{result.search_credits_used}/{result.search_credit_limit}`",
+            f"- **Champion:** {result.champion_url or ''}",
+            f"- **Champion status:** `{result.champion_status}`",
+            f"- **Production ready:** `{result.champion_production_ready}`",
+            f"- **Best review candidate:** {result.best_review_candidate_url or ''}",
+            f"- **Best review candidate status:** `{result.best_review_candidate_status}`",
+            f"- **Runner up:** {result.runner_up_url or ''}",
+            f"- **Margin:** `{result.champion_margin}`",
+            f"- **Search exhausted:** `{result.search_exhausted}`",
+            f"- **Candidate pool exhausted:** `{result.candidate_pool_exhausted}`",
+            f"- **Scrape budget exhausted:** `{result.scrape_budget_exhausted}`",
+            "",
+            "## Queries",
+        ]
         for i, q in enumerate(result.queries, 1):
             lines.append(f"{i}. `{q.scope}` / `{q.reason}`: {q.query}")
         lines.extend(["", "## Rounds", "", "| Batch | Winner | Score | Production Ready | Status | Runner Up | Margin |", "|---:|---|---:|---|---|---|---:|"])

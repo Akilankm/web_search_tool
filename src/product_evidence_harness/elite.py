@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +14,7 @@ MARKETPLACE_HINTS = (
     "amazon.", "ebay.", "aliexpress.", "mercadolibre.", "marketplace", "allegro.", "bol.", "cdiscount.", "rakuten.",
 )
 AGGREGATOR_HINTS = (
-    "heureka.", "idealo.", "pricespy", "pricecompare", "shopping.google", "kelkoo", "comparar", "comparison",
+    "heureka.", "idealo.", "pricespy", "pricecompare", "shopping.google", "kelko", "comparar", "comparison",
 )
 MANUFACTURER_HINTS = (
     "lego.", "mattel.", "hasbro.", "ravensburger.", "spinmaster.", "playmobil.", "pokemon.", "nintendo.",
@@ -88,13 +88,7 @@ class EnterpriseEvidenceAssessment:
 
 
 class EnterpriseEvidenceEngine:
-    """Enterprise-grade evidence synthesis layer.
-
-    This layer does not replace discovery, scraping, verification, ranking, or the
-    final URL selector. It summarizes their observable outputs into a product
-    evidence graph, decomposed confidence, quality tier, failure taxonomy, and a
-    downstream product-coding handoff payload.
-    """
+    """Enterprise-grade synthesis over the tournament champion and evidence graph."""
 
     def assess(self, state: ProductSearchState) -> EnterpriseEvidenceAssessment:
         selected = self._selected_card(state)
@@ -136,17 +130,11 @@ class EnterpriseEvidenceEngine:
         edges: list[dict[str, Any]] = []
         row_id = state.task.row_id
         input_node = f"input:{row_id}"
-        nodes.append({
-            "id": input_node,
-            "type": "input_product",
-            "label": state.task.main_text,
-            "properties": state.task.to_dict(),
-        })
+        nodes.append({"id": input_node, "type": "input_product", "label": state.task.main_text, "properties": state.task.to_dict()})
         if state.identity_graph is not None:
             graph_dict = state.identity_graph.to_dict() if hasattr(state.identity_graph, "to_dict") else state.identity_graph
             nodes.append({"id": f"identity:{row_id}", "type": "identity_graph", "label": "normalized_identity", "properties": graph_dict})
             edges.append({"from": input_node, "to": f"identity:{row_id}", "relation": "normalized_into"})
-
         for rank, card in enumerate(state.scorecards, start=1):
             candidate = card.candidate
             url_id = f"url:{candidate.url}"
@@ -169,8 +157,8 @@ class EnterpriseEvidenceEngine:
             })
             edges.append({"from": input_node, "to": url_id, "relation": "discovered_candidate"})
             if card.scrape:
-                scrape_id = f"scrape:{candidate.url}"
                 s = card.scrape
+                scrape_id = f"scrape:{candidate.url}"
                 nodes.append({
                     "id": scrape_id,
                     "type": "scrape_evidence",
@@ -192,8 +180,8 @@ class EnterpriseEvidenceEngine:
                 })
                 edges.append({"from": url_id, "to": scrape_id, "relation": "scraped_into"})
             if card.verification:
-                verification_id = f"verification:{candidate.url}"
                 v = card.verification
+                verification_id = f"verification:{candidate.url}"
                 nodes.append({
                     "id": verification_id,
                     "type": "identity_verification",
@@ -212,26 +200,13 @@ class EnterpriseEvidenceEngine:
                 })
                 edges.append({"from": url_id, "to": verification_id, "relation": "verified_by_detectors"})
             if card.llm_judgement:
-                llm_id = f"llm:{candidate.url}"
                 j = card.llm_judgement
-                nodes.append({
-                    "id": llm_id,
-                    "type": "llm_adjudication",
-                    "label": j.decision,
-                    "properties": {
-                        "decision": j.decision,
-                        "exact_product_match": j.exact_product_match,
-                        "confidence": j.confidence,
-                        "reject_reason": j.reject_reason,
-                        "scrape_usable": j.scrape_usable,
-                        "image_used": j.image_used,
-                    },
-                })
+                llm_id = f"llm:{candidate.url}"
+                nodes.append({"id": llm_id, "type": "llm_adjudication", "label": j.decision, "properties": j.to_dict()})
                 edges.append({"from": url_id, "to": llm_id, "relation": "adjudicated_by_llm"})
-
         return {
             "row_id": row_id,
-            "graph_version": "enterprise_evidence_graph_v1",
+            "graph_version": "enterprise_evidence_graph_v2_tournament_champion",
             "nodes": nodes,
             "edges": edges,
             "summary": {
@@ -239,15 +214,17 @@ class EnterpriseEvidenceEngine:
                 "scored_candidate_count": len(state.scorecards),
                 "scraped_candidate_count": len(state.scrapes),
                 "verified_candidates": sum(1 for c in state.scorecards if c.validation_status == "VERIFIED"),
+                "selected_product_url": state.final_result.product_url if state.final_result else None,
             },
         }
 
     def coding_readiness(self, state: ProductSearchState, selected: CandidateScorecard | None) -> CodingReadiness:
+        final = state.final_result
         scrape = selected.scrape if selected else None
         evidence: list[str] = []
         missing: list[str] = []
         hints: dict[str, Any] = {}
-
+        valid_ean_evidence = bool((scrape and scrape.structured_eans) or (final and final.input_ean_valid is True))
         checks = {
             "product_name": bool(scrape and (scrape.page_product_name or scrape.title or scrape.h1)),
             "brand": bool(scrape and scrape.brand),
@@ -255,7 +232,7 @@ class EnterpriseEvidenceEngine:
             "description": bool(scrape and scrape.description and len(scrape.description) >= 40),
             "spec_table_or_attributes": bool(scrape and (scrape.specs or scrape.attributes)),
             "images": bool(scrape and scrape.image_count > 0),
-            "ean_or_gtin": bool((scrape and scrape.structured_eans) or state.task.ean),
+            "ean_or_gtin": valid_ean_evidence,
             "price_or_availability": bool(scrape and (scrape.has_price or scrape.availability)),
             "product_page": bool(scrape and scrape.looks_like_product_page),
             "scrape_usable": bool(scrape and scrape.is_scrapable and scrape.success and scrape.reachable),
@@ -283,7 +260,12 @@ class EnterpriseEvidenceEngine:
             status = "URL_ONLY_NOT_CODING_READY"
         else:
             status = "NEEDS_REVIEW"
-
+        production_ready_exact = bool(final and final.product_url and final.verified_exact_url and not final.needs_review and final.is_exact_product_match)
+        if not production_ready_exact:
+            if "production_ready_exact_url" not in missing:
+                missing.append("production_ready_exact_url")
+            if status == "CODING_READY":
+                status = "CODING_PARTIAL" if score >= 0.55 else "URL_ONLY_NOT_CODING_READY"
         if scrape:
             hints = {
                 "product_name": scrape.page_product_name or scrape.title or scrape.h1,
@@ -308,13 +290,7 @@ class EnterpriseEvidenceEngine:
         identity = max(selected.identity_score, 1.0 if verification and verification.identity_status == "VERIFIED" else 0.0)
         scrapability = 0.0
         if scrape:
-            scrapability = sum([
-                0.25 if scrape.success else 0,
-                0.20 if scrape.reachable else 0,
-                0.25 if scrape.is_scrapable else 0,
-                0.20 if scrape.looks_like_product_page else 0,
-                0.10 * min(1.0, scrape.richness_score),
-            ])
+            scrapability = sum([0.25 if scrape.success else 0, 0.20 if scrape.reachable else 0, 0.25 if scrape.is_scrapable else 0, 0.20 if scrape.looks_like_product_page else 0, 0.10 * min(1.0, scrape.richness_score)])
         country = 1.0 if selected.country_check in {"MATCHED", "NOT_PROVIDED"} else 0.35
         retailer = 1.0 if selected.retailer_check == "MATCHED" else 0.65 if selected.retailer_check in {"NOT_PROVIDED", "UNKNOWN"} else 0.35
         variant = 1.0
@@ -323,16 +299,7 @@ class EnterpriseEvidenceEngine:
         elif selected.variant_check in {"UNKNOWN", "NOT_CHECKED"}:
             variant = 0.70
         final = round(min(1.0, (identity * 0.28) + (scrapability * 0.22) + (country * 0.12) + (retailer * 0.08) + (variant * 0.12) + (consensus * 0.08) + (readiness.score * 0.10)), 4)
-        return ConfidenceBreakdown(
-            identity_confidence=round(min(1.0, identity), 4),
-            scrapability_confidence=round(min(1.0, scrapability), 4),
-            country_confidence=round(country, 4),
-            retailer_confidence=round(retailer, 4),
-            variant_confidence=round(variant, 4),
-            source_consensus_score=round(consensus, 4),
-            coding_readiness_confidence=readiness.score,
-            final_confidence=final,
-        )
+        return ConfidenceBreakdown(round(min(1.0, identity), 4), round(min(1.0, scrapability), 4), round(country, 4), round(retailer, 4), round(variant, 4), round(consensus, 4), readiness.score, final)
 
     def source_consensus_score(self, state: ProductSearchState) -> float:
         usable = [c for c in state.scorecards if c.scrape and c.scrape.is_scrapable and c.scrape.looks_like_product_page]
@@ -341,11 +308,7 @@ class EnterpriseEvidenceEngine:
         verified = [c for c in usable if c.validation_status == "VERIFIED"]
         domains = {domain_of(c.candidate.url) for c in usable if c.candidate.url}
         source_types = Counter(st for c in usable for st in c.candidate.source_types)
-        score = 0.25
-        score += min(0.30, len(usable) * 0.08)
-        score += min(0.20, len(domains) * 0.06)
-        score += 0.20 if verified else 0.0
-        score += 0.05 if len(source_types) >= 2 else 0.0
+        score = 0.25 + min(0.30, len(usable) * 0.08) + min(0.20, len(domains) * 0.06) + (0.20 if verified else 0.0) + (0.05 if len(source_types) >= 2 else 0.0)
         return round(min(1.0, score), 4)
 
     def quality_tier(self, state: ProductSearchState, selected: CandidateScorecard | None, readiness: CodingReadiness, confidence: ConfidenceBreakdown, failures: list[str]) -> tuple[str, str]:
@@ -353,11 +316,11 @@ class EnterpriseEvidenceEngine:
         if not final or not selected:
             return "E", "No final candidate was selected."
         if final.product_url and final.verified_exact_url and not final.needs_review and readiness.score >= 0.80 and confidence.final_confidence >= 0.85:
-            return "A", "Verified exact, scrape-usable, coding-ready evidence."
-        if final.product_url and final.is_scrapable and final.is_exact_product_match and confidence.final_confidence >= 0.75:
+            return "A", "Verified exact, production-ready, coding-ready evidence."
+        if final.product_url and final.is_scrapable and final.is_exact_product_match and not final.needs_review and confidence.final_confidence >= 0.75:
             return "B", "Exact and scrape-usable, but coding evidence or confidence is not Tier A."
         if final.product_url and final.is_scrapable:
-            return "C", "Usable product URL exists but exactness/coding readiness requires review."
+            return "C", "Champion URL exists but exactness/production readiness/coding readiness requires review."
         if final.best_reference_url or failures:
             return "D", "Reference-only or weak evidence; do not auto-submit."
         return "E", "No usable URL or evidence was found."
@@ -369,6 +332,10 @@ class EnterpriseEvidenceEngine:
             failures.add("NO_CANDIDATE_FOUND")
         if final and not final.product_url:
             failures.add(final.url_decision_status or "NO_OPERATIONAL_PRODUCT_URL")
+        if final and final.product_url and final.needs_review:
+            failures.add("TOURNAMENT_CHAMPION_NEEDS_REVIEW")
+        if final and final.is_exact_product_match is False:
+            failures.add("PRODUCT_URL_NOT_EXACT_MATCH_NEEDS_REVIEW")
         if state.task.retailer_name and final and final.requested_retailer_attempted and not final.selected_from_requested_retailer:
             failures.add("REQUESTED_RETAILER_NOT_SELECTED")
         if final and final.requested_retailer_scrapability_status in {"UNUSABLE_FOR_EVIDENCE", "SCRAPABILITY_CHECK_IN_PROGRESS"}:
@@ -377,7 +344,9 @@ class EnterpriseEvidenceEngine:
             failures.add("VARIANT_CONFLICT")
         if any(c.verification and c.verification.ean_conflict_is_blocking for c in state.scorecards):
             failures.add("EAN_CONFLICT")
-        if any(c.scrape and c.scrape.looks_like_homepage for c in state.scorecards):
+        if any(c.verification and c.verification.ean_status == "INPUT_INVALID" for c in state.scorecards):
+            failures.add("INPUT_EAN_INVALID_IGNORED_FOR_SEARCH")
+        if any(c.scrape and (c.scrape.looks_like_homepage or not c.scrape.looks_like_product_page) for c in state.scorecards):
             failures.add("HOMEPAGE_OR_LISTING_PAGE_CANDIDATE")
         if any(c.scrape and c.scrape.is_soft_404 for c in state.scorecards):
             failures.add("SOFT_404_OR_REMOVED_PAGE")
@@ -396,7 +365,7 @@ class EnterpriseEvidenceEngine:
         scrape = selected.scrape if selected else None
         verification = selected.verification if selected else None
         return {
-            "schema_version": "product_coding_input_v1",
+            "schema_version": "product_coding_input_v2_tournament_champion",
             "row_id": state.task.row_id,
             "quality_tier": quality_tier,
             "coding_readiness_status": readiness.status,
@@ -407,6 +376,7 @@ class EnterpriseEvidenceEngine:
             "selected_url": final.product_url if final else None,
             "verified_exact_url": final.verified_exact_url if final else None,
             "best_reference_url": final.best_reference_url if final else None,
+            "production_handoff_ready": bool(final and not final.needs_review and final.verified_exact_url),
             "supporting_urls": list(supporting_urls),
             "selected_page_evidence": {
                 "title": scrape.title if scrape else "",
@@ -514,16 +484,8 @@ class EnterpriseEvidenceEngine:
             "## Supporting URLs",
             "",
         ]
-        if assessment.supporting_urls:
-            lines.extend([f"- {url}" for url in assessment.supporting_urls])
-        else:
-            lines.append("No supporting URLs were available.")
-        lines.extend([
-            "",
-            "## Product Coding Handoff",
-            "",
-            "See `product_coding_input.json` for the downstream feature-coding payload.",
-        ])
+        lines.extend([f"- {url}" for url in assessment.supporting_urls] or ["No supporting URLs were available."])
+        lines.extend(["", "## Product Coding Handoff", "", "See `product_coding_input.json` for the downstream feature-coding payload."])
         return "\n".join(lines).rstrip() + "\n"
 
     def _selected_card(self, state: ProductSearchState) -> CandidateScorecard | None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from product_evidence_harness.budget import BudgetTracker
 from product_evidence_harness.candidate_store import CandidateStore
 from product_evidence_harness.config import HarnessPolicy, TournamentConfig
-from product_evidence_harness.contracts import MatchVerification, OrganicSearchResponse, OrganicSearchResult, ProductQuery, ProductSearchState, ScrapeResult
+from product_evidence_harness.contracts import ActionType, MatchVerification, OrganicSearchResponse, OrganicSearchResult, ProductQuery, ProductSearchState, ScrapeResult
 from product_evidence_harness.evidence_extractor import EvidenceExtractor
 from product_evidence_harness.identity_verifier import ProductIdentityVerifier
 from product_evidence_harness.production_url import ProductionURLGate
@@ -81,16 +81,8 @@ class FakeVerifier(ProductIdentityVerifier):
         )
 
 
-def test_tournament_mode_selects_exact_production_champion_under_four_serp_calls() -> None:
-    product = ProductQuery(
-        row_id="row-1",
-        main_text="LEGO Friends 41731 Heartlake International School",
-        country_code="CZ",
-        retailer_name="Alza",
-        ean="5702017415177",
-    )
-    state = ProductSearchState(task=product, budget=BudgetTracker(max_organic=4, max_ai_mode=0, max_scrapes=20))
-    engine = CandidateTournamentEngine(
+def _engine() -> CandidateTournamentEngine:
+    return CandidateTournamentEngine(
         config=TournamentConfig(enabled=True, max_serp_credits=4, candidate_pool=20, preflight_top_k=10, batch_size=5, max_batches=2),
         query_builder=QueryBuilder(),
         organic_client=FakeOrganicClient(),
@@ -102,6 +94,18 @@ def test_tournament_mode_selects_exact_production_champion_under_four_serp_calls
         production_gate=ProductionURLGate(),
     )
 
+
+def test_tournament_mode_selects_exact_production_champion_under_four_serp_calls() -> None:
+    product = ProductQuery(
+        row_id="row-1",
+        main_text="LEGO Friends 41731 Heartlake International School",
+        country_code="CZ",
+        retailer_name="Alza",
+        ean="5702017415177",
+    )
+    state = ProductSearchState(task=product, budget=BudgetTracker(max_organic=4, max_ai_mode=0, max_scrapes=20))
+    engine = _engine()
+
     result = engine.run(state)
 
     assert result.search_credits_used <= 4
@@ -110,3 +114,39 @@ def test_tournament_mode_selects_exact_production_champion_under_four_serp_calls
     assert result.champion_status == "PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL"
     assert state.budget.organic_used <= 4
     assert state.scrapes
+    assert any(a.action.action_type == ActionType.ORGANIC_SEARCH for a in state.actions_taken)
+
+
+def test_query_builder_suppresses_invalid_ean_from_search_queries() -> None:
+    product = ProductQuery(
+        row_id="row-invalid-ean",
+        main_text="COCHE DEPORTIVO RASTAR PORSCHE 911GT2RS 1/24 CON CONTROL",
+        country_code="CO",
+        retailer_name="Mercado Libre",
+        ean="7800270000000",  # invalid GTIN checksum
+    )
+    query = QueryBuilder().requested_retailer_search(product)
+
+    assert "7800270000000" not in query
+    assert "RASTAR" in query or "rastar" in query.lower()
+    assert "Mercado Libre" in query
+
+
+def test_tournament_records_requested_retailer_scope_for_metrics() -> None:
+    product = ProductQuery(
+        row_id="row-retailer-scope",
+        main_text="LEGO Friends 41731 Heartlake International School",
+        country_code="CZ",
+        retailer_name="Alza",
+        ean="5702017415177",
+    )
+    state = ProductSearchState(task=product, budget=BudgetTracker(max_organic=4, max_ai_mode=0, max_scrapes=20))
+    engine = _engine()
+
+    engine.run(state)
+
+    assert any(
+        a.action.action_type == ActionType.ORGANIC_SEARCH
+        and a.action.metadata.get("scope") == "requested_retailer"
+        for a in state.actions_taken
+    )
