@@ -58,7 +58,6 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
         if self.config.enable_llm_adjudication and self.llm_adjudicator is not None and not state.llm_judgements:
             state = self.llm_adjudicator.adjudicate_state(state)
             state.scorecards = self.ranker.score(product=state.task, candidates=state.candidates, scrapes=state.scrapes, verifications=state.verifications)
-            tournament_result = self.tournament_engine.run(state)
 
         best_match = self.selector.select(
             task=product,
