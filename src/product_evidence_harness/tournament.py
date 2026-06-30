@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +26,10 @@ from src.product_evidence_harness.query_builder import QueryBuilder
 from src.product_evidence_harness.ranker import ProductURLRanker
 from src.product_evidence_harness.scraper import CrawlScraper
 from src.product_evidence_harness.serp_clients import GoogleOrganicSearchClient
+
+
+CHAMPION_CONFIRMATION_ATTEMPTS = 3
+CHAMPION_CONFIRMATION_REQUIRED_SUCCESSES = 3
 
 
 @dataclass(frozen=True)
@@ -54,6 +58,55 @@ class TournamentRound:
 
 
 @dataclass(frozen=True)
+class ChampionConfirmationAttempt:
+    attempt_index: int
+    url: str
+    passed: bool
+    status: str
+    final_url: str | None
+    status_code: int | None
+    richness_score: float
+    word_count: int
+    product_label: str
+    reasons: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ChampionConfirmationResult:
+    url: str | None
+    required_attempts: int
+    required_successes: int
+    attempted_count: int
+    success_count: int
+    passed: bool
+    status: str
+    final_url_stable: bool
+    evidence_stable: bool
+    min_richness: float
+    min_word_count: int
+    attempts: tuple[ChampionConfirmationAttempt, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "url": self.url,
+            "required_attempts": self.required_attempts,
+            "required_successes": self.required_successes,
+            "attempted_count": self.attempted_count,
+            "success_count": self.success_count,
+            "passed": self.passed,
+            "status": self.status,
+            "final_url_stable": self.final_url_stable,
+            "evidence_stable": self.evidence_stable,
+            "min_richness": self.min_richness,
+            "min_word_count": self.min_word_count,
+            "attempts": [a.to_dict() for a in self.attempts],
+        }
+
+
+@dataclass(frozen=True)
 class TournamentResult:
     enabled: bool
     search_credit_limit: int
@@ -73,6 +126,7 @@ class TournamentResult:
     search_exhausted: bool = False
     candidate_pool_exhausted: bool = False
     scrape_budget_exhausted: bool = False
+    champion_confirmation: ChampionConfirmationResult | None = None
     queries: tuple[TournamentQuery, ...] = ()
     rounds: tuple[TournamentRound, ...] = ()
 
@@ -96,6 +150,7 @@ class TournamentResult:
             "search_exhausted": self.search_exhausted,
             "candidate_pool_exhausted": self.candidate_pool_exhausted,
             "scrape_budget_exhausted": self.scrape_budget_exhausted,
+            "champion_confirmation": self.champion_confirmation.to_dict() if self.champion_confirmation else None,
             "queries": [q.to_dict() for q in self.queries],
             "rounds": [r.to_dict() for r in self.rounds],
         }
@@ -147,11 +202,17 @@ class CandidateTournamentEngine:
             ))
             ready_card, ready_assessment = self.production_gate.best_production_card(state)
             if ready_card and ready_assessment and ready_assessment.production_ready:
-                state.termination_reason = "tournament_production_ready_champion_found"
+                state.termination_reason = "tournament_production_ready_candidate_found"
                 if not self.config.early_stop or margin >= self.config.early_stop_margin:
                     break
 
         champion_card, champion_assessment = self.production_gate.best_production_card(state)
+        confirmation = self._confirm_champion(state, champion_card) if champion_card and champion_assessment else self._empty_confirmation()
+        if champion_card and champion_assessment and not confirmation.passed:
+            champion_card = None
+            champion_assessment = None
+        if champion_card and champion_assessment and confirmation.passed:
+            state.termination_reason = "tournament_champion_confirmed"
         review_card, review_assessment = self._winner(state.scorecards)
         runner_up = self._runner_up(state.scorecards, champion_card.candidate.url if champion_card else review_card.candidate.url if review_card else None)
         runner_score = self.production_gate.assess_card(runner_up).score if runner_up else 0.0
@@ -165,8 +226,8 @@ class CandidateTournamentEngine:
             scraped_candidate_count=len(state.scrapes),
             champion_url=champion_card.candidate.url if champion_card else None,
             champion_score=champion_score,
-            champion_status=champion_assessment.status if champion_assessment else "NO_PRODUCTION_READY_CHAMPION",
-            champion_production_ready=bool(champion_assessment and champion_assessment.production_ready),
+            champion_status=champion_assessment.status if champion_assessment else confirmation.status if confirmation.attempted_count else "NO_PRODUCTION_READY_CHAMPION",
+            champion_production_ready=bool(champion_assessment and champion_assessment.production_ready and confirmation.passed),
             runner_up_url=runner_up.candidate.url if runner_up else None,
             champion_margin=round(champion_score - runner_score, 4) if champion_card else 0.0,
             best_review_candidate_url=review_card.candidate.url if review_card else None,
@@ -175,17 +236,21 @@ class CandidateTournamentEngine:
             search_exhausted=len(executed) >= self.config.max_serp_credits or not state.budget.can_search_organic(),
             candidate_pool_exhausted=len(state.scrapes) >= len(ranked_candidates),
             scrape_budget_exhausted=not state.budget.can_scrape(),
+            champion_confirmation=confirmation,
             queries=tuple(executed),
             rounds=tuple(rounds),
         )
         setattr(state, "tournament_result", result)
-        logger.info("Tournament done | row_id={} | champion={} | status={} | review_candidate={} | serp_used={} | scraped={}/{}", state.task.row_id, result.champion_url, result.champion_status, result.best_review_candidate_url, result.search_credits_used, result.scraped_candidate_count, result.preflight_candidate_count)
+        logger.info("Tournament done | row_id={} | champion={} | status={} | confirmation={} | serp_used={} | scraped={}/{}", state.task.row_id, result.champion_url, result.champion_status, confirmation.status, result.search_credits_used, result.scraped_candidate_count, result.preflight_candidate_count)
         return result
 
     def write_artifacts(self, result: TournamentResult, product_dir: Path) -> None:
         product_dir.mkdir(parents=True, exist_ok=True)
         (product_dir / "tournament_bracket.json").write_text(json.dumps(result.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         (product_dir / "tournament_bracket.md").write_text(self._markdown(result) + "\n", encoding="utf-8")
+        if result.champion_confirmation:
+            (product_dir / "champion_confirmation.json").write_text(json.dumps(result.champion_confirmation.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            (product_dir / "champion_confirmation.md").write_text(self._confirmation_markdown(result.champion_confirmation) + "\n", encoding="utf-8")
         with (product_dir / "batch_winners.csv").open("w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=["batch_index", "winner_url", "winner_score", "production_ready", "status", "runner_up_url", "margin"])
             writer.writeheader()
@@ -285,6 +350,97 @@ class CandidateTournamentEngine:
         state.verifications[url] = verification
         state.detector_findings[url] = list(verification.detector_findings)
 
+    def _confirm_champion(self, state: ProductSearchState, card: CandidateScorecard) -> ChampionConfirmationResult:
+        attempts: list[ChampionConfirmationAttempt] = []
+        url = card.candidate.url
+        for attempt_index in range(1, CHAMPION_CONFIRMATION_ATTEMPTS + 1):
+            if not state.budget.can_scrape():
+                attempts.append(ChampionConfirmationAttempt(attempt_index, url, False, "SCRAPE_BUDGET_EXHAUSTED", None, None, 0.0, 0, "", ("SCRAPE_BUDGET_EXHAUSTED",)))
+                break
+            state.budget.consume_scrape()
+            scrape = self.scraper.scrape(url, product=state.task)
+            verification = self.verifier.verify(state.task, scrape, identity_graph=state.identity_graph)
+            checked_card = replace(
+                card,
+                scrape=scrape,
+                verification=verification,
+                validation_status="VERIFIED" if verification.identity_status == "VERIFIED" else "NEEDS_REVIEW",
+                exact_product_check=verification.exact_product_check,
+                variant_check=verification.variant_check,
+                richness_score=scrape.richness_score,
+            )
+            assessment = self.production_gate.assess_card(checked_card)
+            attempts.append(ChampionConfirmationAttempt(
+                attempt_index=attempt_index,
+                url=url,
+                passed=assessment.production_ready,
+                status=assessment.status,
+                final_url=scrape.final_url,
+                status_code=scrape.status_code,
+                richness_score=scrape.richness_score,
+                word_count=scrape.word_count,
+                product_label=scrape.page_product_name or scrape.h1 or scrape.title,
+                reasons=assessment.reasons,
+            ))
+        final_urls = {self._stable_url_key(a.final_url or a.url) for a in attempts if a.final_url or a.url}
+        labels = {self._label_key(a.product_label) for a in attempts if self._label_key(a.product_label)}
+        success_count = sum(1 for a in attempts if a.passed)
+        final_url_stable = len(final_urls) <= 1
+        evidence_stable = len(labels) == 1
+        passed = bool(
+            len(attempts) >= CHAMPION_CONFIRMATION_REQUIRED_SUCCESSES
+            and success_count >= CHAMPION_CONFIRMATION_REQUIRED_SUCCESSES
+            and final_url_stable
+            and evidence_stable
+        )
+        status = "CHAMPION_CONFIRMATION_PASSED" if passed else "CHAMPION_CONFIRMATION_FAILED"
+        state.actions_taken.append(AgentActionRecord(
+            iteration=9000,
+            action=AgentAction(action_type=ActionType.SCRAPE_URL, reason="champion_confirmation", url=url, metadata={"scope": "champion_confirmation", "attempts": CHAMPION_CONFIRMATION_ATTEMPTS, "required_successes": CHAMPION_CONFIRMATION_REQUIRED_SUCCESSES}),
+            success=passed,
+            output_summary={"attempted_count": len(attempts), "success_count": success_count, "final_url_stable": final_url_stable, "evidence_stable": evidence_stable, "status": status},
+            error=None if passed else status,
+        ))
+        return ChampionConfirmationResult(
+            url=url,
+            required_attempts=CHAMPION_CONFIRMATION_ATTEMPTS,
+            required_successes=CHAMPION_CONFIRMATION_REQUIRED_SUCCESSES,
+            attempted_count=len(attempts),
+            success_count=success_count,
+            passed=passed,
+            status=status,
+            final_url_stable=final_url_stable,
+            evidence_stable=evidence_stable,
+            min_richness=min((a.richness_score for a in attempts), default=0.0),
+            min_word_count=min((a.word_count for a in attempts), default=0),
+            attempts=tuple(attempts),
+        )
+
+    @staticmethod
+    def _empty_confirmation() -> ChampionConfirmationResult:
+        return ChampionConfirmationResult(
+            url=None,
+            required_attempts=CHAMPION_CONFIRMATION_ATTEMPTS,
+            required_successes=CHAMPION_CONFIRMATION_REQUIRED_SUCCESSES,
+            attempted_count=0,
+            success_count=0,
+            passed=False,
+            status="NO_CHAMPION_CANDIDATE_TO_CONFIRM",
+            final_url_stable=False,
+            evidence_stable=False,
+            min_richness=0.0,
+            min_word_count=0,
+            attempts=(),
+        )
+
+    @staticmethod
+    def _stable_url_key(url: str) -> str:
+        return str(url or "").split("?", 1)[0].rstrip("/").strip().lower()
+
+    @staticmethod
+    def _label_key(label: str) -> str:
+        return " ".join(str(label or "").lower().split())
+
     def _winner(self, cards: list[CandidateScorecard]) -> tuple[CandidateScorecard | None, ProductionURLAssessment | None]:
         if not cards:
             return None, None
@@ -299,7 +455,7 @@ class CandidateTournamentEngine:
             float(a.highly_scrapable),
             float(a.critical_product_evidence_complete),
             float(a.exact_product_match),
-            float(card.country_check in {"MATCHED", "NOT_PROVIDED"}),
+            float(card.country_check in {"MATCHED", "NOT_PROVIDED", "ALTERNATIVE"}),
             float(card.retailer_check == "MATCHED"),
             a.score,
             card.richness_score,
@@ -313,6 +469,7 @@ class CandidateTournamentEngine:
 
     @staticmethod
     def _markdown(result: TournamentResult) -> str:
+        confirmation = result.champion_confirmation
         lines = [
             "# Candidate Tournament Bracket",
             "",
@@ -320,6 +477,9 @@ class CandidateTournamentEngine:
             f"- **Champion:** {result.champion_url or ''}",
             f"- **Champion status:** `{result.champion_status}`",
             f"- **Production ready:** `{result.champion_production_ready}`",
+            f"- **Champion confirmation passed:** `{confirmation.passed if confirmation else False}`",
+            f"- **Champion confirmation attempts:** `{confirmation.attempted_count if confirmation else 0}/{confirmation.required_attempts if confirmation else CHAMPION_CONFIRMATION_ATTEMPTS}`",
+            f"- **Champion confirmation successes:** `{confirmation.success_count if confirmation else 0}/{confirmation.required_successes if confirmation else CHAMPION_CONFIRMATION_REQUIRED_SUCCESSES}`",
             f"- **Best review candidate:** {result.best_review_candidate_url or ''}",
             f"- **Best review candidate status:** `{result.best_review_candidate_status}`",
             f"- **Runner up:** {result.runner_up_url or ''}",
@@ -335,4 +495,26 @@ class CandidateTournamentEngine:
         lines.extend(["", "## Rounds", "", "| Batch | Winner | Score | Production Ready | Status | Runner Up | Margin |", "|---:|---|---:|---|---|---|---:|"])
         for r in result.rounds:
             lines.append(f"| {r.batch_index} | {r.winner_url or ''} | {r.winner_score:.4f} | `{r.production_ready}` | `{r.status}` | {r.runner_up_url or ''} | {r.margin:.4f} |")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _confirmation_markdown(result: ChampionConfirmationResult) -> str:
+        lines = [
+            "# Champion Confirmation",
+            "",
+            f"- **URL:** {result.url or ''}",
+            f"- **Status:** `{result.status}`",
+            f"- **Passed:** `{result.passed}`",
+            f"- **Attempts:** `{result.attempted_count}/{result.required_attempts}`",
+            f"- **Successes:** `{result.success_count}/{result.required_successes}`",
+            f"- **Final URL stable:** `{result.final_url_stable}`",
+            f"- **Evidence stable:** `{result.evidence_stable}`",
+            f"- **Minimum richness:** `{result.min_richness}`",
+            f"- **Minimum word count:** `{result.min_word_count}`",
+            "",
+            "| Attempt | Passed | Status | Final URL | HTTP | Richness | Words | Product Label | Reasons |",
+            "|---:|---|---|---|---:|---:|---:|---|---|",
+        ]
+        for a in result.attempts:
+            lines.append(f"| {a.attempt_index} | `{a.passed}` | `{a.status}` | {a.final_url or ''} | {a.status_code or ''} | {a.richness_score:.4f} | {a.word_count} | {a.product_label} | {'; '.join(a.reasons)} |")
         return "\n".join(lines)
