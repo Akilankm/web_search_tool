@@ -12,7 +12,8 @@ Input CSV/XLSX
   → SerpAPI search fan-out, capped at 4 credits per product
   → Candidate URL pool
   → Cheap preflight ranking
-  → Concurrent batch scraping
+  → Enforced top-k candidate cut
+  → Concurrent batch scraping with max-batch bound
   → Batch winner selection
   → Production-ready champion candidate selection
   → Champion confirmation gate, default 3 checks
@@ -49,6 +50,8 @@ PRODUCT_HARNESS_WRITE_OUTPUTS=true
 ```
 
 The code clamps `PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS` to a maximum of `4`.
+
+The code also enforces `PRODUCT_HARNESS_TOURNAMENT_PREFLIGHT_TOP_K` and `PRODUCT_HARNESS_TOURNAMENT_MAX_BATCHES`. With defaults, the tournament batch phase considers the top `60` ranked candidates and executes at most `3` batches of `20`, subject to remaining scrape budget.
 
 Champion confirmation is currently a fixed post-selection gate:
 
@@ -176,8 +179,8 @@ Rows outside this filter may have a review candidate, but they are not productio
 search credits used
 search credit limit
 raw candidate count
-preflight candidate count
-scraped candidate count
+preflight candidate count after top-k cut
+scraped candidate count after batch-limit enforcement
 champion URL, only when production-ready and confirmation passed
 best review candidate URL when no confirmed champion exists
 runner-up URL
@@ -203,7 +206,7 @@ minimum word count
 per-attempt status and reasons
 ```
 
-`batch_winners.csv` gives a compact table of every batch winner and runner-up.
+`batch_winners.csv` gives a compact table of every executed batch winner and runner-up.
 
 ## Notebooks
 
