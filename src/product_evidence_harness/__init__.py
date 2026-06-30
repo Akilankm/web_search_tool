@@ -39,6 +39,7 @@ from src.product_evidence_harness.pipeline import (
     HybridProductURLFinderPipeline,
     ProductEvidenceHarness,
 )
+from src.product_evidence_harness.production_url import ProductionURLAssessment, ProductionURLGate
 from src.product_evidence_harness.ranker import ProductURLRanker
 from src.product_evidence_harness.scraper import CrawlScraper
 
@@ -54,4 +55,5 @@ __all__ = [
     "ExactProductLLMAdjudicator", "LLMConfig", "LLMService",
     "EnterpriseEvidenceEngine", "EnterpriseEvidenceAssessment", "ConfidenceBreakdown", "CodingReadiness",
     "ReviewFeedbackRecord", "ReviewFeedbackStore", "RetailerDomainMemory",
+    "ProductionURLGate", "ProductionURLAssessment",
 ]
