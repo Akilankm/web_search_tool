@@ -3,7 +3,7 @@
 ## One-line positioning
 
 ```text
-The Product Evidence Harness discovers product URLs, validates browser/scraping usability, verifies exact product identity, and produces an auditable product-coding evidence packet.
+The Product Evidence Harness is a tournament-first product URL engine: it discovers candidate URLs, scrapes them in batches, compares them side by side, selects a champion, validates browser/scraping usability, verifies exact product identity, and produces an auditable product-coding evidence packet.
 ```
 
 ## What to demonstrate
@@ -23,6 +23,8 @@ quality_tier
 coding_readiness_status
 failure_taxonomy
 product_coding_input_path
+tournament_bracket.md
+batch_winners.csv
 ```
 
 ## Demo script
@@ -35,7 +37,13 @@ The URL must be useful for two teams:
 2. A team that scrapes the product page for complete coding evidence.
 ```
 
-### 2. Explain the handoff rule
+### 2. Explain the tournament architecture
+
+```text
+The system searches broadly within a four-credit SerpAPI cap, builds a candidate pool, scrapes the strongest candidates in batches, selects batch winners, and promotes the final champion through a production URL gate.
+```
+
+### 3. Explain the handoff rule
 
 For high-stakes handoff, use only rows where:
 
@@ -47,7 +55,7 @@ needs_review = false
 
 Rows that fail this gate can still have `product_url`, but they are review-only.
 
-### 3. Show the batch command
+### 4. Show the batch command
 
 ```bash
 python batch_main.py \
@@ -56,13 +64,13 @@ python batch_main.py \
   --workers 4
 ```
 
-### 4. Show final_submission.csv
+### 5. Show final_submission.csv
 
 Highlight these columns:
 
 | Column | Message to team |
 |---|---|
-| `product_url` | Best URL emitted by the harness. |
+| `product_url` | Champion/best URL emitted by the harness. |
 | `production_url_ready` | Whether the URL is safe for browser/scraper handoff. |
 | `production_url_status` | Handoff readiness class. |
 | `browser_openable` | Whether the page should open in browser. |
@@ -71,7 +79,7 @@ Highlight these columns:
 | `production_url_reasons` | Why a URL failed the gate, if it failed. |
 | `product_coding_input_path` | Evidence bundle for downstream product coding. |
 
-### 5. Show production-ready filter
+### 6. Show production-ready filter
 
 ```python
 ready = df[
@@ -83,32 +91,34 @@ ready = df[
 
 This filtered dataset is the handoff set for browser and scraping teams.
 
-### 6. Show review-only fallback set
+### 7. Show review-only fallback set
 
 Rows outside the ready set should be shown as governance, not failure:
 
 ```text
-They still have best discovered product_url where possible,
+They still have the best discovered product_url where possible,
 but the system clearly marks them as not production-ready.
 ```
 
-### 7. Open one row artifact folder
+### 8. Open one row artifact folder
 
 Show:
 
 ```text
+output/<row_id>/tournament_bracket.md
+output/<row_id>/batch_winners.csv
 output/<row_id>/quality_assessment.md
 output/<row_id>/product_coding_input.json
 output/<row_id>/evidence_graph.json
 output/<row_id>/decision_trace.md
 ```
 
-Explain that this is the audit trail: what was searched, scraped, verified, rejected, selected, and why.
+Explain that this is the audit trail: what was searched, scraped, compared, rejected, selected, and why.
 
 ## Suggested team wording
 
 ```text
-This harness is not a naive link finder. It runs an iterative search-scrape-verify loop. It first attempts the requested retailer, then same-country alternatives, and then global fallback. The output always preserves the best discovered product_url when a candidate exists, but a separate production gate determines whether that URL is safe for browser opening, downstream scraping, and product coding.
+This harness is not a naive link finder. It uses a tournament-first architecture. It searches broadly within a strict four-credit SerpAPI cap, scrapes candidates in batches, compares them side by side, and selects a champion product URL. The champion still has to pass the production URL gate before it can be handed to browser, scraping, and product-coding teams.
 ```
 
 ```text
@@ -119,6 +129,6 @@ For operational handoff, we will use only rows where production_url_ready is tru
 
 ```text
 The system gives us both coverage and governance:
-- coverage: product_url is populated with the best discovered URL when candidates exist
+- coverage: product_url is populated with the best discovered/champion URL when candidates exist
 - governance: only production_url_ready=true rows are handed to browser/scraping/product-coding teams
 ```
