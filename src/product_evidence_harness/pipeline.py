@@ -112,7 +112,7 @@ class ProductEvidenceHarness:
             llm_calls_used=len(state.llm_call_records),
             state=state,
         )
-        best_match = self._enforce_scrapable_operational_url(best_match, state)
+        best_match = self._enforce_nonempty_product_url(best_match, state)
         state.final_result = best_match
         if self.config.write_outputs:
             product_dir = ArtifactWriter(
@@ -138,18 +138,41 @@ class ProductEvidenceHarness:
         return trace if return_trace else best_match
 
     @staticmethod
-    def _enforce_scrapable_operational_url(match: ProductURLMatch, state: ProductSearchState) -> ProductURLMatch:
-        """Keep the submission-facing product_url scrape-safe.
+    def _enforce_nonempty_product_url(match: ProductURLMatch, state: ProductSearchState) -> ProductURLMatch:
+        """Always expose the best discovered URL in product_url.
 
-        verified_exact_url is already gated by the selector. This additional gate
-        prevents a weak/non-scrapable best-available candidate from being emitted
-        as the operational product_url. Such URLs remain available as reference
-        evidence for review instead of being submitted as usable product links.
+        Business rule: product_url must not be blank when any URL candidate was
+        discovered from requested retailer, same-country alternative, global
+        fallback, organic search, AI reference, or scrape evidence.
+
+        Correctness and scrapability are reported separately through
+        verified_exact_url, is_scrapable, needs_review, url_decision_status,
+        reference_url_status, quality tier, and failure taxonomy. We do not
+        pretend a weak URL is exact; we only avoid suppressing the best URL.
         """
-        if not match.product_url or match.verified_exact_url:
-            return match
+        url = (
+            match.product_url
+            or match.verified_exact_url
+            or match.best_available_url
+            or match.best_reference_url
+            or ProductEvidenceHarness._best_discovered_url(state)
+        )
+        if not url:
+            # A real product URL cannot be fabricated if every provider/tool
+            # returned zero URL candidates. Keep the row visibly unresolved, but
+            # do not hide the strict failure reason.
+            return replace(
+                match,
+                url_decision_status="STRICT_PRODUCT_URL_REQUIRED_BUT_NO_URL_CANDIDATE_AVAILABLE",
+                resolution_status="STRICT_PRODUCT_URL_REQUIRED_BUT_NO_URL_CANDIDATE_AVAILABLE",
+                validation_status="UNRESOLVED",
+                needs_review=True,
+                confidence=0.0,
+                primary_reject_reason=match.primary_reject_reason or "NO_URL_CANDIDATE_AVAILABLE",
+                justification=(match.justification + " | Strict product_url policy could not be satisfied because no URL candidate was discovered by any search/scrape source.").strip(" |"),
+            )
 
-        scrape = state.scrapes.get(match.product_url)
+        scrape = state.scrapes.get(url)
         scrape_usable = bool(
             scrape
             and scrape.scraped
@@ -158,27 +181,66 @@ class ProductEvidenceHarness:
             and scrape.is_scrapable
             and scrape.looks_like_product_page
         )
-        if scrape_usable:
-            return match
+        chosen_from_existing_final = url == match.product_url
+        verified_exact = bool(match.verified_exact_url and url == match.verified_exact_url)
 
-        reference_url = match.best_reference_url or match.best_available_url or match.product_url
-        reason = "Operational product_url cleared because selected best-available candidate was not scrape-usable product-page evidence."
+        if verified_exact or (chosen_from_existing_final and scrape_usable):
+            return replace(match, product_url=url, best_available_url=match.best_available_url or url, is_scrapable=bool(match.is_scrapable or scrape_usable))
+
+        status = ProductEvidenceHarness._strict_url_status(url, state, scrape_usable=scrape_usable)
+        reason = (
+            "Strict non-empty product_url policy applied: emitted the best discovered URL while exposing correctness/scrapability risk through status fields."
+        )
         return replace(
             match,
-            product_url=None,
-            best_available_url=None,
-            best_reference_url=reference_url,
-            reference_url_status=match.reference_url_status or "REFERENCE_ONLY_NOT_SCRAPABLE_OR_UNVERIFIED",
-            url_decision_status="NO_SCRAPABLE_PRODUCT_URL_FOUND",
-            resolution_status="NO_SCRAPABLE_PRODUCT_URL_FOUND",
-            validation_status="UNRESOLVED",
-            is_exact_product_match=False,
-            is_scrapable=False,
+            product_url=url,
+            best_available_url=match.best_available_url or url,
+            best_reference_url=match.best_reference_url or url,
+            reference_url_status=match.reference_url_status or status,
+            url_decision_status=status,
+            resolution_status=status,
+            validation_status="NEEDS_REVIEW" if not match.is_exact_product_match else match.validation_status,
+            is_exact_product_match=bool(match.verified_exact_url and url == match.verified_exact_url),
+            is_scrapable=scrape_usable,
             needs_review=True,
-            confidence=min(match.confidence, 0.20),
+            confidence=min(match.confidence if match.confidence else 0.25, 0.70 if scrape_usable else 0.35),
             justification=(match.justification + " | " + reason).strip(" |"),
-            primary_reject_reason=match.primary_reject_reason or "NOT_SCRAPABLE_PRODUCT_PAGE",
+            primary_reject_reason=match.primary_reject_reason or ("NOT_VERIFIED_EXACT" if scrape_usable else "NOT_SCRAPABLE_OR_UNVERIFIED"),
         )
+
+    @staticmethod
+    def _strict_url_status(url: str, state: ProductSearchState, *, scrape_usable: bool) -> str:
+        if scrape_usable:
+            return "BEST_AVAILABLE_PRODUCT_URL_NEEDS_REVIEW"
+        scrape = state.scrapes.get(url)
+        if scrape and scrape.scraped:
+            if scrape.looks_like_product_page:
+                return "BEST_AVAILABLE_PRODUCT_URL_NOT_SCRAPABLE_NEEDS_REVIEW"
+            return "BEST_AVAILABLE_URL_NOT_CONFIRMED_PRODUCT_PAGE_NEEDS_REVIEW"
+        if any(c.url == url for c in state.candidates):
+            return "DISCOVERED_CANDIDATE_URL_UNSCRAPED_NEEDS_REVIEW"
+        return "REFERENCE_URL_FROM_SEARCH_NEEDS_REVIEW"
+
+    @staticmethod
+    def _best_discovered_url(state: ProductSearchState) -> Optional[str]:
+        for card in state.scorecards:
+            if card.candidate.url:
+                return card.candidate.url
+        for candidate in state.candidates:
+            if candidate.url:
+                return candidate.url
+        for url in state.scrapes:
+            if url:
+                return url
+        for response in state.organic_responses:
+            for result in response.results:
+                if result.url:
+                    return result.url
+        for response in state.ai_responses:
+            for reference in response.references:
+                if reference.link:
+                    return reference.link
+        return None
 
 
 # Intentional API break from the old linear implementation. The old name is kept
