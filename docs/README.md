@@ -2,13 +2,15 @@
 
 Use this index when presenting or operating the Product Evidence Harness.
 
+This folder now keeps only current operating documentation. One-off PR notes, retrospective patch summaries, and stale implementation-history documents have been removed from the active docs tree.
+
 ## Start here
 
 | Document | Purpose |
 |---|---|
 | `../README.md` | Main project overview for the tournament-first architecture and champion confirmation gate. |
-| `END_TO_END_OPERATIONS.md` | Operational runbook for inputs, env, batch run, artifacts, champion confirmation, and handoff. |
-| `TOURNAMENT_MODE.md` | Primary architecture, four-credit SerpAPI cap, champion selection, confirmation, and artifacts. |
+| `END_TO_END_OPERATIONS.md` | Operational runbook for inputs, env, batch run, artifacts, champion confirmation, enforced preflight/batch limits, and handoff. |
+| `TOURNAMENT_MODE.md` | Primary architecture, four-credit SerpAPI cap, enforced top-k/batch limits, champion selection, confirmation, and artifacts. |
 | `TOURNAMENT_CHAMPION_CONTRACT.md` | Exact champion contract, including repeated confirmation requirements. |
 | `CHAMPION.md` | Short champion definition and confirmation requirement. |
 | `TEAM_SHOWCASE_GUIDE.md` | Team-facing demo script and business explanation. |
@@ -25,7 +27,8 @@ Tournament is the default operating path:
 ```text
 search fan-out within 4 SerpAPI credits
   → candidate pool
-  → batch scrape
+  → top-k preflight candidate cut
+  → bounded batch scrape
   → batch winners
   → production-ready champion candidate
   → champion confirmation gate, default 3 checks
@@ -46,6 +49,8 @@ Both notebooks now surface the complete tournament workflow:
 ```text
 tournament config
 4-credit cap
+preflight top-k
+max tournament batches
 champion URL
 runner-up URL
 champion margin
