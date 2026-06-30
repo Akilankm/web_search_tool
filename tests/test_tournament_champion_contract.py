@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import replace
-
 from product_evidence_harness.budget import BudgetTracker
 from product_evidence_harness.candidate_store import CandidateStore
 from product_evidence_harness.config import HarnessPolicy, TournamentConfig
+from product_evidence_harness.constants import PAGE_TYPE_NON_PRODUCT
 from product_evidence_harness.contracts import OrganicSearchResponse, OrganicSearchResult, ProductQuery, ProductSearchState, ScrapeResult
 from product_evidence_harness.evidence_extractor import EvidenceExtractor
 from product_evidence_harness.production_url import ProductionURLGate
@@ -101,5 +100,5 @@ def test_thin_generic_page_is_not_exact_product_detail() -> None:
 
     verification = verifier.verify(product, scrape)
 
-    assert verification.page_type_check == "NON_PRODUCT"
+    assert verification.page_type_check == PAGE_TYPE_NON_PRODUCT
     assert verification.exact_product_check != "EXACT_MATCH"
