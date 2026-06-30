@@ -7,7 +7,7 @@ The URL emitted in `product_url` is intended for two downstream teams:
 1. a team that opens the URL manually in a browser
 2. a team that scrapes the URL to collect complete product information
 
-Because of that, the harness now prefers a **production-grade product URL** over a merely discovered URL.
+Because of that, the harness prefers a **production-grade product URL** over a merely discovered URL.
 
 ## Production-grade definition
 
@@ -19,11 +19,12 @@ highly_scrapable = true
 exact_product_url_match = true
 country match is acceptable
 no hard variant/EAN/product identity conflict
+needs_review = false
 ```
 
 ### Browser-openable
 
-The page must be reachable and not look like a homepage, soft-404, or blocked/thin placeholder.
+The page must be reachable and not look like a homepage, soft-404, blocked page, or thin placeholder.
 
 ### Highly scrapable
 
@@ -35,7 +36,7 @@ The page must be verified as the exact product, not just a sibling variant or re
 
 ## Final selection behavior
 
-The harness now applies two layers:
+The harness applies two layers:
 
 ```text
 Layer 1: production-grade URL promotion
@@ -48,7 +49,7 @@ If no candidate is production-grade, the harness still preserves the strict non-
 
 ## New batch columns
 
-`final_submission.csv` now includes:
+`final_submission.csv` includes:
 
 ```text
 production_url_ready
@@ -95,6 +96,7 @@ STRICT_PRODUCT_URL_REQUIRED_BUT_NO_URL_CANDIDATE_AVAILABLE
 | `exact_product_url_match=true` | Page represents the exact product. |
 | `production_url_status` | Final product URL readiness class. |
 | `production_url_reasons` | Why a URL is not production-grade. |
+| `product_coding_input_path` | Path to downstream product-coding handoff JSON. |
 
 ## High-stakes usage policy
 
@@ -107,3 +109,28 @@ needs_review = false
 ```
 
 Rows that fail this gate still have a `product_url`, but they are review-only and should not be handed to the scraping/coding team as production-ready evidence.
+
+## Notebook workflow
+
+Use the notebooks for demonstration and verification:
+
+```text
+notebooks/01_single_product_harness.ipynb
+notebooks/02_batch_product_harness.ipynb
+```
+
+The single-product notebook shows candidate-level production gate diagnostics. The batch notebook shows the production-ready handoff filter and the review-only fallback set.
+
+## Recommended team demo filter
+
+In `outputs/final_submission.csv`, filter:
+
+```python
+ready = df[
+    (df["production_url_ready"].astype(str).str.lower().isin(["true", "1", "yes"]))
+    & (df["production_url_status"] == "PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL")
+    & (~df["needs_review"].astype(str).str.lower().isin(["true", "1", "yes"]))
+]
+```
+
+This filtered set is the handoff list for browser opening and downstream scraping/coding.
