@@ -1,6 +1,6 @@
 # Product Evidence Harness
 
-Local Python package for **tournament-first exact product URL discovery, production URL validation, and product-coding evidence handoff**.
+Local Python package for **tournament-first exact product URL discovery, production URL validation, champion confirmation, and product-coding evidence handoff**.
 
 This is intentionally not an AzureML component. It is a local PDM/Python codebase with notebooks and CLI entrypoints.
 
@@ -16,7 +16,8 @@ Input product identity
   → concurrent batch scraping
   → deterministic identity, EAN, title, variant, country, retailer, and page-quality checks
   → batch winners
-  → champion URL
+  → production-ready champion candidate
+  → champion confirmation gate, default 3 checks
   → production URL gate
   → evidence artifacts and product-coding handoff
 ```
@@ -25,22 +26,25 @@ The older iterative loop is retained only as a legacy/debug fallback when tourna
 
 ## High-stakes handoff policy
 
-`product_url` and `production_url_ready` must not be confused:
+`product_url`, `production_url_ready`, and champion confirmation must not be confused:
 
 ```text
 product_url = best discovered/champion URL emitted by the harness
 production_url_ready = whether product_url is safe for browser-opening, downstream scraping, and product coding
+champion_confirmation.passed = whether the champion candidate passed repeated quality confirmation
 ```
 
-For browser, scraping, and product-coding teams, use only rows where:
+For browser, scraping, and product-coding teams, use only rows/artifacts where:
 
 ```text
 production_url_ready = true
 production_url_status = PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL
+champion_confirmation.passed = true
+champion_confirmation.success_count = champion_confirmation.required_successes
 needs_review = false
 ```
 
-Rows that fail this gate can still have `product_url`, but they are **review-only**.
+Rows that fail this combined gate can still have `product_url`, but they are **review-only**.
 
 ## Tournament defaults
 
@@ -57,6 +61,23 @@ PRODUCT_HARNESS_TOURNAMENT_MAX_BATCHES=3
 
 The code clamps `PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS` to a maximum of `4`.
 
+Tournament scrape volume is also bounded by the enforced preflight and batch controls:
+
+```text
+preflight candidates considered = top PRODUCT_HARNESS_TOURNAMENT_PREFLIGHT_TOP_K ranked candidates
+max tournament batch candidates scraped = PRODUCT_HARNESS_TOURNAMENT_BATCH_SIZE × PRODUCT_HARNESS_TOURNAMENT_MAX_BATCHES
+default max tournament batch candidates scraped = 20 × 3 = 60
+```
+
+Champion confirmation is currently implemented as a fixed post-selection gate:
+
+```text
+champion_confirmation.required_attempts = 3
+champion_confirmation.required_successes = 3
+```
+
+These confirmation checks are not extra SerpAPI searches. They are post-selection quality confirmations recorded in the row artifacts.
+
 ## Input contract
 
 | Field | Required | Role |
@@ -69,13 +90,13 @@ The code clamps `PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS` to a maximum of `4
 | `language_code` | No | Optional search language override. |
 | `region` | No | Optional market hint. |
 
-EAN/GTIN identifiers are read as strings. If Excel has already converted an EAN into scientific notation, the system flags `EAN_SCIENTIFIC_NOTATION_LOSS_RISK` and avoids using the corrupted value as exact evidence.
+EAN/GTIN identifiers are read as strings. Invalid/corrupted values are retained for diagnostics but are not used as exact search anchors.
 
 ## URL decision semantics
 
-| Field | Meaning |
+| Field / artifact | Meaning |
 |---|---|
-| `product_url` | Best discovered/champion URL. Populated whenever any candidate/search/scrape URL exists. |
+| `product_url` | Best discovered/champion URL. Can be review-only unless all handoff gates pass. |
 | `production_url_ready` | True only when `product_url` is browser-openable, highly scrapable, and exact-product verified. |
 | `production_url_status` | Final handoff/readiness class for the selected `product_url`. |
 | `browser_openable` | Whether the selected page is expected to open in a normal browser. |
@@ -83,6 +104,8 @@ EAN/GTIN identifiers are read as strings. If Excel has already converted an EAN 
 | `exact_product_url_match` | Whether the selected URL is verified as the exact product, not a sibling/variant. |
 | `verified_exact_url` | Strict exact URL. Filled only when exact product proof passes final gates. |
 | `needs_review` | True when the final URL is not production-safe or not coding-ready. |
+| `champion_confirmation.json` | Row-level repeated confirmation artifact for the champion candidate. |
+| `champion_confirmation.passed` | True only when the repeated champion confirmation gate passed. |
 | `quality_tier` | Enterprise quality tier A/B/C/D/E. |
 | `failure_taxonomy` | Machine-readable reasons for weak/review outcomes. |
 
@@ -90,6 +113,8 @@ Important status values:
 
 ```text
 PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL
+CHAMPION_CONFIRMATION_PASSED
+CHAMPION_CONFIRMATION_FAILED
 PRODUCT_URL_NOT_BROWSER_OPENABLE_NEEDS_REVIEW
 PRODUCT_URL_NOT_HIGHLY_SCRAPABLE_NEEDS_REVIEW
 PRODUCT_URL_NOT_EXACT_MATCH_NEEDS_REVIEW
@@ -127,6 +152,8 @@ output/<row_id>/
 ├── quality_assessment.md
 ├── tournament_bracket.json
 ├── tournament_bracket.md
+├── champion_confirmation.json
+├── champion_confirmation.md
 └── batch_winners.csv
 ```
 
@@ -140,7 +167,7 @@ outputs/
 └── metrics.json
 ```
 
-`final_submission.csv` is the main business artifact. For production handoff, filter by `production_url_ready=true` and `needs_review=false`.
+`final_submission.csv` is the main business artifact. For production handoff, filter by `production_url_ready=true` and `needs_review=false`, then verify the row artifact has `champion_confirmation.passed=true`.
 
 ## Product-coding handoff
 
@@ -164,6 +191,8 @@ coding_readiness_status
 review_flags
 ```
 
+Coding readiness should be treated as complete only when the selected URL is production-ready and champion confirmation passed.
+
 ## Active notebooks
 
 ```text
@@ -176,9 +205,14 @@ Both notebooks now cover the complete end-to-end tournament workflow:
 ```text
 tournament config
 4-credit SerpAPI cap
+preflight top-k
+max tournament batches
 champion URL
 runner-up URL
 champion margin
+champion confirmation attempts/successes
+champion_confirmation.json
+champion_confirmation.md
 batch winners
 production URL readiness
 product-coding input artifact
@@ -203,10 +237,13 @@ harness = ProductEvidenceHarness(serp_config=serp_config, config=config)
 trace = harness.run(product, return_trace=True)
 
 match = trace.best_match
+tournament = getattr(trace.state, "tournament_result", None)
+confirmation = getattr(tournament, "champion_confirmation", None) if tournament else None
 production = ProductionURLGate().assess_url_in_state(trace.state, match.product_url or "")
 
 print(match.product_url)
 print(production.to_dict() if production else "No production assessment")
+print(confirmation.to_dict() if confirmation else "No champion confirmation")
 ```
 
 ## Batch usage
@@ -228,8 +265,11 @@ PYTHONPATH=src pytest -q
 ## Related docs
 
 ```text
+docs/README.md
 docs/END_TO_END_OPERATIONS.md
 docs/TOURNAMENT_MODE.md
+docs/TOURNAMENT_CHAMPION_CONTRACT.md
+docs/CHAMPION.md
 docs/PRODUCTION_GRADE_PRODUCT_URL.md
 docs/STRICT_PRODUCT_URL_POLICY.md
 docs/ELITE_EVIDENCE_ENGINE.md
