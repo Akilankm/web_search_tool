@@ -11,7 +11,6 @@ from src.product_evidence_harness.contracts import CandidateScorecard, HarnessTr
 from src.product_evidence_harness.elite import EnterpriseEvidenceEngine
 from src.product_evidence_harness.identity.graph import ProductIdentityGraphBuilder
 from src.product_evidence_harness.pipeline import ProductEvidenceHarness as BaseProductEvidenceHarness
-from src.product_evidence_harness.production_url import ProductionURLAssessment
 from src.product_evidence_harness.retailer_strategy import candidate_matches_requested_retailer
 from src.product_evidence_harness.tournament import CandidateTournamentEngine, TournamentResult
 from src.product_evidence_harness.url_utils import domain_of
@@ -19,14 +18,11 @@ from src.product_evidence_harness.url_utils import domain_of
 
 @dataclass
 class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
-    """ProductEvidenceHarness with optional tournament-mode orchestration.
+    """ProductEvidenceHarness with tournament-mode orchestration.
 
-    When PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE=true, this class builds a broad
-    candidate pool with at most PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS
-    Google organic SerpAPI calls, scrapes candidates in batches, and selects the
-    tournament champion as product_url. The production URL gate still decides
-    whether that champion is handoff-ready. When disabled, it delegates to the
-    existing loop implementation unchanged.
+    In tournament mode, product_url is reserved for a true champion: exact product,
+    browser-openable, highly scrapable, and rich enough for downstream product
+    coding evidence. Review candidates are kept separately when no champion exists.
     """
 
     tournament_engine: CandidateTournamentEngine | None = None
@@ -53,16 +49,8 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
             profile = self.country_profiles.get(product.country_code)
             product = replace(product, language_code=profile.default_language)
 
-        logger.info(
-            "Starting tournament product evidence harness | row_id={} | max_serp_credits={}",
-            product.row_id,
-            self.config.tournament.max_serp_credits,
-        )
-        budget = BudgetTracker(
-            max_organic=self.config.tournament.max_serp_credits,
-            max_ai_mode=0,
-            max_scrapes=self.config.budget.max_scrapes,
-        )
+        logger.info("Starting tournament product evidence harness | row_id={} | max_serp_credits={}", product.row_id, self.config.tournament.max_serp_credits)
+        budget = BudgetTracker(max_organic=self.config.tournament.max_serp_credits, max_ai_mode=0, max_scrapes=self.config.budget.max_scrapes)
         state = ProductSearchState(task=product, budget=budget)
         state.identity_graph = ProductIdentityGraphBuilder().build(product)
 
@@ -70,6 +58,7 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
         if self.config.enable_llm_adjudication and self.llm_adjudicator is not None and not state.llm_judgements:
             state = self.llm_adjudicator.adjudicate_state(state)
             state.scorecards = self.ranker.score(product=state.task, candidates=state.candidates, scrapes=state.scrapes, verifications=state.verifications)
+            tournament_result = self.tournament_engine.run(state)
 
         best_match = self.selector.select(
             task=product,
@@ -80,63 +69,89 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
             state=state,
         )
         best_match = self._enforce_production_grade_product_url(best_match, state, production_gate=self.production_gate)
-        best_match = self._align_final_with_tournament_champion(best_match, state, tournament_result)
+        best_match = self._align_final_with_tournament_result(best_match, state, tournament_result)
         state.final_result = best_match
 
         self._write_outputs(state, tournament_result)
-        logger.info(
-            "Completed tournament harness | row_id={} | status={} | url={} | tournament_champion={}",
-            product.row_id,
-            best_match.url_decision_status,
-            best_match.product_url,
-            tournament_result.champion_url,
-        )
+        logger.info("Completed tournament harness | row_id={} | status={} | url={} | champion={}", product.row_id, best_match.url_decision_status, best_match.product_url, tournament_result.champion_url)
         trace = HarnessTrace(state=state, best_match=best_match)
         return trace if return_trace else best_match
 
-    def _align_final_with_tournament_champion(self, match: ProductURLMatch, state: ProductSearchState, tournament_result: TournamentResult) -> ProductURLMatch:
-        """Make the tournament champion the business-selected product_url.
+    def _align_final_with_tournament_result(self, match: ProductURLMatch, state: ProductSearchState, tournament_result: TournamentResult) -> ProductURLMatch:
+        """Apply tournament result semantics to final output.
 
-        Runner-ups support the decision, but product_url must represent the champion.
-        The production gate still controls needs_review and handoff readiness.
+        Champion exists only when a URL passed the production gate. If no champion
+        exists, product_url is cleared and the best review candidate is preserved
+        as best_available_url / best_reference_url for manual investigation.
         """
-        champion_url = tournament_result.champion_url
-        if not champion_url:
-            return match
-        champion = self._card_for_url(state, champion_url)
+        if not tournament_result.champion_url:
+            review_url = tournament_result.best_review_candidate_url or match.product_url or match.best_available_url or match.best_reference_url
+            justification = (
+                f"No production-ready tournament champion was found. "
+                f"Best review candidate={review_url or 'None'}; status={tournament_result.best_review_candidate_status}. "
+                "product_url is intentionally empty because no candidate passed exact-product, browser-openable, highly scrapable, critical-detail evidence gates."
+            )
+            if match.justification:
+                justification = match.justification + " | " + justification
+            return replace(
+                match,
+                product_url=None,
+                verified_exact_url=None,
+                best_available_url=review_url,
+                best_reference_url=review_url or match.best_reference_url,
+                url_decision_status="NO_PRODUCTION_READY_TOURNAMENT_CHAMPION",
+                resolution_status="NO_PRODUCTION_READY_TOURNAMENT_CHAMPION",
+                validation_status="NEEDS_REVIEW",
+                identity_status="UNVERIFIED",
+                is_exact_product_match=False,
+                is_scrapable=False,
+                needs_review=True,
+                confidence=0.0,
+                match_reason="no production-ready tournament champion",
+                justification=justification,
+                selected_with_warning=True,
+                primary_reject_reason="NO_PRODUCTION_READY_TOURNAMENT_CHAMPION",
+                selection_scope="review_only",
+                selected_retailer_name="review_only",
+                selected_domain=domain_of(review_url) if review_url else "",
+                selected_from_requested_retailer=False,
+                selected_from_other_country_retailer=False,
+                selected_from_global_fallback=False,
+            )
+
+        champion = self._card_for_url(state, tournament_result.champion_url)
         if not champion:
             return match
         assessment = self.production_gate.assess_card(champion)
+        if not assessment.production_ready:
+            return self._align_final_with_tournament_result(match, state, replace(tournament_result, champion_url=None))
+
         scrape = champion.scrape
         verification = champion.verification
         requested = bool(state.task.retailer_name and (champion.retailer_check == "MATCHED" or candidate_matches_requested_retailer(champion.candidate, state.task.retailer_name)))
         country_specific = champion.country_check in {"MATCHED", "NOT_PROVIDED"}
         global_fallback = champion.country_check == "ALTERNATIVE"
         scope = "requested_retailer" if requested else "country" if country_specific else "global_fallback" if global_fallback else "tournament_champion"
-        status = assessment.status if assessment else "TOURNAMENT_CHAMPION_NOT_ASSESSED"
-        production_ready = bool(assessment and assessment.production_ready)
-        reasons = "; ".join(assessment.reasons) if assessment and assessment.reasons else ""
+        reasons = "; ".join(assessment.reasons) if assessment.reasons else "none"
         justification = (
-            f"Tournament champion selected as product_url. Champion={champion_url}. "
-            f"Production status={status}. "
-            f"Runner-up={tournament_result.runner_up_url or 'None'}. "
-            f"Reasons={reasons or 'none'}."
+            f"Tournament champion selected as product_url. Champion={tournament_result.champion_url}. "
+            f"Production status={assessment.status}. Runner-up={tournament_result.runner_up_url or 'None'}. Reasons={reasons}."
         )
         if match.justification:
             justification = match.justification + " | " + justification
         return replace(
             match,
-            product_url=champion_url,
-            best_available_url=champion_url,
-            verified_exact_url=champion_url if production_ready else None,
-            url_decision_status=status,
-            resolution_status="RESOLVED" if production_ready else "TOURNAMENT_CHAMPION_NEEDS_REVIEW",
-            validation_status="VERIFIED" if production_ready else "NEEDS_REVIEW",
+            product_url=tournament_result.champion_url,
+            best_available_url=tournament_result.champion_url,
+            verified_exact_url=tournament_result.champion_url,
+            url_decision_status=assessment.status,
+            resolution_status="RESOLVED",
+            validation_status="VERIFIED",
             identity_status=verification.identity_status if verification else match.identity_status,
-            is_exact_product_match=bool(assessment.exact_product_match) if assessment else False,
-            needs_review=not production_ready,
-            confidence=assessment.score if assessment else champion.final_confidence,
-            match_reason="tournament champion selected",
+            is_exact_product_match=True,
+            needs_review=False,
+            confidence=assessment.score,
+            match_reason="production-ready tournament champion selected",
             justification=justification,
             ean_check=verification.ean_check if verification else match.ean_check,
             title_check=verification.title_check if verification else match.title_check,
@@ -144,10 +159,10 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
             page_type_check=verification.page_type_check if verification else match.page_type_check,
             retailer_check=champion.retailer_check,
             country_check=champion.country_check,
-            blocking_reasons="; ".join(verification.blocking_reasons if verification else champion.hard_failures),
-            hard_failures=champion.hard_failures,
-            soft_warnings=tuple([*champion.soft_warnings, *(('TOURNAMENT_CHAMPION_NOT_PRODUCTION_READY',) if not production_ready else ())]),
-            is_scrapable=bool(scrape and scrape.is_scrapable),
+            blocking_reasons="",
+            hard_failures=(),
+            soft_warnings=champion.soft_warnings,
+            is_scrapable=True,
             scrape_status_code=scrape.status_code if scrape else None,
             scrape_word_count=scrape.word_count if scrape else 0,
             scrape_markdown_chars=scrape.markdown_chars if scrape else 0,
@@ -167,16 +182,16 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
             variant_conflict_terms=verification.variant_conflict_terms if verification else (),
             identity_driver=verification.identity_driver if verification else champion.identity_driver,
             ean_status=verification.ean_status if verification else match.ean_status,
-            ean_conflict_is_blocking=verification.ean_conflict_is_blocking if verification else False,
+            ean_conflict_is_blocking=False,
             input_ean_valid=verification.input_ean_valid if verification else match.input_ean_valid,
             input_ean_normalized=verification.input_ean_normalized if verification else match.input_ean_normalized,
             page_gtins_valid=verification.page_gtins_valid if verification else (),
             page_gtins_ignored=verification.page_gtins_ignored if verification else (),
-            selected_with_warning=not production_ready,
-            primary_reject_reason="" if production_ready else "TOURNAMENT_CHAMPION_NOT_PRODUCTION_READY",
+            selected_with_warning=False,
+            primary_reject_reason="",
             selection_scope=scope,
             selected_retailer_name=state.task.retailer_name if requested else ("global_fallback" if global_fallback else "tournament_champion"),
-            selected_domain=domain_of(champion_url),
+            selected_domain=domain_of(tournament_result.champion_url),
             selected_from_requested_retailer=requested,
             selected_from_other_country_retailer=bool(country_specific and state.task.retailer_name and not requested),
             selected_from_global_fallback=global_fallback,
