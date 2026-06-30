@@ -34,7 +34,7 @@ from src.product_evidence_harness.detectors import DetectorFinding, VariantConfl
 from src.product_evidence_harness.io import CSVProductIO
 from src.product_evidence_harness.llm import ExactProductLLMAdjudicator, LLMConfig, LLMService
 from src.product_evidence_harness.logging_utils import RichPrinter, configure_logging
-from src.product_evidence_harness.tournament_pipeline import (
+from src.product_evidence_harness.champion_pipeline import (
     HarnessProductURLFinderPipeline,
     HybridProductURLFinderPipeline,
     ProductEvidenceHarness,
