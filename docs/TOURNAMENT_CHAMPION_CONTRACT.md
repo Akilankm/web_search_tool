@@ -12,6 +12,16 @@ best_review_candidate_url = strongest non-champion candidate for debugging/revie
 runner_up_url = comparison evidence
 ```
 
+## Search budget
+
+Tournament search uses a maximum of four SerpAPI search batches per product.
+
+```text
+max SerpAPI search batches = 4
+```
+
+Each search batch may return many candidate URLs. Repeated appearance across batches is a strong relevance signal, but it is not enough to become champion.
+
 ## Champion eligibility
 
 A URL can become champion only when it is:
@@ -40,6 +50,29 @@ GTIN/EAN when present
 price or availability signal
 ```
 
+## Champion confirmation gate
+
+After a candidate passes the normal champion gate, the same candidate must pass repeated confirmation checks before final production handoff.
+
+Default requirement:
+
+```text
+champion_confirmation_attempts = 3
+champion_confirmation_required_successes = 3
+```
+
+Each confirmation attempt re-checks the same candidate URL against the production evidence gate. The confirmation must show:
+
+```text
+all required attempts pass
+final URL is stable
+product evidence label is stable
+critical product details remain extractable
+richness and word-count do not collapse
+```
+
+If confirmation fails, the candidate is not accepted as champion.
+
 ## Search objective
 
 The harness should keep the target in working memory:
@@ -48,7 +81,8 @@ The harness should keep the target in working memory:
 Find the real product URL matching the input request.
 Scrape enough critical product evidence.
 Promote only a usable exact product page as champion.
-Record every search, scrape, decision, rejection, and runner-up.
+Confirm the champion repeatedly before production handoff.
+Record every search, scrape, decision, rejection, confirmation attempt, and runner-up.
 ```
 
 ## Review candidate
@@ -67,7 +101,7 @@ Invalid EAN/GTIN values are not used in search queries or LLM prompts. They rema
 
 ## Coding readiness rule
 
-A row cannot be `CODING_READY` unless a production-ready exact champion exists.
+A row cannot be `CODING_READY` unless a production-ready exact champion exists and champion confirmation passed.
 
 ## Requested retailer metrics
 
