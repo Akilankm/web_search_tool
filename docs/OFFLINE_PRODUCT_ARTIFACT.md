@@ -1,29 +1,44 @@
-# Offline Product Artifact
+# Optional Offline Product Artifact
 
 ## Purpose
 
-The live retailer page should be treated as a temporary discovery source, not the permanent downstream input.
+Offline product artifact capture is an **optional second-stage workflow**. It is not part of the default tournament run and should not be treated as mandatory for every product.
 
-The production handoff should become:
+Use it when you want to freeze a confirmed champion URL into a local, openable evidence package that can be inspected or reused without depending on the live retailer page.
+
+The optional flow is:
 
 ```text
 confirmed champion URL
-  -> live capture once
+  -> optional live capture once
   -> validated offline product artifact
-  -> downstream scraping and product coding from local files only
+  -> optional downstream scraping/coding from local files only
 ```
 
-This avoids relying on the retailer page after discovery. A page can change, block, geo-route, expire, or render differently later; a validated offline artifact keeps the evidence stable and auditable.
+This avoids relying on the retailer page after discovery for workflows that require reproducibility. A page can change, block, geo-route, expire, or render differently later; a validated offline artifact keeps the captured evidence stable and auditable.
+
+## When to use it
+
+Use offline capture when:
+
+```text
+you need to open the captured page later without internet
+you need a stable audit artifact for manual review
+you want product coding to consume frozen local evidence
+you want to avoid repeat live retailer scraping after champion validation
+```
+
+Do not use it when the normal champion URL handoff is sufficient.
 
 ## New artifact status
 
-The offline capture builder produces this final status when the local evidence package is usable:
+The offline capture builder produces this status when the local evidence package is usable:
 
 ```text
 PRODUCTION_READY_OFFLINE_ARTIFACT
 ```
 
-Rows should be handed to the product coding engine only when the URL gate and offline artifact gate both pass:
+For the optional offline handoff, use rows only when the URL gate and offline artifact gate both pass:
 
 ```text
 production_url_ready = true
@@ -99,9 +114,15 @@ srcset
 
 The artifact is not marked production-ready if such references remain.
 
-## Usage
+## Dedicated notebook
 
-Standalone capture:
+Offline capture has its own notebook and is intentionally separate from the main discovery notebooks:
+
+```text
+notebooks/03_offline_product_artifact.ipynb
+```
+
+## CLI usage
 
 ```bash
 PYTHONPATH=src python scripts/capture_offline_page.py \
@@ -113,13 +134,13 @@ PYTHONPATH=src python scripts/capture_offline_page.py \
   --ean "1234567890123"
 ```
 
-Programmatic capture:
+## Programmatic usage
 
 ```python
 from pathlib import Path
 
-from src.product_evidence_harness.contracts import ProductQuery
-from src.product_evidence_harness.offline_capture import OfflineCaptureConfig, LivePageOfflineArtifactBuilder
+from product_evidence_harness import ProductQuery
+from product_evidence_harness.offline_capture import OfflineCaptureConfig, LivePageOfflineArtifactBuilder
 
 product = ProductQuery(
     row_id="input-001",
@@ -152,5 +173,5 @@ The correct production guarantee is:
 
 ```text
 Once a champion URL is captured and validated as PRODUCTION_READY_OFFLINE_ARTIFACT,
-downstream scraping/coding can run from local evidence without revisiting the live page.
+offline-enabled downstream workflows can run from local evidence without revisiting the live page.
 ```
