@@ -14,6 +14,7 @@ flowchart TD
     E --> I[Decision Contracts]
     F --> J[Artifact Guide]
     G --> K[Offline Product Artifact]
+    I --> L[Codebase Functionality Map]
 ```
 
 ## Start here
@@ -24,6 +25,7 @@ flowchart TD
 | `BUSINESS_OVERVIEW.md` | Leadership-facing value explanation. | Leadership, managers |
 | `NOTEBOOK_GATEWAY.md` | Notebook-first usage map. | Everyone |
 | `VISUAL_PIPELINE_GUIDE.md` | Graphical explanation of the non-linear pipeline. | Managers, engineers, reviewers |
+| `CODEBASE_FUNCTIONALITY_MAP.md` | Business capability map from code modules to notebook workflows. | Managers, engineers, adoption leads |
 | `DECISION_CONTRACTS.md` | Output field/status meaning and handoff rules. | Operations, downstream teams |
 | `ARTIFACT_GUIDE.md` | Output files, audit trail, and row artifact interpretation. | Analysts, reviewers, engineers |
 | `ASSUMPTIONS_AND_CONSTRAINTS.md` | Input assumptions, external limits, and reliability boundaries. | Leadership, governance, engineers |
