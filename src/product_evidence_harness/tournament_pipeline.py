@@ -212,8 +212,7 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
                 write_debug_csvs=self.config.write_debug_csvs,
                 country_profiles=self.country_profiles,
             ).write_state(state)
-            EnterpriseEvidenceEngine().write_artifacts(state, product_dir)
-            self.tournament_engine.write_artifacts(tournament_result, product_dir)
+            self._write_reviewer_first_outputs(state, product_dir)
         if self.config.write_artifacts and self.config.artifact_dir:
             product_dir = ArtifactWriter(
                 self.config.artifact_dir,

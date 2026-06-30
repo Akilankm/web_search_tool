@@ -10,7 +10,7 @@ Batch outputs:
   - final_submission.csv: compact file to submit/share.
   - review_queue.csv: rows that need human review.
   - batch_summary.md: human-readable run summary.
-  - output/<row_id>/: markdown evidence packet + trace.json for each product.
+  - output/<row_id>/: concise review packet for each product.
 """
 
 from __future__ import annotations
@@ -93,10 +93,10 @@ def process(product, env_file: str) -> dict[str, Any]:
                 "production_url_score": 0.0,
                 "production_url_reasons": "NO_SCORECARD_FOR_SELECTED_PRODUCT_URL",
             })
-        row["enterprise_assessment_path"] = str(row_dir / "enterprise_assessment.json")
-        row["evidence_graph_path"] = str(row_dir / "evidence_graph.json")
+        row["review_summary_path"] = str(row_dir / "review_summary.md")
+        row["review_decision_path"] = str(row_dir / "review_decision.json")
+        row["candidate_decisions_path"] = str(row_dir / "candidate_decisions.csv")
         row["product_coding_input_path"] = str(row_dir / "product_coding_input.json")
-        row["review_feedback_template_path"] = str(row_dir / "review_feedback_template.json")
         row["status"] = "success"
         row["error"] = None
         return row
@@ -143,10 +143,10 @@ def process(product, env_file: str) -> dict[str, Any]:
             "scrape_calls_used": 0,
             "final_justification": "Run failed before final decision.",
             "row_report_path": "",
-            "enterprise_assessment_path": "",
-            "evidence_graph_path": "",
+            "review_summary_path": "",
+            "review_decision_path": "",
+            "candidate_decisions_path": "",
             "product_coding_input_path": "",
-            "review_feedback_template_path": "",
             "status": "error",
             "error": str(exc),
         }
@@ -247,8 +247,9 @@ def write_batch_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
         "## Review Queue",
         "Rows marked `needs_review=true` are written to `review_queue.csv`.",
         "",
-        "## Enterprise Evidence Artifacts",
-        "Each row now includes `enterprise_assessment.json`, `evidence_graph.json`, `product_coding_input.json`, `review_feedback_template.json`, and `quality_assessment.md`.",
+        "## Concise Row Review Packet",
+        "Each row folder defaults to `final_row.csv`, `review_summary.md`, `review_decision.json`, `candidate_decisions.csv`, and `product_coding_input.json`.",
+        "Open `review_summary.md` first. Use `notebooks/04_review_artifact_reader.ipynb` to inspect a row without browsing multiple files.",
         "",
         "## Dashboard Data",
         "Machine-readable batch metrics are written to `metrics.json`.",

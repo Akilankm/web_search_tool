@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field, replace
 from typing import Optional
 
@@ -23,6 +24,7 @@ from src.product_evidence_harness.planner import HarnessPlanner
 from src.product_evidence_harness.production_url import ProductionURLGate
 from src.product_evidence_harness.query_builder import QueryBuilder
 from src.product_evidence_harness.ranker import ProductURLRanker
+from src.product_evidence_harness.review_artifacts import ReviewArtifactWriter
 from src.product_evidence_harness.scraper import CrawlScraper
 from src.product_evidence_harness.selector import FinalSelector
 from src.product_evidence_harness.serp_clients import GoogleAIModeClient, GoogleOrganicSearchClient
@@ -126,7 +128,7 @@ class ProductEvidenceHarness:
                 write_debug_csvs=self.config.write_debug_csvs,
                 country_profiles=self.country_profiles,
             ).write_state(state)
-            self.enterprise_engine.write_artifacts(state, product_dir)
+            self._write_reviewer_first_outputs(state, product_dir)
         if self.config.write_artifacts and self.config.artifact_dir:
             product_dir = ArtifactWriter(
                 self.config.artifact_dir,
@@ -140,6 +142,21 @@ class ProductEvidenceHarness:
         logger.info("Completed harness | row_id={} | status={} | identity={} | confidence={} | url={}", product.row_id, best_match.validation_status, best_match.identity_status, best_match.confidence, best_match.product_url)
         trace = HarnessTrace(state=state, best_match=best_match)
         return trace if return_trace else best_match
+
+    def _write_reviewer_first_outputs(self, state: ProductSearchState, product_dir) -> None:
+        """Write concise default artifacts only.
+
+        Deep enterprise/debug artifacts are still available through
+        PRODUCT_HARNESS_WRITE_ARTIFACTS / artifact_dir flows, but the default
+        row folder stays reviewer-friendly.
+        """
+        assessment = self.enterprise_engine.assess(state)
+        (product_dir / "product_coding_input.json").write_text(
+            json.dumps(assessment.product_coding_input, indent=2, ensure_ascii=False, default=str) + "\n",
+            encoding="utf-8",
+        )
+        if self.config.write_review_pack:
+            ReviewArtifactWriter().write_state(product_dir, state)
 
     @staticmethod
     def _enforce_production_grade_product_url(match: ProductURLMatch, state: ProductSearchState, *, production_gate: ProductionURLGate | None = None) -> ProductURLMatch:
@@ -180,99 +197,90 @@ class ProductEvidenceHarness:
                 validation_status="UNRESOLVED",
                 needs_review=True,
                 confidence=0.0,
-                primary_reject_reason=match.primary_reject_reason or "NO_URL_CANDIDATE_AVAILABLE",
-                justification=(match.justification + " | Strict product_url policy could not be satisfied because no URL candidate was discovered by any search/scrape source.").strip(" |"),
+                match_reason="No URL candidate was available after search and fallback attempts.",
+                justification="No product URL could be emitted because no candidate URL was discovered or retained.",
             )
 
         assessment = gate.assess_url_in_state(state, url)
-        if assessment and assessment.production_ready:
-            # Defensive path for cases where the current selected URL is already
-            # production-ready but not returned by best_production_card because of
-            # missing scorecard ordering context.
-            return replace(
-                match,
-                product_url=url,
-                best_available_url=match.best_available_url or url,
-                verified_exact_url=match.verified_exact_url or url,
-                url_decision_status=assessment.status,
-                resolution_status="RESOLVED",
-                validation_status="VERIFIED",
-                is_exact_product_match=True,
-                is_scrapable=True,
-                needs_review=False,
-                confidence=max(match.confidence, assessment.score),
-                primary_reject_reason="",
-                justification=(match.justification + " | Production-grade product URL confirmed.").strip(" |"),
-            )
-
-        scrape = state.scrapes.get(url)
-        scrape_usable = bool(
-            scrape
-            and scrape.scraped
-            and scrape.success
-            and scrape.reachable
-            and scrape.is_scrapable
-            and scrape.looks_like_product_page
-        )
-        status = assessment.status if assessment else ProductEvidenceHarness._strict_url_status(url, state, scrape_usable=scrape_usable)
-        reasons = "; ".join(assessment.reasons) if assessment and assessment.reasons else "production-grade checks failed"
-        reason = (
-            "No production-grade exact/scrapable/browser-openable URL passed all final gates. "
-            "Strict non-empty product_url policy emitted the best discovered fallback URL for review. "
-            f"Production gate reasons: {reasons}."
-        )
-        return replace(
+        status = assessment.status if assessment else "PRODUCT_URL_NOT_PRODUCTION_GRADE_NEEDS_REVIEW"
+        reasons = "; ".join(assessment.reasons) if assessment else "No production assessment was available."
+        card = ProductEvidenceHarness._card_for_url(state, url)
+        selected_warning = ProductEvidenceHarness._replace_from_card(
             match,
+            card,
+            status=status,
+            reason=f"Best available URL retained for review only. {reasons}",
+        ) if card else match
+        return replace(
+            selected_warning,
             product_url=url,
-            best_available_url=match.best_available_url or url,
-            best_reference_url=match.best_reference_url or url,
-            reference_url_status=match.reference_url_status or status,
+            best_available_url=url,
+            verified_exact_url=None,
             url_decision_status=status,
             resolution_status=status,
             validation_status="NEEDS_REVIEW",
-            is_exact_product_match=False,
-            is_scrapable=scrape_usable,
             needs_review=True,
-            confidence=min(match.confidence if match.confidence else 0.25, 0.70 if scrape_usable else 0.35),
-            justification=(match.justification + " | " + reason).strip(" |"),
-            primary_reject_reason=match.primary_reject_reason or "PRODUCT_URL_NOT_PRODUCTION_GRADE",
+            confidence=min(selected_warning.confidence or 0.0, 0.49),
+            match_reason="best available URL retained for review; not production-grade",
+            justification=f"A non-empty URL is returned for review, but it is not production-ready. Reasons: {reasons}",
+            selected_with_warning=True,
+            primary_reject_reason=status,
         )
 
     @staticmethod
-    def _replace_from_card(match: ProductURLMatch, card: CandidateScorecard, *, status: str, reason: str) -> ProductURLMatch:
+    def _best_discovered_url(state: ProductSearchState) -> str | None:
+        if state.scorecards:
+            return sorted(state.scorecards, key=lambda c: c.final_confidence, reverse=True)[0].candidate.url
+        if state.candidates:
+            return state.candidates[0].url
+        return None
+
+    @staticmethod
+    def _card_for_url(state: ProductSearchState, url: str) -> CandidateScorecard | None:
+        for card in state.scorecards:
+            if card.candidate.url == url:
+                return card
+        return None
+
+    @staticmethod
+    def _replace_from_card(match: ProductURLMatch, card: CandidateScorecard | None, *, status: str, reason: str) -> ProductURLMatch:
+        if card is None:
+            return replace(match, url_decision_status=status, resolution_status=status, justification=reason)
         scrape = card.scrape
         verification = card.verification
         url = card.candidate.url
+        requested = card.retailer_check == "MATCHED"
         country_specific = card.country_check in {"MATCHED", "NOT_PROVIDED"}
-        global_fallback = card.country_check == "COUNTRY_ALTERNATIVE"
+        global_fallback = card.country_check == "ALTERNATIVE"
+        scope = "requested_retailer" if requested else "country" if country_specific else "global_fallback" if global_fallback else "fallback"
         return replace(
             match,
             product_url=url,
             best_available_url=url,
-            verified_exact_url=url,
+            verified_exact_url=url if status == "PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL" else match.verified_exact_url,
             url_decision_status=status,
-            resolution_status="RESOLVED",
-            validation_status="VERIFIED",
-            identity_status=verification.identity_status if verification else "VERIFIED",
-            is_exact_product_match=True,
-            match_reason="production-grade exact product URL selected",
-            justification=(match.justification + " | " + reason).strip(" |"),
+            resolution_status="RESOLVED" if status == "PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL" else status,
+            validation_status="VERIFIED" if status == "PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL" else "NEEDS_REVIEW",
+            identity_status=verification.identity_status if verification else match.identity_status,
+            is_exact_product_match=bool(verification and verification.exact_product_check == "EXACT_MATCH"),
+            needs_review=status != "PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL",
+            confidence=card.final_confidence,
+            match_reason=reason,
+            justification=reason,
             ean_check=verification.ean_check if verification else match.ean_check,
             title_check=verification.title_check if verification else match.title_check,
             quantity_check=verification.quantity_check if verification else match.quantity_check,
             page_type_check=verification.page_type_check if verification else match.page_type_check,
             retailer_check=card.retailer_check,
             country_check=card.country_check,
-            requested_quantity=verification.requested_quantity if verification else match.requested_quantity,
-            page_quantity=verification.page_quantity if verification else match.page_quantity,
-            blocking_reasons="",
-            hard_failures=(),
-            soft_warnings=card.soft_warnings,
-            is_scrapable=True,
+            blocking_reasons="; ".join(verification.blocking_reasons) if verification else "",
+            hard_failures=tuple(card.hard_failures),
+            soft_warnings=tuple(card.soft_warnings),
+            is_scrapable=bool(scrape and scrape.is_scrapable),
             scrape_status_code=scrape.status_code if scrape else None,
             scrape_word_count=scrape.word_count if scrape else 0,
             scrape_markdown_chars=scrape.markdown_chars if scrape else 0,
-            scrape_final_url=scrape.final_url if scrape else url,
+            scrape_final_url=scrape.final_url if scrape else None,
             richness_score=scrape.richness_score if scrape else 0.0,
             price=scrape.price if scrape else None,
             currency=scrape.currency if scrape else "",
@@ -283,8 +291,8 @@ class ProductEvidenceHarness:
             image_count=scrape.image_count if scrape else 0,
             specs=dict(scrape.specs) if scrape else {},
             image_urls=tuple(scrape.image_urls) if scrape else (),
-            exact_product_check=verification.exact_product_check if verification else "EXACT_MATCH",
-            variant_check=verification.variant_check if verification else "MATCHED",
+            exact_product_check=verification.exact_product_check if verification else card.exact_product_check,
+            variant_check=verification.variant_check if verification else card.variant_check,
             variant_conflict_terms=verification.variant_conflict_terms if verification else (),
             identity_driver=verification.identity_driver if verification else card.identity_driver,
             ean_status=verification.ean_status if verification else match.ean_status,
@@ -293,62 +301,12 @@ class ProductEvidenceHarness:
             input_ean_normalized=verification.input_ean_normalized if verification else match.input_ean_normalized,
             page_gtins_valid=verification.page_gtins_valid if verification else (),
             page_gtins_ignored=verification.page_gtins_ignored if verification else (),
-            selected_with_warning=False,
-            primary_reject_reason="",
-            llm_used=card.llm_used,
-            llm_decision=card.llm_decision,
-            llm_confidence=card.llm_confidence,
-            llm_exact_product_match=card.llm_exact_product_match,
-            llm_reject_reason=card.llm_reject_reason,
-            llm_justification=card.llm_justification,
-            best_reference_url=match.best_reference_url,
-            reference_url_status=match.reference_url_status,
-            selection_scope="requested_retailer" if card.retailer_check == "MATCHED" else ("global_fallback" if global_fallback else "country"),
-            selected_retailer_name=match.requested_retailer_name if card.retailer_check == "MATCHED" else ("global_fallback" if global_fallback else "alternative_country_retailer"),
+            selected_with_warning=status != "PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL",
+            primary_reject_reason=card.primary_reject_reason if status != "PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL" else "",
+            selection_scope=scope,
+            selected_retailer_name=card.candidate.domain,
             selected_domain=domain_of(url),
-            selected_from_requested_retailer=card.retailer_check == "MATCHED",
-            selected_from_other_country_retailer=bool(country_specific and card.retailer_check != "MATCHED" and match.retailer_name),
+            selected_from_requested_retailer=requested,
+            selected_from_other_country_retailer=bool(country_specific and not requested),
             selected_from_global_fallback=global_fallback,
-            needs_review=False,
-            confidence=max(match.confidence, card.final_confidence),
         )
-
-    @staticmethod
-    def _strict_url_status(url: str, state: ProductSearchState, *, scrape_usable: bool) -> str:
-        if scrape_usable:
-            return "BEST_AVAILABLE_PRODUCT_URL_NEEDS_REVIEW"
-        scrape = state.scrapes.get(url)
-        if scrape and scrape.scraped:
-            if scrape.looks_like_product_page:
-                return "BEST_AVAILABLE_PRODUCT_URL_NOT_SCRAPABLE_NEEDS_REVIEW"
-            return "BEST_AVAILABLE_URL_NOT_CONFIRMED_PRODUCT_PAGE_NEEDS_REVIEW"
-        if any(c.url == url for c in state.candidates):
-            return "DISCOVERED_CANDIDATE_URL_UNSCRAPED_NEEDS_REVIEW"
-        return "REFERENCE_URL_FROM_SEARCH_NEEDS_REVIEW"
-
-    @staticmethod
-    def _best_discovered_url(state: ProductSearchState) -> Optional[str]:
-        for card in state.scorecards:
-            if card.candidate.url:
-                return card.candidate.url
-        for candidate in state.candidates:
-            if candidate.url:
-                return candidate.url
-        for url in state.scrapes:
-            if url:
-                return url
-        for response in state.organic_responses:
-            for result in response.results:
-                if result.url:
-                    return result.url
-        for response in state.ai_responses:
-            for reference in response.references:
-                if reference.link:
-                    return reference.link
-        return None
-
-
-# Intentional API break from the old linear implementation. The old name is kept
-# as an alias only so notebooks fail less noisily while using the new harness.
-HarnessProductURLFinderPipeline = ProductEvidenceHarness
-HybridProductURLFinderPipeline = ProductEvidenceHarness

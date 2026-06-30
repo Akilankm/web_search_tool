@@ -157,8 +157,10 @@ class HarnessConfig:
     write_artifacts: bool = False
     artifact_dir: Optional[str] = None
     country_profile_path: Optional[str] = None
-    write_markdown_reports: bool = True
-    write_trace_json: bool = True
+    # Reviewer-first output is now the default. Verbose markdown/trace files are opt-in.
+    write_review_pack: bool = True
+    write_markdown_reports: bool = False
+    write_trace_json: bool = False
     write_debug_csvs: bool = False
 
     enable_llm_adjudication: bool = False
@@ -230,8 +232,9 @@ class HarnessConfig:
             max_global_scrapes_per_batch=_env_int("PRODUCT_HARNESS_MAX_GLOBAL_SCRAPES", 12),
             output_dir=os.getenv("PRODUCT_HARNESS_OUTPUT_DIR", "output"),
             write_outputs=_env_bool("PRODUCT_HARNESS_WRITE_OUTPUTS", True),
-            write_markdown_reports=_env_bool("PRODUCT_HARNESS_WRITE_MARKDOWN_REPORTS", True),
-            write_trace_json=_env_bool("PRODUCT_HARNESS_WRITE_TRACE_JSON", True),
+            write_review_pack=_env_bool("PRODUCT_HARNESS_WRITE_REVIEW_PACK", True),
+            write_markdown_reports=_env_bool("PRODUCT_HARNESS_WRITE_MARKDOWN_REPORTS", False),
+            write_trace_json=_env_bool("PRODUCT_HARNESS_WRITE_TRACE_JSON", False),
             write_debug_csvs=_env_bool("PRODUCT_HARNESS_WRITE_DEBUG_CSVS", False),
             country_profile_path=os.getenv("PRODUCT_HARNESS_COUNTRY_PROFILES") or None,
             enable_llm_adjudication=llm_enabled,
@@ -259,10 +262,7 @@ class HarnessConfig:
             self,
             policy=replace(
                 self.policy,
-                require_llm_exact_match_for_final=self.llm_require_exact_match_for_final
-                or self.policy.require_llm_exact_match_for_final,
+                require_llm_exact_match_for_final=self.policy.require_llm_exact_match_for_final or self.llm_require_exact_match_for_final,
+                return_rejected_reference_as_product_url=self.policy.return_rejected_reference_as_product_url or self.return_rejected_reference_as_product_url,
             ),
         )
-
-
-PipelineConfig = HarnessConfig

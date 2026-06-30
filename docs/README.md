@@ -1,6 +1,6 @@
 # Documentation Index
 
-This documentation is organized for adoption. Start with the business story, then use notebooks as the execution gateway, then inspect decision contracts and artifacts.
+This documentation is organized for adoption. Start with the business story, then use notebooks as the execution gateway, then inspect decision contracts and concise review artifacts.
 
 ```mermaid
 flowchart TD
@@ -13,6 +13,7 @@ flowchart TD
     B --> H[Adoption Playbook]
     E --> I[Decision Contracts]
     F --> J[Artifact Guide]
+    J --> M[Concise Review Artifacts]
     G --> K[Offline Product Artifact]
     I --> L[Codebase Functionality Map]
 ```
@@ -28,6 +29,7 @@ flowchart TD
 | `CODEBASE_FUNCTIONALITY_MAP.md` | Business capability map from code modules to notebook workflows. | Managers, engineers, adoption leads |
 | `DECISION_CONTRACTS.md` | Output field/status meaning and handoff rules. | Operations, downstream teams |
 | `ARTIFACT_GUIDE.md` | Output files, audit trail, and row artifact interpretation. | Analysts, reviewers, engineers |
+| `CONCISE_REVIEW_ARTIFACTS.md` | Reviewer-first artifact packet: what, why, how, selected/rejected. | Reviewers, managers, notebook users |
 | `ASSUMPTIONS_AND_CONSTRAINTS.md` | Input assumptions, external limits, and reliability boundaries. | Leadership, governance, engineers |
 | `ADOPTION_PLAYBOOK.md` | Demo, rollout, and standardization playbook. | Managers, champions, delivery leads |
 | `OFFLINE_PRODUCT_ARTIFACT.md` | Optional notebook-only offline capture contract. | Audit/evidence users |
@@ -37,7 +39,7 @@ flowchart TD
 | Notebook | Purpose | Linked docs |
 |---|---|---|
 | `../notebooks/00_notebook_gateway.ipynb` | Start here; decide the right notebook path. | `NOTEBOOK_GATEWAY.md`, `BUSINESS_OVERVIEW.md` |
-| `../notebooks/01_single_product_harness.ipynb` | Demonstrate one product end-to-end. | `VISUAL_PIPELINE_GUIDE.md`, `DECISION_CONTRACTS.md`, `ARTIFACT_GUIDE.md` |
+| `../notebooks/01_single_product_harness.ipynb` | Demonstrate one product end-to-end and inspect concise review artifacts. | `VISUAL_PIPELINE_GUIDE.md`, `DECISION_CONTRACTS.md`, `CONCISE_REVIEW_ARTIFACTS.md` |
 | `../notebooks/02_batch_product_harness.ipynb` | Run many products and produce business outputs. | `ARTIFACT_GUIDE.md`, `DECISION_CONTRACTS.md`, `ADOPTION_PLAYBOOK.md` |
 | `../notebooks/03_offline_product_artifact.ipynb` | Optional offline page capture after champion confirmation. | `OFFLINE_PRODUCT_ARTIFACT.md`, `ASSUMPTIONS_AND_CONSTRAINTS.md` |
 
@@ -51,7 +53,7 @@ flowchart LR
     D --> E[Identity / country / scrapability checks]
     E --> F[Champion confirmation]
     F --> G[Production URL gate]
-    G --> H[CSV + artifacts + product coding evidence]
+    G --> H[CSV + concise review packet + product coding evidence]
 ```
 
 ## Production handoff rule
@@ -67,6 +69,19 @@ needs_review = false
 ```
 
 Rows outside this filter can still contain useful evidence, but they are review-only.
+
+## Default review packet
+
+```text
+output/<row_id>/
+├── final_row.csv
+├── review_summary.md
+├── review_decision.json
+├── candidate_decisions.csv
+└── product_coding_input.json
+```
+
+Open `review_summary.md` first. It is designed to answer what was selected, why, how it was decided, what the model/detectors contributed, what was rejected, and what a reviewer should do next.
 
 ## Optional offline handoff rule
 
