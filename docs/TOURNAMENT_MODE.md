@@ -21,7 +21,7 @@ Given product text, country, optional retailer, and optional EAN,
 find the exact product URL that can be opened in a browser and scraped for complete product information.
 ```
 
-Tournament architecture treats this as a comparative decision problem. A URL is not judged only in isolation; it is compared against other candidates until a champion URL is selected.
+Tournament architecture treats this as a comparative decision problem. A URL is not judged only in isolation; it is compared against other candidates until a champion candidate is found and confirmed.
 
 ## Architecture
 
@@ -35,6 +35,7 @@ Input product identity
   → deterministic identity / EAN / title / variant / country / retailer checks
   → batch winner selection
   → champion-vs-challenger comparison
+  → champion confirmation gate, default 3 checks
   → final production URL gate
   → product_url + evidence artifacts
 ```
@@ -49,7 +50,7 @@ PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS=4
 
 The config clamps this value to a maximum of `4`, even if a higher value is supplied.
 
-Tournament uses Google organic SerpAPI calls for candidate-pool discovery. AI Mode SerpAPI calls are not used inside the tournament discovery path, so the search-credit budget stays bounded.
+Tournament uses Google organic SerpAPI calls for candidate-pool discovery. Champion confirmation checks happen after candidate selection and do not add SerpAPI search calls.
 
 ## Default configuration
 
@@ -66,13 +67,20 @@ PRODUCT_HARNESS_TOURNAMENT_EARLY_STOP_MARGIN=0.15
 PRODUCT_HARNESS_TOURNAMENT_REQUIRE_PRODUCTION_READY=true
 ```
 
+Champion confirmation is currently fixed in the tournament implementation:
+
+```text
+champion_confirmation.required_attempts = 3
+champion_confirmation.required_successes = 3
+```
+
 ## Search strategy
 
 The search fan-out can include:
 
 ```text
 requested retailer search
-EAN / country exact search
+EAN / country exact search when valid
 same-country alternative retailer search
 secondary language country search, when available
 global fallback challenger search
@@ -82,9 +90,9 @@ Only the first unique queries within the four-credit cap are executed.
 
 ## Champion selection
 
-Each batch produces a winner. Winners are then compared until a champion URL is selected.
+Each batch produces a winner. Winners are then compared until a production-ready champion candidate is selected.
 
-The champion is ranked by:
+The champion candidate is ranked by:
 
 ```text
 production readiness
@@ -97,7 +105,30 @@ confidence
 richness
 ```
 
-The champion still must pass the production URL gate before it is accepted for team handoff.
+The candidate still must pass the champion confirmation gate before it is accepted for team handoff.
+
+## Champion confirmation gate
+
+After candidate selection, the same candidate URL is confirmed repeatedly.
+
+Default requirement:
+
+```text
+attempted_count = 3
+success_count = 3
+final_url_stable = true
+evidence_stable = true
+passed = true
+```
+
+Confirmation artifacts:
+
+```text
+champion_confirmation.json
+champion_confirmation.md
+```
+
+If confirmation fails, the candidate is not accepted as a confirmed champion. It remains evidence for review and comparison.
 
 ## Production handoff rule
 
@@ -106,10 +137,12 @@ A row is handoff-ready only when:
 ```text
 production_url_ready = true
 production_url_status = PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL
+champion_confirmation.passed = true
+champion_confirmation.success_count = champion_confirmation.required_successes
 needs_review = false
 ```
 
-If no production-ready champion exists, the harness still follows the strict non-empty `product_url` policy and emits the best discovered fallback URL as review-only.
+If no confirmed production-ready champion exists, the harness keeps the strongest available review candidate but does not treat it as production handoff-ready.
 
 ## Row artifacts
 
@@ -118,6 +151,8 @@ Each row includes tournament artifacts:
 ```text
 tournament_bracket.json
 tournament_bracket.md
+champion_confirmation.json
+champion_confirmation.md
 batch_winners.csv
 ```
 
@@ -134,6 +169,8 @@ champion URL
 runner-up URL
 champion margin
 production readiness status
+champion confirmation status
+champion confirmation attempts and successes
 ```
 
 ## Why this is the primary architecture
@@ -147,6 +184,7 @@ broad discovery
 parallel evidence collection
 side-by-side candidate comparison
 production gate enforcement
+repeated champion confirmation
 artifact-backed decisions
 ```
 
@@ -163,7 +201,8 @@ highly_scrapable
 exact_product_url_match
 needs_review
 tournament_bracket.md
+champion_confirmation.md
 batch_winners.csv
 ```
 
-For downstream browser/scraping/product-coding teams, hand off only rows where `production_url_ready=true` and `needs_review=false`.
+For downstream browser/scraping/product-coding teams, hand off only rows where `production_url_ready=true`, `champion_confirmation.passed=true`, and `needs_review=false`.
