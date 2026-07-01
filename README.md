@@ -4,7 +4,7 @@
 
 The Product Evidence Harness is an enterprise-grade system for turning product web search into **verified, auditable, product-coding-ready evidence**.
 
-It is not a simple scraper. It is not a loose search utility. It is a controlled evidence pipeline that discovers candidate product URLs, validates them, confirms a champion, and writes business-ready outputs plus audit artifacts.
+It is not a simple scraper. It is not a loose search utility. It is a controlled evidence pipeline that discovers candidate product URLs, validates them, confirms a champion, protects against unsafe review fallbacks, verifies rendered page relevance, and writes business-ready outputs plus audit artifacts.
 
 ```text
 Input product identity -> verified product URL evidence -> production handoff -> product coding evidence
@@ -17,7 +17,7 @@ The notebooks are the gateway into the system. Users should start here, not insi
 | Notebook | Use when | Business outcome |
 |---|---|---|
 | `notebooks/00_notebook_gateway.ipynb` | You are new to the repo. | Understand which notebook to use and how the system works. |
-| `notebooks/01_single_product_harness.ipynb` | You want to prove the full system on one product. | Champion URL, confirmation, production gate, concise review artifacts. |
+| `notebooks/01_single_product_harness.ipynb` | You want to prove the full system on one product. | Champion URL, rendered-page gate, confirmation, production gate, concise review artifacts. |
 | `notebooks/02_batch_product_harness.ipynb` | You want to run many products. | Final CSV, review queue, metrics, concise row artifacts. |
 | `notebooks/03_offline_product_artifact.ipynb` | You already have a confirmed champion URL and need offline evidence. | Local `offline_page.html`, local assets, validation JSON. |
 
@@ -40,6 +40,8 @@ flowchart LR
 | Manual product URL search is inconsistent. | Candidate tournament and evidence-based selection. |
 | Search rank is treated as truth. | Search is only a candidate source, not final proof. |
 | Wrong variants/listings can slip through. | Identity, EAN, title, quantity, and variant checks. |
+| URL opens but visible page is wrong. | Rendered-page relevance gate blocks homepage/category/search/intermediate/wrong-content pages. |
+| Hard-rejected URLs can confuse review. | Safe-review gate prevents rejected candidates from becoming selected/best-review URLs. |
 | Scraping issues are discovered too late. | Scrapability and browser-readiness are checked before handoff. |
 | Decisions are hard to defend. | Concise review artifacts explain what was selected, rejected, why, and how. |
 | Automation hides uncertainty. | Weak cases go to review queue with failure taxonomy. |
@@ -56,9 +58,11 @@ flowchart TD
     F --> G[Identity verification]
     F --> H[Country and retailer checks]
     F --> I[Scrapability and richness checks]
+    F --> R[Rendered page relevance check]
     G --> J[Candidate scorecards]
     H --> J
     I --> J
+    R --> J
     J --> K[Champion candidate]
     K --> L[Champion confirmation]
     L --> M[Production URL gate]
@@ -72,25 +76,33 @@ The older iterative loop is retained only as a legacy/debug fallback when tourna
 
 ## High-stakes handoff policy
 
-`product_url`, `production_url_ready`, and champion confirmation must not be confused.
+`product_url`, `best_available_url`, `production_url_ready`, rendered-page validation, and champion confirmation must not be confused.
 
 ```text
-product_url = selected/champion URL emitted by the harness
+product_url = production-ready champion URL only
+best_available_url = safe review-only candidate only
+candidate_decisions.csv = full evidence table, including rejected candidates
 production_url_ready = whether product_url is safe for browser-opening, downstream scraping, and product coding
+rendered_page_check_passed = whether the visible page shows the intended product content
 champion_confirmation.passed = whether repeated champion confirmation passed
 ```
 
 Use automated handoff only when:
 
 ```text
+product_url is not blank
 production_url_ready = true
 production_url_status = PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL
+browser_openable = true
+rendered_page_check_passed = true
+highly_scrapable = true
+exact_product_url_match = true
 champion_confirmation.passed = true
 champion_confirmation.success_count = champion_confirmation.required_successes
 needs_review = false
 ```
 
-Rows outside this filter are review-only, even when a useful fallback URL exists.
+Rows outside this filter are review-only. Hard rejected candidates remain in `candidate_decisions.csv`; they must not be promoted into selected evidence.
 
 ## Tournament defaults
 
@@ -218,6 +230,9 @@ It is intentionally not part of `main.py`, `batch_main.py`, or notebooks `01`/`0
 | `docs/VISUAL_PIPELINE_GUIDE.md` | Graphical architecture and non-linear flow. |
 | `docs/CODEBASE_FUNCTIONALITY_MAP.md` | Maps business capabilities to code areas and notebooks. |
 | `docs/DECISION_CONTRACTS.md` | Meaning of output fields/statuses. |
+| `docs/PRODUCTION_GRADE_PRODUCT_URL.md` | Production URL gate and rendered-page handoff contract. |
+| `docs/STRICT_PRODUCT_URL_POLICY.md` | Safe URL promotion policy. |
+| `docs/HANDOFF_VALIDATION_CHECKLIST.md` | Final handoff validation checklist. |
 | `docs/ARTIFACT_GUIDE.md` | Output files, row artifacts, and audit trail. |
 | `docs/CONCISE_REVIEW_ARTIFACTS.md` | Reviewer-first artifact strategy and file contract. |
 | `docs/ASSUMPTIONS_AND_CONSTRAINTS.md` | Explicit assumptions, limits, and risk boundaries. |
@@ -266,6 +281,8 @@ python batch_main.py \
 
 ```bash
 PYTHONPATH=src python -m compileall -q src main.py batch_main.py
+PYTHONPATH=src pytest -q tests/test_production_url_gate.py
+PYTHONPATH=src pytest -q tests/test_champion_contract.py
 PYTHONPATH=src pytest -q
 ```
 
