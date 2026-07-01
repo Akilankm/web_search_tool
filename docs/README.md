@@ -1,6 +1,6 @@
 # Documentation Index
 
-This documentation is organized for adoption. Start with the business story, then use notebooks as the execution gateway, then inspect decision contracts and concise review artifacts.
+This documentation is organized for adoption. Start with the business story, then use notebooks as the execution gateway, then inspect decision contracts, browser-visible verification, and concise review artifacts.
 
 ```mermaid
 flowchart TD
@@ -12,6 +12,7 @@ flowchart TD
     C --> G[Notebook 03: Optional offline capture]
     B --> H[Adoption Playbook]
     E --> I[Decision Contracts]
+    E --> V[Browser-visible Product Gate]
     F --> J[Artifact Guide]
     J --> M[Concise Review Artifacts]
     G --> K[Offline Product Artifact]
@@ -26,6 +27,7 @@ flowchart TD
 | `BUSINESS_OVERVIEW.md` | Leadership-facing value explanation. | Leadership, managers |
 | `NOTEBOOK_GATEWAY.md` | Notebook-first usage map. | Everyone |
 | `VISUAL_PIPELINE_GUIDE.md` | Graphical explanation of the non-linear pipeline. | Managers, engineers, reviewers |
+| `BROWSER_VISIBLE_PRODUCT_GATE.md` | Contract for verifying what the user actually sees in the browser. | Operations, reviewers, engineers |
 | `CODEBASE_FUNCTIONALITY_MAP.md` | Business capability map from code modules to notebook workflows. | Managers, engineers, adoption leads |
 | `DECISION_CONTRACTS.md` | Output field/status meaning and handoff rules. | Operations, downstream teams |
 | `ARTIFACT_GUIDE.md` | Output files, audit trail, and row artifact interpretation. | Analysts, reviewers, engineers |
@@ -39,8 +41,8 @@ flowchart TD
 | Notebook | Purpose | Linked docs |
 |---|---|---|
 | `../notebooks/00_notebook_gateway.ipynb` | Start here; decide the right notebook path. | `NOTEBOOK_GATEWAY.md`, `BUSINESS_OVERVIEW.md` |
-| `../notebooks/01_single_product_harness.ipynb` | Demonstrate one product end-to-end and inspect concise review artifacts. | `VISUAL_PIPELINE_GUIDE.md`, `DECISION_CONTRACTS.md`, `CONCISE_REVIEW_ARTIFACTS.md` |
-| `../notebooks/02_batch_product_harness.ipynb` | Run many products and produce business outputs. | `ARTIFACT_GUIDE.md`, `DECISION_CONTRACTS.md`, `ADOPTION_PLAYBOOK.md` |
+| `../notebooks/01_single_product_harness.ipynb` | Demonstrate one product end-to-end and inspect concise review + browser-visible artifacts. | `VISUAL_PIPELINE_GUIDE.md`, `DECISION_CONTRACTS.md`, `BROWSER_VISIBLE_PRODUCT_GATE.md`, `CONCISE_REVIEW_ARTIFACTS.md` |
+| `../notebooks/02_batch_product_harness.ipynb` | Run many products and produce business outputs. | `ARTIFACT_GUIDE.md`, `DECISION_CONTRACTS.md`, `BROWSER_VISIBLE_PRODUCT_GATE.md`, `ADOPTION_PLAYBOOK.md` |
 | `../notebooks/03_offline_product_artifact.ipynb` | Optional offline page capture after champion confirmation. | `OFFLINE_PRODUCT_ARTIFACT.md`, `ASSUMPTIONS_AND_CONSTRAINTS.md` |
 
 ## Primary architecture
@@ -51,7 +53,8 @@ flowchart LR
     B --> C[Candidate tournament]
     C --> D[Evidence extraction]
     D --> E[Identity / country / scrapability checks]
-    E --> F[Champion confirmation]
+    E --> V[Browser-visible page verification]
+    V --> F[Champion confirmation]
     F --> G[Production URL gate]
     G --> H[CSV + concise review packet + product coding evidence]
 ```
@@ -63,6 +66,8 @@ For browser-opening, downstream scraping, and product-coding teams, use only row
 ```text
 production_url_ready = true
 production_url_status = PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL
+user_visible_product_match = true
+user_visible_status = USER_VISIBLE_PRODUCT_PAGE_CONFIRMED
 champion_confirmation.passed = true
 champion_confirmation.success_count = champion_confirmation.required_successes
 needs_review = false
@@ -78,10 +83,12 @@ output/<row_id>/
 ├── review_summary.md
 ├── review_decision.json
 ├── candidate_decisions.csv
+├── browser_visible_verdicts.json
+├── browser_visible/
 └── product_coding_input.json
 ```
 
-Open `review_summary.md` first. It is designed to answer what was selected, why, how it was decided, what the model/detectors contributed, what was rejected, and what a reviewer should do next.
+Open `review_summary.md` first. Use `browser_visible_verdicts.json` and the `browser_visible/` folder when a URL opens but may show rerouted/wrong content.
 
 ## Optional offline handoff rule
 
