@@ -1,10 +1,4 @@
-"""Single-product runner for the Exact Product Discovery Harness.
-
-Usage:
-  python main.py --main-text "LEGO 41731 Heartlake International School" --country-code CH --ean 5702017415352
-
-All credentials and budgets are loaded from .env / environment variables.
-"""
+"""Single-product runner for the product evidence harness."""
 
 from __future__ import annotations
 
@@ -28,7 +22,7 @@ from product_evidence_harness import (  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run exact-product URL discovery for one product row.")
+    parser = argparse.ArgumentParser(description="Run product URL discovery for one product row.")
     parser.add_argument("--row-id", default="single-001")
     parser.add_argument("--main-text", required=True)
     parser.add_argument("--country-code", required=True)
@@ -64,7 +58,8 @@ def main() -> None:
     printer.print_match(trace.best_match)
     printer.print_scorecards(trace.scored_candidates)
     print("Per-row artifact packet written under:", config.output_dir)
-    print("Default row files: final_row.csv, report.md, search_plan.md, candidate_review.md, scrape_evidence.md, retailer_scrapability.md, final_decision.md, decision_trace.md, trace.json")
+    print("Default row files: final_row.csv, review_summary.md, review_decision.json, candidate_decisions.csv, product_coding_input.json")
+    print("Canonical docs: docs/README.md")
 
 
 if __name__ == "__main__":
