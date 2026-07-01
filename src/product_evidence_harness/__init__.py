@@ -1,4 +1,9 @@
 from src.product_evidence_harness.config import HarnessBudgetConfig, HarnessConfig, HarnessPolicy, SerpAPIConfig
+from src.product_evidence_harness.browser_visible import (
+    BrowserVisibleContentVerifier,
+    BrowserVisibleProductVerdict,
+    BrowserVisibleVerifierConfig,
+)
 from src.product_evidence_harness.contracts import (
     AgentAction,
     AgentActionRecord,
@@ -45,6 +50,7 @@ from src.product_evidence_harness.scraper import CrawlScraper
 
 __all__ = [
     "SerpAPIConfig", "HarnessConfig", "HarnessPolicy", "HarnessBudgetConfig",
+    "BrowserVisibleContentVerifier", "BrowserVisibleProductVerdict", "BrowserVisibleVerifierConfig",
     "DiscoveryMode", "ProductQuery", "ProductURLMatch", "HarnessTrace", "PipelineTrace",
     "URLCandidate", "LLMSearchPlan", "LLMSearchQuery", "CandidateScorecard", "ScoredURLCandidate", "ScrapeResult", "ProductEvidence",
     "MatchVerification", "OrganicSearchResponse", "OrganicSearchResult", "SerpAIResponse",
