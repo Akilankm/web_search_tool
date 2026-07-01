@@ -163,6 +163,19 @@ class HarnessConfig:
     write_trace_json: bool = False
     write_debug_csvs: bool = False
 
+    # Browser-visible content verification protects against URLs that open but
+    # display a homepage, consent wall, search page, wrong product, or reroute.
+    enable_browser_visible_verification: bool = True
+    require_browser_visible_product_content: bool = True
+    browser_visible_capture_enabled: bool = True
+    browser_visible_llm_enabled: bool = False
+    browser_visible_top_k: int = 5
+    browser_visible_timeout_ms: int = 45000
+    browser_visible_wait_ms: int = 1500
+    browser_visible_min_token_overlap: float = 0.35
+    browser_visible_min_title_overlap: float = 0.45
+    browser_visible_min_llm_confidence: float = 0.70
+
     enable_llm_adjudication: bool = False
     enable_llm_search_planning: bool = False
     enable_llm_search_feedback: bool = False
@@ -205,6 +218,7 @@ class HarnessConfig:
                 max_iterations=_env_int("PRODUCT_HARNESS_MAX_ITERATIONS", 240),
             )
         llm_enabled = _env_bool("PRODUCT_HARNESS_ENABLE_LLM", False) or _env_bool("PRODUCT_HARNESS_ENABLE_LLM_ADJUDICATION", False)
+        browser_visible_llm = _env_bool("PRODUCT_HARNESS_BROWSER_VISIBLE_LLM", False)
         policy = HarnessPolicy(
             require_llm_exact_match_for_final=_env_bool("PRODUCT_HARNESS_REQUIRE_LLM_EXACT_MATCH", False),
             allow_global_fallback=_env_bool("PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK", True),
@@ -237,6 +251,16 @@ class HarnessConfig:
             write_trace_json=_env_bool("PRODUCT_HARNESS_WRITE_TRACE_JSON", False),
             write_debug_csvs=_env_bool("PRODUCT_HARNESS_WRITE_DEBUG_CSVS", False),
             country_profile_path=os.getenv("PRODUCT_HARNESS_COUNTRY_PROFILES") or None,
+            enable_browser_visible_verification=_env_bool("PRODUCT_HARNESS_BROWSER_VISIBLE_VERIFY", True),
+            require_browser_visible_product_content=_env_bool("PRODUCT_HARNESS_REQUIRE_BROWSER_VISIBLE_PRODUCT_CONTENT", True),
+            browser_visible_capture_enabled=_env_bool("PRODUCT_HARNESS_BROWSER_VISIBLE_CAPTURE", True),
+            browser_visible_llm_enabled=browser_visible_llm,
+            browser_visible_top_k=_env_int("PRODUCT_HARNESS_BROWSER_VISIBLE_TOP_K", 5),
+            browser_visible_timeout_ms=_env_int("PRODUCT_HARNESS_BROWSER_VISIBLE_TIMEOUT_MS", 45000),
+            browser_visible_wait_ms=_env_int("PRODUCT_HARNESS_BROWSER_VISIBLE_WAIT_MS", 1500),
+            browser_visible_min_token_overlap=_env_float("PRODUCT_HARNESS_BROWSER_VISIBLE_MIN_TOKEN_OVERLAP", 0.35),
+            browser_visible_min_title_overlap=_env_float("PRODUCT_HARNESS_BROWSER_VISIBLE_MIN_TITLE_OVERLAP", 0.45),
+            browser_visible_min_llm_confidence=_env_float("PRODUCT_HARNESS_BROWSER_VISIBLE_MIN_LLM_CONFIDENCE", 0.70),
             enable_llm_adjudication=llm_enabled,
             enable_llm_search_planning=_env_bool("PRODUCT_HARNESS_ENABLE_LLM_SEARCH_PLANNING", llm_enabled),
             enable_llm_search_feedback=_env_bool("PRODUCT_HARNESS_ENABLE_LLM_SEARCH_FEEDBACK", llm_enabled),
