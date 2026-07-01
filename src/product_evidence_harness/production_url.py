@@ -20,19 +20,26 @@ class ProductionURLAssessment:
     score: float
     critical_product_evidence_complete: bool = False
     country_acceptable: bool = False
+    user_visible_product_match: bool = False
+    user_visible_status: str = "NOT_VERIFIED"
+    user_visible_page_type: str = "unknown"
+    user_visible_confidence: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
+@dataclass
 class ProductionURLGate:
     """Gate product URLs for browser use, scraping use, and exact-product use.
 
-    In this harness, scrapable means more than reachable HTML. A URL is highly
-    scrapable only when the page exposes enough real product details for
-    downstream product coding.
+    Browser-openable is necessary but not sufficient. A URL can open in a
+    browser and still show a homepage, consent wall, search page, access block,
+    or a different product. When ``require_user_visible_verification`` is true,
+    a candidate must also pass the user-visible product-content verdict.
     """
 
+    require_user_visible_verification: bool = False
     min_richness_score: float = 0.45
     min_word_count: int = 120
     min_title_score: float = 0.70
@@ -42,6 +49,7 @@ class ProductionURLGate:
         url = card.candidate.url
         scrape = card.scrape
         verification = card.verification
+        visible = getattr(card, "browser_visible_verdict", None)
         reasons: list[str] = []
 
         browser_openable = bool(
@@ -55,6 +63,16 @@ class ProductionURLGate:
         )
         if not browser_openable:
             reasons.append("URL_NOT_CONFIRMED_BROWSER_OPENABLE")
+
+        user_visible_product_match = self._user_visible_product_match(visible)
+        user_visible_status = getattr(visible, "status", "NOT_VERIFIED") if visible else "NOT_VERIFIED"
+        user_visible_page_type = getattr(visible, "browser_visible_page_type", "unknown") if visible else "unknown"
+        user_visible_confidence = float(getattr(visible, "user_visible_content_confidence", 0.0) or 0.0) if visible else 0.0
+        if self.require_user_visible_verification and not user_visible_product_match:
+            if visible:
+                reasons.append(user_visible_status or "USER_VISIBLE_PRODUCT_CONTENT_NOT_CONFIRMED")
+            else:
+                reasons.append("USER_VISIBLE_PRODUCT_CONTENT_NOT_VERIFIED")
 
         critical_product_evidence_complete = self._critical_product_evidence_complete(card)
         if not critical_product_evidence_complete:
@@ -104,8 +122,10 @@ class ProductionURLGate:
         if card.hard_failures:
             reasons.extend(card.hard_failures)
 
+        visible_ok = user_visible_product_match or not self.require_user_visible_verification
         production_ready = bool(
             browser_openable
+            and visible_ok
             and highly_scrapable
             and critical_product_evidence_complete
             and exact_product_match
@@ -117,6 +137,7 @@ class ProductionURLGate:
             exact_product_match=exact_product_match,
             critical_product_evidence_complete=critical_product_evidence_complete,
             country_acceptable=country_acceptable,
+            user_visible_product_match=user_visible_product_match,
             card=card,
         )
         status = "PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL" if production_ready else self._status(
@@ -126,6 +147,8 @@ class ProductionURLGate:
             critical_product_evidence_complete,
             country_acceptable,
             card,
+            visible=visible,
+            require_user_visible_verification=self.require_user_visible_verification,
         )
         return ProductionURLAssessment(
             url=url,
@@ -138,6 +161,21 @@ class ProductionURLGate:
             score=score,
             critical_product_evidence_complete=critical_product_evidence_complete,
             country_acceptable=country_acceptable,
+            user_visible_product_match=user_visible_product_match,
+            user_visible_status=user_visible_status,
+            user_visible_page_type=user_visible_page_type,
+            user_visible_confidence=round(user_visible_confidence, 4),
+        )
+
+    @staticmethod
+    def _user_visible_product_match(visible: Any) -> bool:
+        if not visible:
+            return False
+        return bool(
+            getattr(visible, "champion_should_survive_visible_check", False)
+            and getattr(visible, "user_visible_product_match", False)
+            and getattr(visible, "browser_visible_page_type", "") == "product_page"
+            and getattr(visible, "status", "") == "USER_VISIBLE_PRODUCT_PAGE_CONFIRMED"
         )
 
     def _critical_product_evidence_complete(self, card: CandidateScorecard) -> bool:
@@ -172,6 +210,7 @@ class ProductionURLGate:
                 1 if pair[0].retailer_check == "MATCHED" else 0,
                 1 if pair[0].country_check == "MATCHED" else 0,
                 1 if pair[0].country_check == "ALTERNATIVE" else 0,
+                pair[1].user_visible_confidence,
                 pair[1].score,
                 pair[0].richness_score,
                 pair[0].final_confidence,
@@ -186,21 +225,28 @@ class ProductionURLGate:
         return None
 
     @staticmethod
-    def _score(*, browser_openable: bool, highly_scrapable: bool, exact_product_match: bool, critical_product_evidence_complete: bool, country_acceptable: bool, card: CandidateScorecard) -> float:
+    def _score(*, browser_openable: bool, highly_scrapable: bool, exact_product_match: bool, critical_product_evidence_complete: bool, country_acceptable: bool, user_visible_product_match: bool, card: CandidateScorecard) -> float:
         score = 0.0
-        score += 0.20 if browser_openable else 0.0
-        score += 0.20 if highly_scrapable else 0.0
-        score += 0.20 if critical_product_evidence_complete else 0.0
-        score += 0.25 if exact_product_match else 0.0
-        score += 0.08 if country_acceptable else 0.0
-        score += 0.04 if card.retailer_check == "MATCHED" else 0.0
-        score += 0.03 * min(1.0, card.richness_score)
+        score += 0.17 if browser_openable else 0.0
+        score += 0.16 if user_visible_product_match else 0.0
+        score += 0.17 if highly_scrapable else 0.0
+        score += 0.17 if critical_product_evidence_complete else 0.0
+        score += 0.22 if exact_product_match else 0.0
+        score += 0.06 if country_acceptable else 0.0
+        score += 0.03 if card.retailer_check == "MATCHED" else 0.0
+        score += 0.02 * min(1.0, card.richness_score)
         return round(min(1.0, score), 4)
 
     @staticmethod
-    def _status(browser_openable: bool, highly_scrapable: bool, exact_product_match: bool, critical_product_evidence_complete: bool, country_acceptable: bool, card: CandidateScorecard) -> str:
+    def _status(browser_openable: bool, highly_scrapable: bool, exact_product_match: bool, critical_product_evidence_complete: bool, country_acceptable: bool, card: CandidateScorecard, *, visible: Any, require_user_visible_verification: bool) -> str:
         if not browser_openable:
             return "PRODUCT_URL_NOT_BROWSER_OPENABLE_NEEDS_REVIEW"
+        if require_user_visible_verification:
+            if visible is None:
+                return "BROWSER_VISIBLE_PRODUCT_CONTENT_NOT_VERIFIED_NEEDS_REVIEW"
+            visible_status = getattr(visible, "status", "") or "BROWSER_VISIBLE_PRODUCT_CONTENT_NOT_CONFIRMED"
+            if not ProductionURLGate._user_visible_product_match(visible):
+                return visible_status if visible_status.startswith("BROWSER_OPENABLE_BUT_") else "BROWSER_OPENABLE_BUT_VISIBLE_CONTENT_INSUFFICIENT"
         if not critical_product_evidence_complete:
             return "PRODUCT_URL_CRITICAL_DETAILS_NOT_EXTRACTED_NEEDS_REVIEW"
         if not highly_scrapable:
