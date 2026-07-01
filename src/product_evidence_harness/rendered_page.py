@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import asdict, dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -19,7 +18,6 @@ STORE_SELECTOR = "STORE_SELECTOR"
 ERROR_PAGE = "ERROR_PAGE"
 ANTI_BOT_PAGE = "ANTI_BOT_PAGE"
 EMPTY_OR_BROKEN_RENDER = "EMPTY_OR_BROKEN_RENDER"
-UNRELATED_CONTENT = "UNRELATED_CONTENT"
 NON_PRODUCT_PAGE = "NON_PRODUCT_PAGE"
 UNKNOWN_PAGE = "UNKNOWN_PAGE"
 
@@ -28,12 +26,7 @@ PRODUCT_PAGE_TYPES = {PRODUCT_DETAIL_PAGE, PRODUCT_VARIANT_PAGE}
 
 @dataclass(frozen=True)
 class RenderedPageCheck:
-    """Assessment of what the user actually sees when the URL renders.
-
-    Browser-openable is a technical access check. This rendered check is the
-    product-experience check: does the visible/rendered content look like the
-    intended product page, or did the URL soft-reroute to unrelated content?
-    """
+    """Assessment of what the user actually sees when the URL renders."""
 
     url: str
     final_url: str | None
@@ -57,16 +50,7 @@ class RenderedPageCheck:
 
 
 class RenderedPageVerifier:
-    """Verify rendered page relevance using browser-visible scrape evidence.
-
-    The current harness may scrape a page successfully and mark it browser-openable
-    while the human-visible page is a homepage, category, search page, interstitial,
-    login wall, or unrelated product page. This verifier blocks those cases from
-    becoming production-ready champions.
-
-    The fields include screenshot/LLM placeholders so a Playwright/VLM capture path
-    can populate the same contract without changing downstream CSV/artifact schemas.
-    """
+    """Block champions that open but render the wrong user-facing page."""
 
     min_related_confidence: float = 0.58
     min_product_visibility_confidence: float = 0.35
@@ -83,7 +67,7 @@ class RenderedPageVerifier:
                 content_related_to_intended_product=False,
                 match_confidence=0.0,
                 verdict="FAIL_RENDERED_NO_SCRAPE",
-                reason="No rendered or scraped content was available to verify what the user sees.",
+                reason="No rendered or scraped content was available to verify the user-visible page.",
                 mismatch_reasons=("RENDERED_CONTENT_NOT_AVAILABLE",),
             )
 
@@ -92,12 +76,7 @@ class RenderedPageVerifier:
         related_confidence = self._related_confidence(card, scrape)
         content_related = related_confidence >= self.min_related_confidence
         reasons = self._mismatch_reasons(card, scrape, page_type, product_visible, content_related)
-        passed = bool(
-            page_type in PRODUCT_PAGE_TYPES
-            and product_visible
-            and content_related
-            and not reasons
-        )
+        passed = bool(page_type in PRODUCT_PAGE_TYPES and product_visible and content_related and not reasons)
         verdict = "PASS_RENDERED_PRODUCT_CONTENT" if passed else self._failure_verdict(page_type, reasons)
         return RenderedPageCheck(
             url=card.candidate.url,
@@ -123,15 +102,15 @@ class RenderedPageVerifier:
             return ERROR_PAGE
         if scrape.word_count < 20 or not text.strip():
             return EMPTY_OR_BROKEN_RENDER
-        if self._has_any(text, ["captcha", "are you human", "verify you are human", "access denied", "blocked", "bot detection"]):
+        if self._has_any(text, ["verify you are human", "access denied", "bot detection"]):
             return ANTI_BOT_PAGE
-        if self._has_any(text, ["sign in", "log in", "login", "create account", "my account"]):
+        if self._has_any(text, ["sign in", "log in", "login", "create account"]):
             if not scrape.looks_like_product_page and scrape.richness_score < 0.35:
                 return LOGIN_OR_ACCESS_WALL
-        if self._has_any(text, ["accept cookies", "cookie settings", "consent", "privacy preferences", "gdpr"]):
+        if self._has_any(text, ["accept cookies", "cookie settings", "consent", "privacy preferences"]):
             if not scrape.looks_like_product_page and scrape.richness_score < 0.35:
                 return CONSENT_OR_INTERSTITIAL
-        if self._has_any(text, ["choose your store", "select store", "select location", "delivery location", "pick a store"]):
+        if self._has_any(text, ["choose your store", "select store", "select location", "delivery location"]):
             if not scrape.looks_like_product_page and scrape.richness_score < 0.35:
                 return STORE_SELECTOR
         if scrape.looks_like_homepage or path in {"", "home", "homepage"}:
@@ -145,13 +124,10 @@ class RenderedPageVerifier:
         return PRODUCT_DETAIL_PAGE
 
     def _product_visible(self, scrape: ScrapeResult) -> bool:
-        name_present = bool(scrape.page_product_name or scrape.h1 or scrape.title)
-        commerce_or_media = bool(scrape.image_count > 0 or scrape.image_urls or scrape.has_price or scrape.structured_eans)
-        details_present = bool(scrape.description or scrape.specs or scrape.attributes or scrape.brand or scrape.manufacturer)
         confidence = 0.0
-        confidence += 0.40 if name_present else 0.0
-        confidence += 0.35 if commerce_or_media else 0.0
-        confidence += 0.25 if details_present else 0.0
+        confidence += 0.40 if bool(scrape.page_product_name or scrape.h1 or scrape.title) else 0.0
+        confidence += 0.35 if bool(scrape.image_count > 0 or scrape.image_urls or scrape.has_price or scrape.structured_eans) else 0.0
+        confidence += 0.25 if bool(scrape.description or scrape.specs or scrape.attributes or scrape.brand or scrape.manufacturer) else 0.0
         return confidence >= self.min_product_visibility_confidence
 
     def _related_confidence(self, card: CandidateScorecard, scrape: ScrapeResult) -> float:
@@ -161,13 +137,9 @@ class RenderedPageVerifier:
             float(card.title_score or 0.0),
             float(verification.title_match_score if verification else 0.0),
         ]
-        if verification and verification.ean_check == "MATCHED":
-            signals.append(1.0)
-        if scrape.contains_ean:
-            signals.append(0.95)
-        if verification and verification.identity_status == "VERIFIED" and verification.exact_product_check == "EXACT_MATCH":
-            signals.append(max(0.70, verification.title_match_score))
-        if card.llm_used and card.llm_exact_product_match:
+        # Rendered relevance is about visible/product-facing content. Hidden GTINs
+        # or metadata alone cannot prove the page a user sees is the right product.
+        if card.llm_used and card.llm_exact_product_match and card.llm_judgement and card.llm_judgement.image_used:
             signals.append(max(0.70, card.llm_confidence))
         return max(0.0, min(1.0, max(signals or [0.0])))
 
@@ -204,23 +176,13 @@ class RenderedPageVerifier:
         )
 
     def _visible_text(self, card: CandidateScorecard, scrape: ScrapeResult) -> str:
-        parts = [
-            scrape.page_product_name,
-            scrape.h1,
-            scrape.title,
-            scrape.description,
-            scrape.markdown_excerpt,
-            card.candidate.title,
-            card.candidate.snippet,
-        ]
+        parts = [scrape.page_product_name, scrape.h1, scrape.title, scrape.description, scrape.markdown_excerpt, card.candidate.title, card.candidate.snippet]
         return " ".join(p for p in parts if p)
 
     def _looks_search_or_category(self, url: str, text: str) -> bool:
-        url_markers = ["/search", "?q=", "?query=", "/category", "/c/", "/catalog", "/browse", "/shop/"]
-        if any(marker in url for marker in url_markers):
+        if any(marker in url for marker in ["/search", "?q=", "?query=", "/category", "/c/", "/catalog", "/browse", "/shop/"]):
             return True
-        listing_terms = ["sort by", "filter by", "results for", "products found", "items found", "categories", "showing", "view all"]
-        return self._has_any(text[:3000], listing_terms)
+        return self._has_any(text[:3000], ["sort by", "filter by", "results for", "products found", "items found", "categories", "showing", "view all"])
 
     @staticmethod
     def _has_any(text: str, terms: list[str]) -> bool:
@@ -236,6 +198,4 @@ class RenderedPageVerifier:
             return True
         original_path = original.path.strip("/").lower()
         final_path = final.path.strip("/").lower()
-        if original_path and not final_path:
-            return True
-        return False
+        return bool(original_path and not final_path)
