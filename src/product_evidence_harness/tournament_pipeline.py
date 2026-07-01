@@ -11,6 +11,7 @@ from src.product_evidence_harness.contracts import CandidateScorecard, HarnessTr
 from src.product_evidence_harness.elite import EnterpriseEvidenceEngine
 from src.product_evidence_harness.identity.graph import ProductIdentityGraphBuilder
 from src.product_evidence_harness.pipeline import ProductEvidenceHarness as BaseProductEvidenceHarness
+from src.product_evidence_harness.production_url import ProductionURLGate
 from src.product_evidence_harness.retailer_strategy import candidate_matches_requested_retailer
 from src.product_evidence_harness.tournament import CandidateTournamentEngine, TournamentResult
 from src.product_evidence_harness.url_utils import domain_of
@@ -21,14 +22,19 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
     """ProductEvidenceHarness with tournament-mode orchestration.
 
     In tournament mode, product_url is reserved for a true champion: exact product,
-    browser-openable, highly scrapable, and rich enough for downstream product
-    coding evidence. Review candidates are kept separately when no champion exists.
+    browser-openable, user-visible product content confirmed, highly scrapable,
+    and rich enough for downstream product coding evidence.
     """
 
     tournament_engine: CandidateTournamentEngine | None = None
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        # The tournament engine uses the existing scrape/identity production gate
+        # to find likely finalists quickly. The stricter browser-visible gate is
+        # applied immediately after tournament discovery, before final champion
+        # handoff. This avoids needing screenshot/LLM verification for every URL.
+        tournament_gate = ProductionURLGate(require_user_visible_verification=False)
         self.tournament_engine = self.tournament_engine or CandidateTournamentEngine(
             config=self.config.tournament,
             query_builder=self.query_builder,
@@ -38,7 +44,7 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
             verifier=self.verifier,
             ranker=self.ranker,
             evidence_extractor=self.evidence_extractor,
-            production_gate=self.production_gate,
+            production_gate=tournament_gate,
         )
 
     def run(self, product: ProductQuery, *, return_trace: bool = False) -> ProductURLMatch | HarnessTrace:
@@ -59,6 +65,11 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
             state = self.llm_adjudicator.adjudicate_state(state)
             state.scorecards = self.ranker.score(product=state.task, candidates=state.candidates, scrapes=state.scrapes, verifications=state.verifications)
 
+        candidate_urls = {u for u in [tournament_result.champion_url, tournament_result.best_review_candidate_url, tournament_result.runner_up_url] if u}
+        self._verify_browser_visible_content(state, candidate_urls=candidate_urls)
+        tournament_result = self._apply_browser_visible_gate_to_tournament_result(state, tournament_result)
+        setattr(state, "tournament_result", tournament_result)
+
         best_match = self.selector.select(
             task=product,
             scorecards=state.scorecards,
@@ -76,6 +87,45 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
         trace = HarnessTrace(state=state, best_match=best_match)
         return trace if return_trace else best_match
 
+    def _apply_browser_visible_gate_to_tournament_result(self, state: ProductSearchState, tournament_result: TournamentResult) -> TournamentResult:
+        """Re-evaluate the tournament champion using the browser-visible gate."""
+        champion_card, champion_assessment = self.production_gate.best_production_card(state)
+        review_card = None
+        review_assessment = None
+        if self.tournament_engine:
+            review_card, _old_review_assessment = self.tournament_engine._winner(state.scorecards)  # noqa: SLF001 - controlled internal reuse
+        if review_card:
+            review_assessment = self.production_gate.assess_card(review_card)
+        runner_up = None
+        if self.tournament_engine:
+            runner_up = self.tournament_engine._runner_up(  # noqa: SLF001 - controlled internal reuse
+                state.scorecards,
+                champion_card.candidate.url if champion_card else review_card.candidate.url if review_card else None,
+            )
+        runner_score = self.production_gate.assess_card(runner_up).score if runner_up else 0.0
+
+        confirmation = self.tournament_engine._confirm_champion(state, champion_card) if self.tournament_engine and champion_card and champion_assessment else self.tournament_engine._empty_confirmation() if self.tournament_engine else None  # noqa: SLF001
+        if champion_card and champion_assessment and confirmation and not confirmation.passed:
+            champion_card = None
+            champion_assessment = None
+        if champion_card and champion_assessment and confirmation and confirmation.passed:
+            state.termination_reason = "tournament_champion_confirmed_after_browser_visible_gate"
+
+        champion_score = champion_assessment.score if champion_assessment else 0.0
+        return replace(
+            tournament_result,
+            champion_url=champion_card.candidate.url if champion_card else None,
+            champion_score=champion_score,
+            champion_status=champion_assessment.status if champion_assessment else (confirmation.status if confirmation and confirmation.attempted_count else "NO_BROWSER_VISIBLE_PRODUCTION_READY_CHAMPION"),
+            champion_production_ready=bool(champion_assessment and champion_assessment.production_ready and confirmation and confirmation.passed),
+            runner_up_url=runner_up.candidate.url if runner_up else None,
+            champion_margin=round(champion_score - runner_score, 4) if champion_card else 0.0,
+            best_review_candidate_url=review_card.candidate.url if review_card else tournament_result.best_review_candidate_url,
+            best_review_candidate_score=review_assessment.score if review_assessment else tournament_result.best_review_candidate_score,
+            best_review_candidate_status=review_assessment.status if review_assessment else tournament_result.best_review_candidate_status,
+            champion_confirmation=confirmation,
+        )
+
     def _align_final_with_tournament_result(self, match: ProductURLMatch, state: ProductSearchState, tournament_result: TournamentResult) -> ProductURLMatch:
         """Apply tournament result semantics to final output.
 
@@ -88,7 +138,7 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
             justification = (
                 f"No production-ready tournament champion was found. "
                 f"Best review candidate={review_url or 'None'}; status={tournament_result.best_review_candidate_status}. "
-                "product_url is intentionally empty because no candidate passed exact-product, browser-openable, highly scrapable, critical-detail evidence gates."
+                "product_url is intentionally empty because no candidate passed exact-product, browser-openable, user-visible content, highly scrapable, critical-detail evidence gates."
             )
             if match.justification:
                 justification = match.justification + " | " + justification
@@ -98,18 +148,18 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
                 verified_exact_url=None,
                 best_available_url=review_url,
                 best_reference_url=review_url or match.best_reference_url,
-                url_decision_status="NO_PRODUCTION_READY_TOURNAMENT_CHAMPION",
-                resolution_status="NO_PRODUCTION_READY_TOURNAMENT_CHAMPION",
+                url_decision_status="NO_BROWSER_VISIBLE_PRODUCTION_READY_TOURNAMENT_CHAMPION",
+                resolution_status="NO_BROWSER_VISIBLE_PRODUCTION_READY_TOURNAMENT_CHAMPION",
                 validation_status="NEEDS_REVIEW",
                 identity_status="UNVERIFIED",
                 is_exact_product_match=False,
                 is_scrapable=False,
                 needs_review=True,
                 confidence=0.0,
-                match_reason="no production-ready tournament champion",
+                match_reason="no browser-visible production-ready tournament champion",
                 justification=justification,
                 selected_with_warning=True,
-                primary_reject_reason="NO_PRODUCTION_READY_TOURNAMENT_CHAMPION",
+                primary_reject_reason="NO_BROWSER_VISIBLE_PRODUCTION_READY_TOURNAMENT_CHAMPION",
                 selection_scope="review_only",
                 selected_retailer_name="review_only",
                 selected_domain=domain_of(review_url) if review_url else "",
@@ -134,7 +184,8 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
         reasons = "; ".join(assessment.reasons) if assessment.reasons else "none"
         justification = (
             f"Tournament champion selected as product_url. Champion={tournament_result.champion_url}. "
-            f"Production status={assessment.status}. Runner-up={tournament_result.runner_up_url or 'None'}. Reasons={reasons}."
+            f"Production status={assessment.status}; user_visible_status={assessment.user_visible_status}. "
+            f"Runner-up={tournament_result.runner_up_url or 'None'}. Reasons={reasons}."
         )
         if match.justification:
             justification = match.justification + " | " + justification
@@ -150,7 +201,7 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
             is_exact_product_match=True,
             needs_review=False,
             confidence=assessment.score,
-            match_reason="production-ready tournament champion selected",
+            match_reason="browser-visible production-ready tournament champion selected",
             justification=justification,
             ean_check=verification.ean_check if verification else match.ean_check,
             title_check=verification.title_check if verification else match.title_check,
