@@ -1,19 +1,20 @@
 # Artifact Guide
 
-The harness writes business outputs and audit artifacts. The default artifact layout is now **reviewer-first**: fewer files, sharper decisions, less context distraction.
+The harness writes business outputs and audit artifacts. The default artifact layout is **reviewer-first**: fewer files, sharper decisions, less context distraction, and explicit browser-visible evidence for champion quality.
 
 ## Artifact philosophy
 
 ```text
-Default output = concise, reviewable decision packet
+Default output = concise, reviewable decision packet + browser-visible verdicts
 Deep output = opt-in engineering/debug trace
 ```
 
 | Format | Default role |
 |---|---|
 | CSV | Operational row/batch output and candidate accept/reject table. |
-| Markdown | Human-readable decision summary. |
-| JSON | Compact machine-readable decision/product-coding payload. |
+| Markdown | Human-readable decision summary and visible-content verdicts. |
+| JSON | Compact machine-readable decision/product-coding/visible-verdict payload. |
+| PNG | Browser screenshot of what the user actually sees, when capture is available. |
 | Notebook | User-facing execution gateway. |
 
 ## Batch-level artifact map
@@ -31,6 +32,7 @@ flowchart TD
     D --> I[Management summary]
     E --> J[Operational metrics]
     F --> K[Concise review packet]
+    F --> L[Browser-visible verdicts]
 ```
 
 ## Default row-level artifact map
@@ -41,12 +43,16 @@ flowchart TD
     A --> C[review_summary.md]
     A --> D[review_decision.json]
     A --> E[candidate_decisions.csv]
-    A --> F[product_coding_input.json]
+    A --> F[browser_visible_verdicts.json]
+    A --> G[browser_visible/]
+    A --> H[product_coding_input.json]
 
-    C --> G[What was selected?]
-    C --> H[Why was it selected?]
-    C --> I[How was it decided?]
-    E --> J[What was rejected and why?]
+    C --> I[What was selected]
+    C --> J[Why was it selected]
+    C --> K[How was it decided]
+    E --> L[What was rejected and why]
+    F --> M[Did the browser-visible page show the product]
+    G --> N[Screenshot, text, and resolved URL evidence]
 ```
 
 ## Default row folder
@@ -57,6 +63,13 @@ output/<row_id>/
 ├── review_summary.md
 ├── review_decision.json
 ├── candidate_decisions.csv
+├── browser_visible_verdicts.json
+├── browser_visible/
+│   ├── <candidate>_browser_preview.png
+│   ├── <candidate>_visible_text.txt
+│   ├── <candidate>_resolved_url.txt
+│   ├── <candidate>_browser_visible_verdict.json
+│   └── <candidate>_browser_visible_verdict.md
 └── product_coding_input.json
 ```
 
@@ -66,6 +79,9 @@ output/<row_id>/
 |---|---|---|---:|
 | `review_summary.md` | Reviewers, managers, analysts | Concise what/why/how decision summary. | Yes |
 | `candidate_decisions.csv` | Reviewers | Top candidates with selected/rejected reasons. | Yes |
+| `browser_visible_verdicts.json` | Reviewers, engineers | Shows whether browser-visible content matched the product. | When URL content seems suspicious |
+| `browser_visible/*.png` | Reviewers, engineers | Screenshot of what the user actually sees. | When content mismatch is suspected |
+| `browser_visible/*_browser_visible_verdict.md` | Reviewers | Human-readable visible-content verdict. | When content mismatch is suspected |
 | `final_row.csv` | Business/operations | One-row operational output. | Sometimes |
 | `product_coding_input.json` | Product coding engine | Structured evidence for downstream coding. | No |
 | `review_decision.json` | Notebook/UI/automation | Compact machine-readable version of the review summary. | No |
@@ -78,9 +94,12 @@ flowchart TD
     B --> C{Decision clear?}
     C -->|Yes| D[Accept or route based on review instruction]
     C -->|No| E[Open candidate_decisions.csv]
-    E --> F{Still unclear?}
-    F -->|No| D
-    F -->|Yes| G[Enable deep artifacts / engineering review]
+    E --> F{URL opens but content looks wrong?}
+    F -->|Yes| G[Open browser_visible_verdicts.json and screenshot]
+    F -->|No| H{Still unclear?}
+    G --> D
+    H -->|No| D
+    H -->|Yes| I[Enable deep artifacts / engineering review]
 ```
 
 ## Final submission interpretation
@@ -88,16 +107,21 @@ flowchart TD
 ```mermaid
 flowchart LR
     A[final_submission.csv] --> B{production_url_ready?}
-    B -->|true| C{needs_review?}
-    C -->|false| D[Automated handoff]
-    C -->|true| E[Review]
-    B -->|false| E
+    B -->|true| C{user_visible_product_match?}
+    C -->|true| D{needs_review?}
+    D -->|false| E[Automated handoff]
+    B -->|false| R[Review]
+    C -->|false| R
+    D -->|true| R
 ```
 
 Automated handoff requires:
 
 ```text
 production_url_ready = true
+production_url_status = PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL
+user_visible_product_match = true
+user_visible_status = USER_VISIBLE_PRODUCT_PAGE_CONFIRMED
 needs_review = false
 champion_confirmation.passed = true
 ```
@@ -124,6 +148,8 @@ coding_readiness_status
 review_flags
 ```
 
+The browser-visible verdict is the final safety evidence that the selected URL is not merely openable, but actually displays the intended product to the user.
+
 ## Optional deep artifacts
 
 Deep artifacts are available only when explicitly enabled:
@@ -138,6 +164,7 @@ Use deep artifacts only when:
 
 ```text
 review_summary.md is insufficient
+browser_visible_verdicts.json indicates reroute/content mismatch
 candidate scoring needs debugging
 scrape behavior needs investigation
 LLM/model calls need audit inspection
@@ -169,5 +196,5 @@ Use offline artifacts only when the workflow explicitly requires offline reprodu
 ## Reviewer rule
 
 ```text
-A reviewer should be able to judge most rows from review_summary.md and candidate_decisions.csv only.
+A reviewer should be able to judge most rows from review_summary.md, candidate_decisions.csv, and browser_visible_verdicts.json.
 ```
