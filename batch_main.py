@@ -65,6 +65,52 @@ def build_harness(product, env_file: str) -> tuple[ProductEvidenceHarness, Harne
     return ProductEvidenceHarness(serp_config=serp_config, config=config), config
 
 
+def _production_fields(production_assessment) -> dict[str, Any]:
+    if not production_assessment:
+        return {
+            "production_url_ready": False,
+            "production_url_status": "PRODUCT_URL_NOT_ASSESSED_OR_NO_SCORECARD",
+            "browser_openable": False,
+            "highly_scrapable": False,
+            "exact_product_url_match": False,
+            "production_url_score": 0.0,
+            "production_url_reasons": "NO_SCORECARD_FOR_SELECTED_PRODUCT_URL",
+            "rendered_page_check_passed": False,
+            "rendered_page_type": "UNKNOWN_PAGE",
+            "rendered_product_visible": False,
+            "rendered_content_related": False,
+            "rendered_match_confidence": 0.0,
+            "rendered_verdict": "NOT_EVALUATED",
+            "rendered_mismatch_reasons": "NO_SCORECARD_FOR_SELECTED_PRODUCT_URL",
+            "rendered_visible_title": "",
+            "rendered_visible_product_name": "",
+            "rendered_screenshot_path": "",
+            "rendered_screenshot_captured": False,
+            "rendered_llm_used": False,
+        }
+    return {
+        "production_url_ready": production_assessment.production_ready,
+        "production_url_status": production_assessment.status,
+        "browser_openable": production_assessment.browser_openable,
+        "highly_scrapable": production_assessment.highly_scrapable,
+        "exact_product_url_match": production_assessment.exact_product_match,
+        "production_url_score": production_assessment.score,
+        "production_url_reasons": "|".join(production_assessment.reasons),
+        "rendered_page_check_passed": production_assessment.rendered_page_check_passed,
+        "rendered_page_type": production_assessment.rendered_page_type,
+        "rendered_product_visible": production_assessment.rendered_product_visible,
+        "rendered_content_related": production_assessment.rendered_content_related,
+        "rendered_match_confidence": production_assessment.rendered_match_confidence,
+        "rendered_verdict": production_assessment.rendered_verdict,
+        "rendered_mismatch_reasons": "|".join(production_assessment.rendered_mismatch_reasons),
+        "rendered_visible_title": production_assessment.rendered_visible_title,
+        "rendered_visible_product_name": production_assessment.rendered_visible_product_name,
+        "rendered_screenshot_path": production_assessment.rendered_screenshot_path or "",
+        "rendered_screenshot_captured": production_assessment.rendered_screenshot_captured,
+        "rendered_llm_used": production_assessment.rendered_llm_used,
+    }
+
+
 def process(product, env_file: str) -> dict[str, Any]:
     try:
         harness, config = build_harness(product, env_file)
@@ -73,26 +119,7 @@ def process(product, env_file: str) -> dict[str, Any]:
         row = ArtifactWriter(config.output_dir, country_profiles=harness.country_profiles).final_submission_row(trace.state, product_dir=row_dir)
         row.update(EnterpriseEvidenceEngine().assess(trace.state).final_submission_extras())
         production_assessment = ProductionURLGate().assess_url_in_state(trace.state, row.get("product_url") or "")
-        if production_assessment:
-            row.update({
-                "production_url_ready": production_assessment.production_ready,
-                "production_url_status": production_assessment.status,
-                "browser_openable": production_assessment.browser_openable,
-                "highly_scrapable": production_assessment.highly_scrapable,
-                "exact_product_url_match": production_assessment.exact_product_match,
-                "production_url_score": production_assessment.score,
-                "production_url_reasons": "|".join(production_assessment.reasons),
-            })
-        else:
-            row.update({
-                "production_url_ready": False,
-                "production_url_status": "PRODUCT_URL_NOT_ASSESSED_OR_NO_SCORECARD",
-                "browser_openable": False,
-                "highly_scrapable": False,
-                "exact_product_url_match": False,
-                "production_url_score": 0.0,
-                "production_url_reasons": "NO_SCORECARD_FOR_SELECTED_PRODUCT_URL",
-            })
+        row.update(_production_fields(production_assessment))
         row["review_summary_path"] = str(row_dir / "review_summary.md")
         row["review_decision_path"] = str(row_dir / "review_decision.json")
         row["candidate_decisions_path"] = str(row_dir / "candidate_decisions.csv")
@@ -124,6 +151,18 @@ def process(product, env_file: str) -> dict[str, Any]:
             "exact_product_url_match": False,
             "production_url_score": 0.0,
             "production_url_reasons": "RUN_ERROR",
+            "rendered_page_check_passed": False,
+            "rendered_page_type": "RUN_ERROR",
+            "rendered_product_visible": False,
+            "rendered_content_related": False,
+            "rendered_match_confidence": 0.0,
+            "rendered_verdict": "RUN_ERROR",
+            "rendered_mismatch_reasons": "RUN_ERROR",
+            "rendered_visible_title": "",
+            "rendered_visible_product_name": "",
+            "rendered_screenshot_path": "",
+            "rendered_screenshot_captured": False,
+            "rendered_llm_used": False,
             "quality_tier": "E",
             "quality_tier_reason": "Run failed before final decision.",
             "coding_readiness_status": "NEEDS_REVIEW",
@@ -171,6 +210,7 @@ def write_batch_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
     product_url = sum(1 for r in rows if str(r.get("product_url") or "").strip())
     production_ready = sum(1 for r in rows if str(r.get("production_url_ready")).lower() in {"true", "1", "yes"})
     browser_openable = sum(1 for r in rows if str(r.get("browser_openable")).lower() in {"true", "1", "yes"})
+    rendered_passed = sum(1 for r in rows if str(r.get("rendered_page_check_passed")).lower() in {"true", "1", "yes"})
     highly_scrapable = sum(1 for r in rows if str(r.get("highly_scrapable")).lower() in {"true", "1", "yes"})
     exact_product_url = sum(1 for r in rows if str(r.get("exact_product_url_match")).lower() in {"true", "1", "yes"})
     coding_ready = sum(1 for r in rows if r.get("coding_readiness_status") == "CODING_READY")
@@ -185,9 +225,14 @@ def write_batch_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
     tier_counts = Counter(str(r.get("quality_tier") or "UNKNOWN") for r in rows)
     readiness_counts = Counter(str(r.get("coding_readiness_status") or "UNKNOWN") for r in rows)
     production_counts = Counter(str(r.get("production_url_status") or "UNKNOWN") for r in rows)
+    rendered_counts = Counter(str(r.get("rendered_page_type") or "UNKNOWN") for r in rows)
+    rendered_verdict_counts = Counter(str(r.get("rendered_verdict") or "UNKNOWN") for r in rows)
     failure_counts: Counter[str] = Counter()
     for r in rows:
         for failure in str(r.get("failure_taxonomy") or "").split("|"):
+            if failure:
+                failure_counts[failure] += 1
+        for failure in str(r.get("rendered_mismatch_reasons") or "").split("|"):
             if failure:
                 failure_counts[failure] += 1
 
@@ -196,6 +241,7 @@ def write_batch_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
         "product_url_count": product_url,
         "production_ready_product_url_count": production_ready,
         "browser_openable_product_url_count": browser_openable,
+        "rendered_page_check_passed_count": rendered_passed,
         "highly_scrapable_product_url_count": highly_scrapable,
         "exact_product_url_match_count": exact_product_url,
         "verified_exact_count": exact,
@@ -211,6 +257,8 @@ def write_batch_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
         "quality_tiers": dict(tier_counts),
         "coding_readiness": dict(readiness_counts),
         "production_url_status": dict(production_counts),
+        "rendered_page_type": dict(rendered_counts),
+        "rendered_verdict": dict(rendered_verdict_counts),
         "failure_taxonomy": dict(failure_counts),
     }
     (output_dir / "metrics.json").write_text(json.dumps(metrics, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -218,71 +266,62 @@ def write_batch_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
     lines = [
         "# Batch Product URL Discovery Summary",
         "",
-        "## Outcome Metrics",
-        f"- **Total rows:** `{total}`",
-        f"- **Operational product URLs:** `{product_url}`",
-        f"- **Production-ready product URLs:** `{production_ready}`",
-        f"- **Browser-openable product URLs:** `{browser_openable}`",
-        f"- **Highly scrapable product URLs:** `{highly_scrapable}`",
-        f"- **Exact product URL matches:** `{exact_product_url}`",
-        f"- **Verified exact URLs:** `{exact}`",
-        f"- **Coding-ready rows:** `{coding_ready}`",
-        f"- **Needs review:** `{needs_review}`",
-        f"- **Errors:** `{errors}`",
-        f"- **Selected from requested retailer:** `{requested_retailer}`",
-        f"- **Selected from same-country alternative retailer:** `{country_alt}`",
-        f"- **Selected from global fallback:** `{global_fallback}`",
+        "## Executive metrics",
         "",
-        "## Resource Usage",
-        f"- **SerpAPI calls:** `{serp_calls}`",
-        f"- **LLM calls:** `{llm_calls}`",
-        f"- **scrape calls:** `{scrapes}`",
+        "| Metric | Value |",
+        "|---|---:|",
+        f"| Total rows | {total} |",
+        f"| Rows with product_url | {product_url} |",
+        f"| Production-ready URLs | {production_ready} |",
+        f"| Browser-openable URLs | {browser_openable} |",
+        f"| Rendered product-content checks passed | {rendered_passed} |",
+        f"| Highly scrapable URLs | {highly_scrapable} |",
+        f"| Exact product URL matches | {exact_product_url} |",
+        f"| Coding-ready rows | {coding_ready} |",
+        f"| Needs review | {needs_review} |",
+        f"| Errors | {errors} |",
+        f"| Requested retailer selected | {requested_retailer} |",
+        f"| Other country retailer selected | {country_alt} |",
+        f"| Global fallback selected | {global_fallback} |",
+        f"| SerpAPI organic calls | {serp_calls} |",
+        f"| LLM calls | {llm_calls} |",
+        f"| Scrape calls | {scrapes} |",
         "",
     ]
-    lines.extend(_counter_lines("Production URL Status Distribution", production_counts))
-    lines.extend(_counter_lines("Quality Tier Distribution", tier_counts))
-    lines.extend(_counter_lines("Coding Readiness Distribution", readiness_counts))
-    lines.extend(_counter_lines("Failure Taxonomy", failure_counts))
-    lines.extend([
-        "## Review Queue",
-        "Rows marked `needs_review=true` are written to `review_queue.csv`.",
-        "",
-        "## Concise Row Review Packet",
-        "Each row folder defaults to `final_row.csv`, `review_summary.md`, `review_decision.json`, `candidate_decisions.csv`, and `product_coding_input.json`.",
-        "Open `review_summary.md` first. Use `notebooks/04_review_artifact_reader.ipynb` to inspect a row without browsing multiple files.",
-        "",
-        "## Dashboard Data",
-        "Machine-readable batch metrics are written to `metrics.json`.",
-    ])
-    (output_dir / "batch_summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    lines.extend(_counter_lines("Production URL status", production_counts))
+    lines.extend(_counter_lines("Rendered page type", rendered_counts))
+    lines.extend(_counter_lines("Rendered verdict", rendered_verdict_counts))
+    lines.extend(_counter_lines("Coding readiness", readiness_counts))
+    lines.extend(_counter_lines("Quality tiers", tier_counts))
+    lines.extend(_counter_lines("Failure taxonomy", failure_counts))
+    (output_dir / "batch_summary.md").write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 
 def main() -> None:
     args = parse_args()
     configure_logging(args.log_level)
-    products = CSVProductIO.read_products(Path(args.input))
-    print(f"[bold cyan]Loaded {len(products)} products[/bold cyan]")
+    products = CSVProductIO().read_products(args.input)
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"[bold]Running batch[/bold] rows={len(products)} workers={args.workers}")
     rows: list[dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
-        futures = [executor.submit(process, p, args.env_file) for p in products]
-        for future in tqdm(as_completed(futures), total=len(futures), desc="Processing"):
-            rows.append(future.result())
+    if args.workers <= 1:
+        for product in tqdm(products):
+            rows.append(process(product, args.env_file))
+    else:
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            future_map = {pool.submit(process, product, args.env_file): product for product in products}
+            for future in tqdm(as_completed(future_map), total=len(future_map)):
+                rows.append(future.result())
 
-    out = Path(args.output)
-    out.parent.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(rows)
-    if "ean" in df.columns:
-        df["ean"] = df["ean"].astype("string")
-    df.to_csv(out, index=False)
-
-    review = df[(df.get("needs_review", True).astype(str).str.lower().isin(["true", "1", "yes"])) | (df.get("status", "").astype(str) == "error")]
-    review.to_csv(out.parent / "review_queue.csv", index=False)
-    write_batch_summary(out.parent, rows)
-
-    print(f"[bold green]Wrote final submission CSV: {out}[/bold green]")
-    print(f"[bold yellow]Wrote review queue: {out.parent / 'review_queue.csv'}[/bold yellow]")
-    print(f"[bold cyan]Wrote batch summary: {out.parent / 'batch_summary.md'}[/bold cyan]")
-    print(f"[bold cyan]Wrote metrics JSON: {out.parent / 'metrics.json'}[/bold cyan]")
+    df.to_csv(output_path, index=False)
+    review = df[(df["needs_review"].astype(str).str.lower().isin(["true", "1", "yes"])) | (df["status"] == "error")]
+    review.to_csv(output_path.parent / "review_queue.csv", index=False)
+    write_batch_summary(output_path.parent, rows)
+    print(f"[green]Wrote[/green] {output_path}")
+    print(f"[yellow]Review queue[/yellow] {output_path.parent / 'review_queue.csv'} rows={len(review)}")
 
 
 if __name__ == "__main__":
