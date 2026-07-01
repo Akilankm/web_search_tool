@@ -20,6 +20,7 @@ class ReviewArtifactWriter:
     - review_summary.md: what was selected/rejected, why, and how the decision was made.
     - review_decision.json: compact machine-readable summary for notebooks/UI.
     - candidate_decisions.csv: top candidate outcomes in one table.
+    - browser_visible_verdicts.json: whether the browser-visible page shows the product.
     """
 
     candidate_limit: int = 10
@@ -35,6 +36,7 @@ class ReviewArtifactWriter:
     def decision_payload(self, state: ProductSearchState) -> dict[str, Any]:
         final = state.final_result
         selected = self._selected_card(state)
+        visible = self._visible(selected)
         tournament = getattr(state, "tournament_result", None)
         confirmation = getattr(tournament, "champion_confirmation", None) if tournament else None
         budget = state.budget.snapshot() if hasattr(state.budget, "snapshot") else None
@@ -60,6 +62,11 @@ class ReviewArtifactWriter:
 
         checks = {
             "browser_or_page_access": bool(selected and selected.scrape and selected.scrape.reachable),
+            "user_visible_product_match": bool(visible and getattr(visible, "user_visible_product_match", False)),
+            "user_visible_status": getattr(visible, "status", "NOT_VERIFIED") if visible else "NOT_VERIFIED",
+            "browser_visible_page_type": getattr(visible, "browser_visible_page_type", "unknown") if visible else "unknown",
+            "browser_visible_confidence": getattr(visible, "user_visible_content_confidence", 0.0) if visible else 0.0,
+            "browser_visible_rerouted": getattr(visible, "rerouted_or_not", False) if visible else False,
             "scrapable": bool(selected and selected.scrape and selected.scrape.is_scrapable),
             "looks_like_product_page": bool(selected and selected.scrape and selected.scrape.looks_like_product_page),
             "exact_product_match": bool(final and final.is_exact_product_match),
@@ -75,7 +82,7 @@ class ReviewArtifactWriter:
         rejected = self._rejected_summary(state, selected)
 
         return {
-            "schema_version": "concise_review_decision/v1",
+            "schema_version": "concise_review_decision/v2_browser_visible",
             "decision": decision,
             "checks": checks,
             "what_selected": self._what_selected(state, selected),
@@ -99,7 +106,7 @@ class ReviewArtifactWriter:
             "",
             "## 1. What was decided?",
             "",
-            f"| Field | Value |",
+            "| Field | Value |",
             "|---|---|",
             f"| Decision | `{d['decision']}` |",
             f"| Selected URL | {self._link(d.get('selected_url'))} |",
@@ -130,13 +137,25 @@ class ReviewArtifactWriter:
             lines.append(f"| {key} | `{value}` |")
         lines.extend([
             "",
-            "## 5. AI / model reasoning summary",
+            "## 5. Browser-visible content verdict",
+            "",
+            "The browser-visible gate verifies what a normal browser user actually sees. A URL can open and still be rejected if it shows a homepage, search page, consent/login wall, access block, or a different product.",
+            "",
+            "| Field | Value |",
+            "|---|---|",
+            f"| Visible product match | `{checks.get('user_visible_product_match')}` |",
+            f"| Visible status | `{checks.get('user_visible_status')}` |",
+            f"| Visible page type | `{checks.get('browser_visible_page_type')}` |",
+            f"| Visible confidence | `{checks.get('browser_visible_confidence')}` |",
+            f"| Rerouted | `{checks.get('browser_visible_rerouted')}` |",
+            "",
+            "## 6. AI / model reasoning summary",
             "",
         ])
         lines.extend(f"- {x}" for x in payload["ai_reasoning_summary"])
         lines.extend([
             "",
-            "## 6. Selected evidence",
+            "## 7. Selected evidence",
             "",
             "| Evidence | Value |",
             "|---|---|",
@@ -145,30 +164,32 @@ class ReviewArtifactWriter:
             lines.append(f"| {key} | {self._text(value)} |")
         lines.extend([
             "",
-            "## 7. What was rejected and why?",
+            "## 8. What was rejected and why?",
             "",
-            "| URL | Decision | Reason |",
-            "|---|---|---|",
+            "| URL | Decision | Reason | Visible status |",
+            "|---|---|---|---|",
         ])
         for row in payload["candidate_decisions"][: self.candidate_limit]:
             if row.get("selected"):
                 continue
-            lines.append(f"| {self._link(row.get('url'))} | `{row.get('decision')}` | {self._text(row.get('reason'))} |")
+            lines.append(f"| {self._link(row.get('url'))} | `{row.get('decision')}` | {self._text(row.get('reason'))} | `{row.get('user_visible_status')}` |")
         if all(row.get("selected") for row in payload["candidate_decisions"][: self.candidate_limit]):
-            lines.append("| - | - | No rejected candidate in top review set. |")
+            lines.append("| - | - | No rejected candidate in top review set. | - |")
         lines.extend([
             "",
-            "## 8. Review instruction",
+            "## 9. Review instruction",
             "",
             payload["review_instruction"],
             "",
-            "## 9. Related concise files",
+            "## 10. Related concise files",
             "",
             "| File | Use |",
             "|---|---|",
             "| `final_row.csv` | Operational one-row output. |",
             "| `review_decision.json` | Same decision summary in machine-readable form. |",
             "| `candidate_decisions.csv` | Top candidate accept/reject table. |",
+            "| `browser_visible_verdicts.json` | Browser-visible content verdicts for checked candidates. |",
+            "| `browser_visible/` | Screenshot, resolved URL, text excerpt, and visible verdict artifacts. |",
             "| `product_coding_input.json` | Downstream product-coding evidence when available. |",
         ])
         return "\n".join(lines).rstrip() + "\n"
@@ -195,13 +216,16 @@ class ReviewArtifactWriter:
 
     def _why_summary(self, state: ProductSearchState, selected: CandidateScorecard | None) -> list[str]:
         final = state.final_result
+        visible = self._visible(selected)
         if not final:
             return ["No final URL was selected; manual review is required."]
         points: list[str] = []
         if final.product_url and not final.needs_review:
-            points.append("Selected URL passed the final production handoff gates.")
+            points.append("Selected URL passed the final production handoff gates, including browser-visible product content verification.")
         elif final.best_available_url:
             points.append("No production-ready URL was confirmed; best available URL is kept for review only.")
+        if visible:
+            points.append(f"Browser-visible status was `{getattr(visible, 'status', 'UNKNOWN')}` with page type `{getattr(visible, 'browser_visible_page_type', 'unknown')}`.")
         if selected:
             points.append(f"Candidate score/confidence was `{selected.final_confidence:.3f}` with status `{selected.validation_status}`.")
             if selected.primary_reject_reason:
@@ -211,13 +235,14 @@ class ReviewArtifactWriter:
         justification = final.justification or final.llm_justification or final.match_reason
         if justification:
             points.append("Final justification: " + self._short(justification, 280))
-        return points or ["Decision was based on available ranking, scrape, identity, and validation signals."]
+        return points or ["Decision was based on available ranking, scrape, identity, visible-content, and validation signals."]
 
     def _how_summary(self, state: ProductSearchState, tournament: Any, budget: Any) -> list[str]:
         points = [
             f"Discovered `{len(state.candidates)}` candidate URL(s).",
             f"Scored `{len(state.scorecards)}` candidate(s).",
             f"Scraped `{len(state.scrapes)}` candidate page(s).",
+            f"Browser-visible verdicts recorded for `{len(getattr(state, 'browser_visible_verdicts', {}) or {})}` candidate(s).",
         ]
         if budget:
             points.append(f"Used search=`{getattr(budget, 'organic_used', 0)}`, AI-mode=`{getattr(budget, 'ai_mode_used', 0)}`, scrape=`{getattr(budget, 'scrape_used', 0)}` calls.")
@@ -240,8 +265,12 @@ class ReviewArtifactWriter:
             for call in state.llm_call_records[:3]:
                 decision = call.decision or "NO_DECISION"
                 points.append(f"LLM call `{call.call_index}` decision=`{decision}`, success=`{call.success}`, image_used=`{call.image_used}`.")
+        visible = getattr(state, "browser_visible_verdicts", {}) or {}
+        llm_visible = [v for v in visible.values() if isinstance(v, dict) and v.get("llm_used")]
+        if llm_visible:
+            points.append(f"Browser-visible LLM/vision verification was used for `{len(llm_visible)}` candidate(s).")
         if not points:
-            points.append("No LLM reasoning call was recorded for this run; decision used deterministic search, scrape, ranking, and validation signals.")
+            points.append("No LLM reasoning call was recorded for this run; decision used deterministic search, scrape, ranking, visible-content, and validation signals.")
         points.append("This section records observable model/planner outputs only; it is not hidden chain-of-thought.")
         return points
 
@@ -250,6 +279,7 @@ class ReviewArtifactWriter:
             return {"selected_candidate": "None"}
         scrape = selected.scrape
         verification = selected.verification
+        visible = self._visible(selected)
         return {
             "url": selected.candidate.url,
             "domain": selected.candidate.domain or self._domain(selected.candidate.url),
@@ -257,6 +287,11 @@ class ReviewArtifactWriter:
             "scrape_success": bool(scrape and scrape.success),
             "scrapable": bool(scrape and scrape.is_scrapable),
             "product_page": bool(scrape and scrape.looks_like_product_page),
+            "user_visible_product_match": bool(visible and getattr(visible, "user_visible_product_match", False)),
+            "user_visible_status": getattr(visible, "status", "NOT_VERIFIED") if visible else "NOT_VERIFIED",
+            "browser_visible_page_type": getattr(visible, "browser_visible_page_type", "unknown") if visible else "unknown",
+            "browser_visible_confidence": getattr(visible, "user_visible_content_confidence", 0.0) if visible else 0.0,
+            "browser_screenshot_path": getattr(visible, "screenshot_path", "") if visible else "",
             "page_title": scrape.title if scrape else "",
             "product_name": scrape.page_product_name if scrape else "",
             "brand": scrape.brand if scrape else "",
@@ -286,6 +321,7 @@ class ReviewArtifactWriter:
         for rank, card in enumerate(cards, start=1):
             scrape = card.scrape
             verification = card.verification
+            visible = self._visible(card)
             is_selected = bool(selected_url and card.candidate.url == selected_url)
             reason = self._candidate_reason(card, is_selected)
             rows.append({
@@ -304,6 +340,10 @@ class ReviewArtifactWriter:
                 "scrape_success": bool(scrape and scrape.success),
                 "scrapable": bool(scrape and scrape.is_scrapable),
                 "product_page": bool(scrape and scrape.looks_like_product_page),
+                "user_visible_status": getattr(visible, "status", "NOT_VERIFIED") if visible else "NOT_VERIFIED",
+                "user_visible_product_match": bool(visible and getattr(visible, "user_visible_product_match", False)),
+                "browser_visible_page_type": getattr(visible, "browser_visible_page_type", "unknown") if visible else "unknown",
+                "browser_visible_confidence": getattr(visible, "user_visible_content_confidence", 0.0) if visible else 0.0,
                 "reason": reason,
             })
         if not rows:
@@ -323,13 +363,20 @@ class ReviewArtifactWriter:
                 "scrape_success": False,
                 "scrapable": False,
                 "product_page": False,
+                "user_visible_status": "NOT_VERIFIED",
+                "user_visible_product_match": False,
+                "browser_visible_page_type": "unknown",
+                "browser_visible_confidence": 0.0,
                 "reason": "No candidates were available for review.",
             })
         return rows
 
     def _candidate_reason(self, card: CandidateScorecard, selected: bool) -> str:
+        visible = self._visible(card)
+        if visible and not getattr(visible, "champion_should_survive_visible_check", False):
+            return getattr(visible, "status", "BROWSER_VISIBLE_PRODUCT_CONTENT_NOT_CONFIRMED")
         if selected:
-            return "Promoted because it had the strongest combined production, identity, scrape, country, and retailer evidence."
+            return "Promoted because it had the strongest combined production, identity, scrape, visible-content, country, and retailer evidence."
         if card.primary_reject_reason:
             return card.primary_reject_reason
         if card.llm_reject_reason:
@@ -340,7 +387,7 @@ class ReviewArtifactWriter:
             return "Not promoted because scrape evidence was missing or unsuccessful."
         if card.verification and card.verification.blocking_reasons:
             return "; ".join(card.verification.blocking_reasons[:3])
-        if card.exact_product_check not in {"EXACT", "MATCHED", "VERIFIED"}:
+        if card.exact_product_check not in {"EXACT", "MATCHED", "VERIFIED", "EXACT_MATCH"}:
             return f"Not promoted because exact product check was `{card.exact_product_check or 'UNKNOWN'}`."
         return "Not promoted because another candidate had stronger combined evidence."
 
@@ -349,7 +396,7 @@ class ReviewArtifactWriter:
             return "Manual review required: no final result was produced."
         if final.product_url and not final.needs_review:
             return "Reviewer can accept this row for automated handoff unless business policy requires additional manual sampling."
-        return "Manual review required: do not use as automated handoff until a reviewer confirms the best available URL."
+        return "Manual review required: do not use as automated handoff until a reviewer confirms the best available URL and browser-visible content."
 
     def _selected_card(self, state: ProductSearchState) -> CandidateScorecard | None:
         final_url = state.final_result.product_url if state.final_result else None
@@ -373,6 +420,10 @@ class ReviewArtifactWriter:
             if card.candidate.url == selected.candidate.url:
                 return idx
         return None
+
+    @staticmethod
+    def _visible(card: CandidateScorecard | None) -> Any:
+        return getattr(card, "browser_visible_verdict", None) if card else None
 
     def _write_json(self, path: Path, data: Any) -> None:
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str) + "\n", encoding="utf-8")
