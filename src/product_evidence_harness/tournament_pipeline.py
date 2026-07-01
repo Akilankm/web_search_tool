@@ -12,6 +12,7 @@ from src.product_evidence_harness.elite import EnterpriseEvidenceEngine
 from src.product_evidence_harness.identity.graph import ProductIdentityGraphBuilder
 from src.product_evidence_harness.pipeline import ProductEvidenceHarness as BaseProductEvidenceHarness
 from src.product_evidence_harness.retailer_strategy import candidate_matches_requested_retailer
+from src.product_evidence_harness.review_safety import best_safe_review_card, card_for_url, unsafe_review_reason
 from src.product_evidence_harness.tournament import CandidateTournamentEngine, TournamentResult
 from src.product_evidence_harness.url_utils import domain_of
 
@@ -22,7 +23,8 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
 
     In tournament mode, product_url is reserved for a true champion: exact product,
     browser-openable, highly scrapable, and rich enough for downstream product
-    coding evidence. Review candidates are kept separately when no champion exists.
+    coding evidence. Review candidates are kept separately only when they pass a
+    safe-review gate. Hard-rejected mismatches remain in candidate tables.
     """
 
     tournament_engine: CandidateTournamentEngine | None = None
@@ -80,14 +82,33 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
         """Apply tournament result semantics to final output.
 
         Champion exists only when a URL passed the production gate. If no champion
-        exists, product_url is cleared and the best review candidate is preserved
-        as best_available_url / best_reference_url for manual investigation.
+        exists, product_url is cleared. A best_available_url is preserved only for
+        candidates that pass the safe-review gate; hard mismatches are kept only in
+        rejected candidate evidence.
         """
         if not tournament_result.champion_url:
-            review_url = tournament_result.best_review_candidate_url or match.product_url or match.best_available_url or match.best_reference_url
+            min_review_confidence = getattr(getattr(getattr(self, "config", None), "policy", None), "min_review_confidence", 0.30)
+            candidate_urls = (
+                tournament_result.best_review_candidate_url,
+                match.best_available_url,
+                match.best_reference_url,
+                match.product_url,
+            )
+            review_card = None
+            for candidate_url in candidate_urls:
+                card = card_for_url(state, candidate_url)
+                if card and not unsafe_review_reason(card, min_confidence=min_review_confidence):
+                    review_card = card
+                    break
+            review_card = review_card or best_safe_review_card(state, min_confidence=min_review_confidence)
+            review_url = review_card.candidate.url if review_card else None
+            top_card = card_for_url(state, tournament_result.best_review_candidate_url) or (state.scorecards[0] if state.scorecards else None)
+            unsafe_reason = "" if review_card else unsafe_review_reason(top_card, min_confidence=min_review_confidence) if top_card else "NO_CANDIDATES"
+            status = "NO_PRODUCTION_READY_TOURNAMENT_CHAMPION" if review_url else "NO_SAFE_REVIEW_CANDIDATE"
             justification = (
                 f"No production-ready tournament champion was found. "
-                f"Best review candidate={review_url or 'None'}; status={tournament_result.best_review_candidate_status}. "
+                f"Safe review candidate={review_url or 'None'}. "
+                f"Rejected fallback reason={unsafe_reason or 'none'}. "
                 "product_url is intentionally empty because no candidate passed exact-product, browser-openable, highly scrapable, critical-detail evidence gates."
             )
             if match.justification:
@@ -97,21 +118,21 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
                 product_url=None,
                 verified_exact_url=None,
                 best_available_url=review_url,
-                best_reference_url=review_url or match.best_reference_url,
-                url_decision_status="NO_PRODUCTION_READY_TOURNAMENT_CHAMPION",
-                resolution_status="NO_PRODUCTION_READY_TOURNAMENT_CHAMPION",
-                validation_status="NEEDS_REVIEW",
-                identity_status="UNVERIFIED",
+                best_reference_url=review_url,
+                url_decision_status=status,
+                resolution_status=status,
+                validation_status="NEEDS_REVIEW" if review_url else "UNRESOLVED",
+                identity_status=review_card.verification.identity_status if review_card and review_card.verification else "UNVERIFIED",
                 is_exact_product_match=False,
-                is_scrapable=False,
+                is_scrapable=bool(review_card and review_card.scrape and review_card.scrape.is_scrapable),
                 needs_review=True,
-                confidence=0.0,
-                match_reason="no production-ready tournament champion",
+                confidence=min(review_card.final_confidence, 0.49) if review_card else 0.0,
+                match_reason="safe review candidate retained" if review_card else "no safe review candidate",
                 justification=justification,
                 selected_with_warning=True,
-                primary_reject_reason="NO_PRODUCTION_READY_TOURNAMENT_CHAMPION",
-                selection_scope="review_only",
-                selected_retailer_name="review_only",
+                primary_reject_reason=status,
+                selection_scope="review_only" if review_card else "unresolved",
+                selected_retailer_name="review_only" if review_card else "",
                 selected_domain=domain_of(review_url) if review_url else "",
                 selected_from_requested_retailer=False,
                 selected_from_other_country_retailer=False,
@@ -198,10 +219,7 @@ class TournamentAwareProductEvidenceHarness(BaseProductEvidenceHarness):
 
     @staticmethod
     def _card_for_url(state: ProductSearchState, url: str) -> CandidateScorecard | None:
-        for card in state.scorecards:
-            if card.candidate.url == url:
-                return card
-        return None
+        return card_for_url(state, url)
 
     def _write_outputs(self, state: ProductSearchState, tournament_result: TournamentResult) -> None:
         if self.config.write_outputs:
