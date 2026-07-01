@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from product_evidence_harness import ProductEvidenceHarness, ProductQuery, ProductSearchState, ProductURLMatch
 from product_evidence_harness.budget import BudgetTracker
+from product_evidence_harness.browser_visible import BrowserVisibleProductVerdict
 from product_evidence_harness.contracts import CandidateScorecard, MatchVerification, ScrapeResult, URLCandidate
 from product_evidence_harness.production_url import ProductionURLGate
 
@@ -51,10 +52,26 @@ def _verification(url: str, *, exact: bool = True) -> MatchVerification:
     )
 
 
-def _card(url: str, *, exact: bool = True, scrapable: bool = True, final_confidence: float = 0.95) -> CandidateScorecard:
+def _visible(url: str, *, match: bool = True, status: str = "USER_VISIBLE_PRODUCT_PAGE_CONFIRMED", page_type: str = "product_page") -> BrowserVisibleProductVerdict:
+    return BrowserVisibleProductVerdict(
+        url=url,
+        final_url=url,
+        status=status,
+        browser_visible_page_type=page_type,
+        user_visible_product_match=match,
+        champion_should_survive_visible_check=match and status == "USER_VISIBLE_PRODUCT_PAGE_CONFIRMED" and page_type == "product_page",
+        user_visible_content_confidence=0.95 if match else 0.15,
+        product_content_visible=match,
+        rerouted_or_not=False,
+        evidence=("test verdict",),
+        reasons=("test visible content verdict",),
+    )
+
+
+def _card(url: str, *, exact: bool = True, scrapable: bool = True, final_confidence: float = 0.95, visible: BrowserVisibleProductVerdict | None = None) -> CandidateScorecard:
     scrape = _scrape(url, scrapable=scrapable)
     verification = _verification(url, exact=exact)
-    return CandidateScorecard(
+    card = CandidateScorecard(
         candidate=URLCandidate(url=url, title="LEGO Friends 41731", domain="retailer.test"),
         organic_score=1.0,
         ai_score=0.0,
@@ -77,6 +94,9 @@ def _card(url: str, *, exact: bool = True, scrapable: bool = True, final_confide
         exact_product_check=verification.exact_product_check,
         variant_check=verification.variant_check,
     )
+    if visible:
+        object.__setattr__(card, "browser_visible_verdict", visible)
+    return card
 
 
 def _match(url: str) -> ProductURLMatch:
@@ -114,6 +134,23 @@ def test_production_gate_requires_browser_scrapable_exact_product_url() -> None:
     assert weak.status == "PRODUCT_URL_NOT_EXACT_MATCH_NEEDS_REVIEW"
 
 
+def test_browser_visible_gate_blocks_openable_wrong_visible_content() -> None:
+    url = "https://retailer.test/product/41731"
+    no_visible = ProductionURLGate(require_user_visible_verification=True).assess_card(_card(url))
+    wrong_visible = ProductionURLGate(require_user_visible_verification=True).assess_card(
+        _card(url, visible=_visible(url, match=False, status="BROWSER_OPENABLE_BUT_WRONG_PRODUCT", page_type="product_page"))
+    )
+    good_visible = ProductionURLGate(require_user_visible_verification=True).assess_card(_card(url, visible=_visible(url)))
+
+    assert no_visible.production_ready is False
+    assert no_visible.status == "BROWSER_VISIBLE_PRODUCT_CONTENT_NOT_VERIFIED_NEEDS_REVIEW"
+    assert wrong_visible.production_ready is False
+    assert wrong_visible.status == "BROWSER_OPENABLE_BUT_WRONG_PRODUCT"
+    assert good_visible.production_ready is True
+    assert good_visible.user_visible_product_match is True
+    assert good_visible.status == "PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL"
+
+
 def test_pipeline_promotes_production_grade_url_over_weak_initial_product_url() -> None:
     weak_url = "https://retailer.test/product/weak"
     strong_url = "https://retailer.test/product/41731"
@@ -146,5 +183,5 @@ def test_pipeline_keeps_nonempty_url_but_marks_non_production_fallback() -> None
     assert selected.product_url == weak_url
     assert selected.needs_review is True
     assert selected.is_exact_product_match is False
-    assert selected.primary_reject_reason == "PRODUCT_URL_NOT_PRODUCTION_GRADE"
+    assert selected.primary_reject_reason == "PRODUCT_URL_NOT_EXACT_MATCH_NEEDS_REVIEW"
     assert selected.url_decision_status == "PRODUCT_URL_NOT_EXACT_MATCH_NEEDS_REVIEW"
