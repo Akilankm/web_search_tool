@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from src.product_evidence_harness.contracts import CandidateScorecard, ProductSearchState
+from src.product_evidence_harness.review_safety import card_for_url, is_safe_review_candidate
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,7 @@ class ReviewArtifactWriter:
         tournament = getattr(state, "tournament_result", None)
         confirmation = getattr(tournament, "champion_confirmation", None) if tournament else None
         budget = state.budget.snapshot() if hasattr(state.budget, "snapshot") else None
+        best_review_url = final.best_available_url if final and selected and final.best_available_url else None
 
         decision = {
             "row_id": state.task.row_id,
@@ -48,14 +50,14 @@ class ReviewArtifactWriter:
             "decision": self._decision_label(state),
             "selected_url": final.product_url if final else None,
             "verified_exact_url": final.verified_exact_url if final else None,
-            "best_review_url": final.best_available_url if final else None,
+            "best_review_url": best_review_url,
             "needs_review": bool(final.needs_review) if final else True,
             "confidence": round(float(final.confidence), 4) if final else 0.0,
             "status": final.url_decision_status if final else "UNRESOLVED",
             "identity_status": final.identity_status if final else "UNVERIFIED",
             "validation_status": final.validation_status if final else "UNRESOLVED",
-            "selected_domain": final.selected_domain if final else "",
-            "selection_scope": final.selection_scope if final else "unresolved",
+            "selected_domain": final.selected_domain if final and selected else "",
+            "selection_scope": final.selection_scope if final and selected else "unresolved",
         }
 
         checks = {
@@ -75,7 +77,7 @@ class ReviewArtifactWriter:
         rejected = self._rejected_summary(state, selected)
 
         return {
-            "schema_version": "concise_review_decision/v1",
+            "schema_version": "concise_review_decision/v2",
             "decision": decision,
             "checks": checks,
             "what_selected": self._what_selected(state, selected),
@@ -85,7 +87,7 @@ class ReviewArtifactWriter:
             "selected_evidence": evidence,
             "rejection_summary": rejected,
             "candidate_decisions": self._candidate_rows(state, selected),
-            "review_instruction": self._review_instruction(final),
+            "review_instruction": self._review_instruction(final, selected),
         }
 
     def render_markdown(self, state: ProductSearchState, payload: dict[str, Any]) -> str:
@@ -109,7 +111,7 @@ class ReviewArtifactWriter:
             f"| Confidence | `{d.get('confidence')}` |",
             f"| Selected domain | `{d.get('selected_domain')}` |",
             "",
-            "## 2. Why was this selected?",
+            "## 2. Why was this decision made?",
             "",
         ]
         lines.extend(f"- {x}" for x in payload["why_selected"])
@@ -136,7 +138,7 @@ class ReviewArtifactWriter:
         lines.extend(f"- {x}" for x in payload["ai_reasoning_summary"])
         lines.extend([
             "",
-            "## 6. Selected evidence",
+            "## 6. Selected / safe review evidence",
             "",
             "| Evidence | Value |",
             "|---|---|",
@@ -175,19 +177,20 @@ class ReviewArtifactWriter:
 
     def _decision_label(self, state: ProductSearchState) -> str:
         final = state.final_result
+        selected = self._selected_card(state)
         if not final:
             return "UNRESOLVED_REVIEW_REQUIRED"
-        if final.product_url and not final.needs_review:
+        if final.product_url and not final.needs_review and selected:
             return "ACCEPT_PRODUCTION_URL"
-        if final.best_available_url or final.best_reference_url:
-            return "REVIEW_BEST_AVAILABLE_URL"
+        if final.best_available_url and selected:
+            return "REVIEW_SAFE_AVAILABLE_URL"
         return "UNRESOLVED_REVIEW_REQUIRED"
 
     def _what_selected(self, state: ProductSearchState, selected: CandidateScorecard | None) -> dict[str, Any]:
         final = state.final_result
         return {
-            "selected_url": final.product_url if final else None,
-            "review_url": final.best_available_url if final else None,
+            "selected_url": final.product_url if final and selected else None,
+            "review_url": final.best_available_url if final and selected else None,
             "candidate_rank": self._rank(state, selected) if selected else None,
             "domain": selected.candidate.domain if selected else "",
             "title": selected.candidate.title if selected else "",
@@ -198,10 +201,12 @@ class ReviewArtifactWriter:
         if not final:
             return ["No final URL was selected; manual review is required."]
         points: list[str] = []
-        if final.product_url and not final.needs_review:
+        if final.product_url and not final.needs_review and selected:
             points.append("Selected URL passed the final production handoff gates.")
-        elif final.best_available_url:
-            points.append("No production-ready URL was confirmed; best available URL is kept for review only.")
+        elif final.best_available_url and selected:
+            points.append("No production-ready URL was confirmed; a safe review URL was retained for manual review only.")
+        else:
+            points.append("No production-ready URL and no safe review URL were confirmed; rejected candidates remain visible only in the candidate table.")
         if selected:
             points.append(f"Candidate score/confidence was `{selected.final_confidence:.3f}` with status `{selected.validation_status}`.")
             if selected.primary_reject_reason:
@@ -247,7 +252,7 @@ class ReviewArtifactWriter:
 
     def _selected_evidence(self, selected: CandidateScorecard | None) -> dict[str, Any]:
         if not selected:
-            return {"selected_candidate": "None"}
+            return {"selected_candidate": "None", "note": "No production-ready or safe review candidate was selected."}
         scrape = selected.scrape
         verification = selected.verification
         return {
@@ -281,17 +286,23 @@ class ReviewArtifactWriter:
 
     def _candidate_rows(self, state: ProductSearchState, selected: CandidateScorecard | None) -> list[dict[str, Any]]:
         cards = self._ranked_cards(state)[: self.candidate_limit]
-        selected_url = selected.candidate.url if selected else (state.final_result.product_url if state.final_result else None)
+        selected_url = selected.candidate.url if selected else None
         rows: list[dict[str, Any]] = []
         for rank, card in enumerate(cards, start=1):
             scrape = card.scrape
             verification = card.verification
             is_selected = bool(selected_url and card.candidate.url == selected_url)
             reason = self._candidate_reason(card, is_selected)
+            if is_selected and state.final_result and state.final_result.product_url == card.candidate.url:
+                decision = "SELECTED_PRODUCTION_URL"
+            elif is_selected:
+                decision = "SAFE_REVIEW_CANDIDATE"
+            else:
+                decision = "REJECTED_OR_NOT_PROMOTED"
             rows.append({
                 "rank": rank,
                 "selected": is_selected,
-                "decision": "SELECTED" if is_selected else "REJECTED_OR_NOT_PROMOTED",
+                "decision": decision,
                 "url": card.candidate.url,
                 "domain": card.candidate.domain or self._domain(card.candidate.url),
                 "confidence": round(float(card.final_confidence), 4),
@@ -329,39 +340,44 @@ class ReviewArtifactWriter:
 
     def _candidate_reason(self, card: CandidateScorecard, selected: bool) -> str:
         if selected:
-            return "Promoted because it had the strongest combined production, identity, scrape, country, and retailer evidence."
+            return "Promoted because it passed either production gates or the safe-review fallback gate."
         if card.primary_reject_reason:
             return card.primary_reject_reason
         if card.llm_reject_reason:
             return card.llm_reject_reason
         if card.hard_failures:
             return "; ".join(card.hard_failures[:3])
-        if not (card.scrape and card.scrape.success):
-            return "Not promoted because scrape evidence was missing or unsuccessful."
         if card.verification and card.verification.blocking_reasons:
             return "; ".join(card.verification.blocking_reasons[:3])
-        if card.exact_product_check not in {"EXACT", "MATCHED", "VERIFIED"}:
+        if not (card.scrape and card.scrape.success):
+            return "Not promoted because scrape evidence was missing or unsuccessful."
+        if not is_safe_review_candidate(card):
+            return "Not promoted because it failed the safe-review fallback gate."
+        if card.exact_product_check not in {"EXACT", "MATCHED", "VERIFIED", "EXACT_MATCH"}:
             return f"Not promoted because exact product check was `{card.exact_product_check or 'UNKNOWN'}`."
         return "Not promoted because another candidate had stronger combined evidence."
 
-    def _review_instruction(self, final: Any) -> str:
+    def _review_instruction(self, final: Any, selected: CandidateScorecard | None = None) -> str:
         if not final:
             return "Manual review required: no final result was produced."
         if final.product_url and not final.needs_review:
             return "Reviewer can accept this row for automated handoff unless business policy requires additional manual sampling."
-        return "Manual review required: do not use as automated handoff until a reviewer confirms the best available URL."
+        if final.best_available_url and selected:
+            return "Manual review required: a safe review URL exists, but do not use it for automated handoff until a reviewer confirms it."
+        return "Manual review required: no safe review URL was retained; inspect rejected candidates only as search diagnostics, not as product URLs."
 
     def _selected_card(self, state: ProductSearchState) -> CandidateScorecard | None:
-        final_url = state.final_result.product_url if state.final_result else None
-        fallback = state.final_result.best_available_url if state.final_result else None
-        for url in (final_url, fallback):
-            if not url:
-                continue
-            for card in state.scorecards:
-                if card.candidate.url == url:
-                    return card
-        ranked = self._ranked_cards(state)
-        return ranked[0] if ranked else None
+        if not state.final_result:
+            return None
+        final = state.final_result
+        for url in (final.product_url, final.verified_exact_url):
+            card = card_for_url(state, url)
+            if card:
+                return card
+        fallback = card_for_url(state, final.best_available_url)
+        if fallback and is_safe_review_candidate(fallback):
+            return fallback
+        return None
 
     def _ranked_cards(self, state: ProductSearchState) -> list[CandidateScorecard]:
         return sorted(state.scorecards, key=lambda c: (c.final_confidence, c.weighted_confidence), reverse=True)
