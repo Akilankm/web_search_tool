@@ -25,6 +25,7 @@ from src.product_evidence_harness.production_url import ProductionURLGate
 from src.product_evidence_harness.query_builder import QueryBuilder
 from src.product_evidence_harness.ranker import ProductURLRanker
 from src.product_evidence_harness.review_artifacts import ReviewArtifactWriter
+from src.product_evidence_harness.review_safety import best_safe_review_card, card_for_url, unsafe_review_reason
 from src.product_evidence_harness.scraper import CrawlScraper
 from src.product_evidence_harness.selector import FinalSelector
 from src.product_evidence_harness.serp_clients import GoogleAIModeClient, GoogleOrganicSearchClient
@@ -160,16 +161,15 @@ class ProductEvidenceHarness:
 
     @staticmethod
     def _enforce_production_grade_product_url(match: ProductURLMatch, state: ProductSearchState, *, production_gate: ProductionURLGate | None = None) -> ProductURLMatch:
-        """Prefer production-grade URLs; still keep strict non-empty fallback.
+        """Promote only production-grade URLs; keep only safe review fallbacks.
 
-        Production-grade means the URL is browser-openable, scrape-usable,
-        product-page-like, rich enough for downstream scraping/coding, and exact
-        product verified. This is the URL the browser and scraping teams should
-        be able to use directly.
+        Production-grade means browser-openable, scrape-usable, product-page-like,
+        rich enough for downstream scraping/coding, and exact-product verified.
 
-        If no production-grade URL exists, product_url is still filled with the
-        best discovered URL per the non-empty business rule, but it is marked
-        review-only/non-production through status fields.
+        If no production-grade URL exists, product_url stays empty. A fallback URL
+        is retained only in best_available_url / best_reference_url when it passes
+        the safe-review gate. Hard mismatches remain visible in candidate tables
+        but are not promoted into selected or best-review fields.
         """
         gate = production_gate or ProductionURLGate()
         production_card, production_assessment = gate.best_production_card(state)
@@ -182,65 +182,125 @@ class ProductEvidenceHarness:
             )
             return promoted
 
-        url = (
-            match.product_url
-            or match.verified_exact_url
-            or match.best_available_url
-            or match.best_reference_url
-            or ProductEvidenceHarness._best_discovered_url(state)
-        )
-        if not url:
+        min_review_confidence = 0.30
+        review_card = best_safe_review_card(state, min_confidence=min_review_confidence)
+        if not review_card:
+            top_card = sorted(state.scorecards, key=lambda c: (c.final_confidence, c.weighted_confidence), reverse=True)[0] if state.scorecards else None
+            reject_reason = unsafe_review_reason(top_card, min_confidence=min_review_confidence) if top_card else "NO_CANDIDATES"
             return replace(
                 match,
-                url_decision_status="STRICT_PRODUCT_URL_REQUIRED_BUT_NO_URL_CANDIDATE_AVAILABLE",
-                resolution_status="STRICT_PRODUCT_URL_REQUIRED_BUT_NO_URL_CANDIDATE_AVAILABLE",
+                product_url=None,
+                verified_exact_url=None,
+                best_available_url=None,
+                best_reference_url=None,
+                url_decision_status="NO_SAFE_REVIEW_CANDIDATE",
+                resolution_status="NO_SAFE_REVIEW_CANDIDATE",
                 validation_status="UNRESOLVED",
+                identity_status="UNVERIFIED",
+                is_exact_product_match=False,
+                is_scrapable=False,
                 needs_review=True,
                 confidence=0.0,
-                match_reason="No URL candidate was available after search and fallback attempts.",
-                justification="No product URL could be emitted because no candidate URL was discovered or retained.",
+                match_reason="no production-ready URL and no safe review candidate",
+                justification=f"No production-ready URL was found. Top candidate was not promoted to review URL because: {reject_reason}.",
+                selected_with_warning=True,
+                primary_reject_reason="NO_SAFE_REVIEW_CANDIDATE",
+                selected_domain="",
+                selection_scope="unresolved",
+                selected_retailer_name="",
+                selected_from_requested_retailer=False,
+                selected_from_other_country_retailer=False,
+                selected_from_global_fallback=False,
             )
 
-        assessment = gate.assess_url_in_state(state, url)
-        status = assessment.status if assessment else "PRODUCT_URL_NOT_PRODUCTION_GRADE_NEEDS_REVIEW"
-        reasons = "; ".join(assessment.reasons) if assessment else "No production assessment was available."
-        card = ProductEvidenceHarness._card_for_url(state, url)
-        selected_warning = ProductEvidenceHarness._replace_from_card(
+        assessment = gate.assess_card(review_card)
+        status = assessment.status if assessment else "SAFE_REVIEW_CANDIDATE_NEEDS_REVIEW"
+        reasons = "; ".join(assessment.reasons) if assessment else "Safe review candidate did not have a production assessment."
+        return ProductEvidenceHarness._replace_review_from_card(
             match,
-            card,
+            review_card,
             status=status,
-            reason=f"Best available URL retained for review only. {reasons}",
-        ) if card else match
-        return replace(
-            selected_warning,
-            product_url=url,
-            best_available_url=url,
-            verified_exact_url=None,
-            url_decision_status=status,
-            resolution_status=status,
-            validation_status="NEEDS_REVIEW",
-            needs_review=True,
-            confidence=min(selected_warning.confidence or 0.0, 0.49),
-            match_reason="best available URL retained for review; not production-grade",
-            justification=f"A non-empty URL is returned for review, but it is not production-ready. Reasons: {reasons}",
-            selected_with_warning=True,
-            primary_reject_reason=status,
+            reason=f"Safe review URL retained for manual review only. {reasons}",
         )
 
     @staticmethod
     def _best_discovered_url(state: ProductSearchState) -> str | None:
-        if state.scorecards:
-            return sorted(state.scorecards, key=lambda c: c.final_confidence, reverse=True)[0].candidate.url
-        if state.candidates:
-            return state.candidates[0].url
+        review_card = best_safe_review_card(state, min_confidence=0.30)
+        if review_card:
+            return review_card.candidate.url
         return None
 
     @staticmethod
     def _card_for_url(state: ProductSearchState, url: str) -> CandidateScorecard | None:
-        for card in state.scorecards:
-            if card.candidate.url == url:
-                return card
-        return None
+        return card_for_url(state, url)
+
+    @staticmethod
+    def _replace_review_from_card(match: ProductURLMatch, card: CandidateScorecard, *, status: str, reason: str) -> ProductURLMatch:
+        scrape = card.scrape
+        verification = card.verification
+        url = card.candidate.url
+        requested = card.retailer_check == "MATCHED"
+        country_specific = card.country_check in {"MATCHED", "NOT_PROVIDED"}
+        global_fallback = card.country_check == "ALTERNATIVE"
+        scope = "requested_retailer" if requested else "country" if country_specific else "global_fallback" if global_fallback else "safe_review"
+        return replace(
+            match,
+            product_url=None,
+            best_available_url=url,
+            best_reference_url=url,
+            verified_exact_url=None,
+            url_decision_status=status,
+            resolution_status=status,
+            validation_status="NEEDS_REVIEW",
+            identity_status=verification.identity_status if verification else match.identity_status,
+            is_exact_product_match=False,
+            needs_review=True,
+            confidence=min(card.final_confidence, 0.49),
+            match_reason="safe review URL retained; not production-grade",
+            justification=reason,
+            ean_check=verification.ean_check if verification else match.ean_check,
+            title_check=verification.title_check if verification else match.title_check,
+            quantity_check=verification.quantity_check if verification else match.quantity_check,
+            page_type_check=verification.page_type_check if verification else match.page_type_check,
+            retailer_check=card.retailer_check,
+            country_check=card.country_check,
+            blocking_reasons="; ".join(verification.blocking_reasons) if verification else "",
+            hard_failures=tuple(card.hard_failures),
+            soft_warnings=tuple(card.soft_warnings),
+            is_scrapable=bool(scrape and scrape.is_scrapable),
+            scrape_status_code=scrape.status_code if scrape else None,
+            scrape_word_count=scrape.word_count if scrape else 0,
+            scrape_markdown_chars=scrape.markdown_chars if scrape else 0,
+            scrape_final_url=scrape.final_url if scrape else None,
+            richness_score=scrape.richness_score if scrape else 0.0,
+            price=scrape.price if scrape else None,
+            currency=scrape.currency if scrape else "",
+            brand=scrape.brand if scrape else "",
+            manufacturer=scrape.manufacturer if scrape else "",
+            description=scrape.description if scrape else "",
+            specs_count=len(scrape.specs) if scrape else 0,
+            image_count=scrape.image_count if scrape else 0,
+            specs=dict(scrape.specs) if scrape else {},
+            image_urls=tuple(scrape.image_urls) if scrape else (),
+            exact_product_check=verification.exact_product_check if verification else card.exact_product_check,
+            variant_check=verification.variant_check if verification else card.variant_check,
+            variant_conflict_terms=verification.variant_conflict_terms if verification else (),
+            identity_driver=verification.identity_driver if verification else card.identity_driver,
+            ean_status=verification.ean_status if verification else match.ean_status,
+            ean_conflict_is_blocking=False,
+            input_ean_valid=verification.input_ean_valid if verification else match.input_ean_valid,
+            input_ean_normalized=verification.input_ean_normalized if verification else match.input_ean_normalized,
+            page_gtins_valid=verification.page_gtins_valid if verification else (),
+            page_gtins_ignored=verification.page_gtins_ignored if verification else (),
+            selected_with_warning=True,
+            primary_reject_reason="",
+            selection_scope=scope,
+            selected_retailer_name=card.candidate.domain,
+            selected_domain=domain_of(url),
+            selected_from_requested_retailer=requested,
+            selected_from_other_country_retailer=bool(country_specific and not requested),
+            selected_from_global_fallback=global_fallback,
+        )
 
     @staticmethod
     def _replace_from_card(match: ProductURLMatch, card: CandidateScorecard | None, *, status: str, reason: str) -> ProductURLMatch:
