@@ -1,93 +1,53 @@
 # Product Evidence Harness
 
-## Executive positioning
+The Product Evidence Harness turns product web search into verified, auditable, product-coding-ready evidence.
 
-The Product Evidence Harness is an enterprise-grade system for turning product web search into **verified, auditable, product-coding-ready evidence**.
-
-It is not a simple scraper. It is not a loose search utility. It is a controlled evidence pipeline that discovers candidate product URLs, validates them, confirms a champion, protects against unsafe review fallbacks, verifies rendered page relevance, and writes business-ready outputs plus audit artifacts.
+It is a controlled decision pipeline, not a simple scraper or loose search utility.
 
 ```text
-Input product identity -> verified product URL evidence -> production handoff -> product coding evidence
+Input product identity
+  -> candidate URL discovery
+  -> evidence extraction
+  -> identity verification
+  -> rendered page relevance validation
+  -> production champion gate
+  -> concise review artifacts
+  -> product-coding evidence
+```
+
+## Canonical documentation
+
+All detailed documentation is consolidated here:
+
+```text
+docs/README.md
+```
+
+Older specialized docs were removed to avoid stale or conflicting references. Use `docs/README.md` as the source of truth for:
+
+```text
+notebook workflow
+input contract
+production URL contract
+rendered-page gate
+safe review fallback behavior
+CSV/output fields
+row artifact packet
+validation commands
 ```
 
 ## Start with notebooks
 
-The notebooks are the gateway into the system. Users should start here, not inside `src/`.
-
-| Notebook | Use when | Business outcome |
+| Notebook | Use when | Output |
 |---|---|---|
-| `notebooks/00_notebook_gateway.ipynb` | You are new to the repo. | Understand which notebook to use and how the system works. |
-| `notebooks/01_single_product_harness.ipynb` | You want to prove the full system on one product. | Champion URL, rendered-page gate, confirmation, production gate, concise review artifacts. |
-| `notebooks/02_batch_product_harness.ipynb` | You want to run many products. | Final CSV, review queue, metrics, concise row artifacts. |
-| `notebooks/03_offline_product_artifact.ipynb` | You already have a confirmed champion URL and need offline evidence. | Local `offline_page.html`, local assets, validation JSON. |
+| `notebooks/00_notebook_gateway.ipynb` | You are new to the repo. | Choose the right workflow. |
+| `notebooks/01_single_product_harness.ipynb` | Test one product end to end. | Champion URL decision, rendered-page gate, production gate, review packet. |
+| `notebooks/02_batch_product_harness.ipynb` | Run many products. | `final_submission.csv`, `review_queue.csv`, metrics, row artifacts. |
+| `notebooks/03_offline_product_artifact.ipynb` | Capture local/offline evidence for a confirmed champion. | `offline_page.html` and local assets. |
 
-```mermaid
-flowchart LR
-    A[Start here] --> B[00 Notebook Gateway]
-    B --> C{Use case}
-    C -->|One product demo| D[01 Single Product]
-    C -->|Batch operation| E[02 Batch Harness]
-    C -->|Optional offline capture| F[03 Offline Artifact]
-    D --> G[Concise review summary]
-    E --> H[Final CSV + review queue + concise row artifacts]
-    F --> I[Offline HTML + local evidence]
-```
+## High-stakes handoff rule
 
-## Business value
-
-| Problem today | Harness value |
-|---|---|
-| Manual product URL search is inconsistent. | Candidate tournament and evidence-based selection. |
-| Search rank is treated as truth. | Search is only a candidate source, not final proof. |
-| Wrong variants/listings can slip through. | Identity, EAN, title, quantity, and variant checks. |
-| URL opens but visible page is wrong. | Rendered-page relevance gate blocks homepage/category/search/intermediate/wrong-content pages. |
-| Hard-rejected URLs can confuse review. | Safe-review gate prevents rejected candidates from becoming selected/best-review URLs. |
-| Scraping issues are discovered too late. | Scrapability and browser-readiness are checked before handoff. |
-| Decisions are hard to defend. | Concise review artifacts explain what was selected, rejected, why, and how. |
-| Automation hides uncertainty. | Weak cases go to review queue with failure taxonomy. |
-
-## Primary architecture
-
-```mermaid
-flowchart TD
-    A[Input product identity] --> B[SerpAPI search fan-out]
-    B --> C[Candidate URL pool]
-    C --> D[Preflight ranking]
-    D --> E[Bounded tournament scraping]
-    E --> F[Evidence extraction]
-    F --> G[Identity verification]
-    F --> H[Country and retailer checks]
-    F --> I[Scrapability and richness checks]
-    F --> R[Rendered page relevance check]
-    G --> J[Candidate scorecards]
-    H --> J
-    I --> J
-    R --> J
-    J --> K[Champion candidate]
-    K --> L[Champion confirmation]
-    L --> M[Production URL gate]
-    M --> N{Production ready?}
-    N -->|Yes| O[final_submission.csv]
-    N -->|No| P[review_queue.csv]
-    O --> Q[review_summary.md + product_coding_input.json]
-```
-
-The older iterative loop is retained only as a legacy/debug fallback when tournament mode is explicitly disabled.
-
-## High-stakes handoff policy
-
-`product_url`, `best_available_url`, `production_url_ready`, rendered-page validation, and champion confirmation must not be confused.
-
-```text
-product_url = production-ready champion URL only
-best_available_url = safe review-only candidate only
-candidate_decisions.csv = full evidence table, including rejected candidates
-production_url_ready = whether product_url is safe for browser-opening, downstream scraping, and product coding
-rendered_page_check_passed = whether the visible page shows the intended product content
-champion_confirmation.passed = whether repeated champion confirmation passed
-```
-
-Use automated handoff only when:
+Use automated browser-opening, scraping, or product-coding handoff only when:
 
 ```text
 product_url is not blank
@@ -102,142 +62,7 @@ champion_confirmation.success_count = champion_confirmation.required_successes
 needs_review = false
 ```
 
-Rows outside this filter are review-only. Hard rejected candidates remain in `candidate_decisions.csv`; they must not be promoted into selected evidence.
-
-## Tournament defaults
-
-Tournament mode is the default.
-
-```env
-PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE=true
-PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS=4
-PRODUCT_HARNESS_TOURNAMENT_CANDIDATE_POOL=150
-PRODUCT_HARNESS_TOURNAMENT_PREFLIGHT_TOP_K=60
-PRODUCT_HARNESS_TOURNAMENT_BATCH_SIZE=20
-PRODUCT_HARNESS_TOURNAMENT_MAX_BATCHES=3
-PRODUCT_HARNESS_WRITE_REVIEW_PACK=true
-PRODUCT_HARNESS_WRITE_MARKDOWN_REPORTS=false
-PRODUCT_HARNESS_WRITE_TRACE_JSON=false
-PRODUCT_HARNESS_WRITE_DEBUG_CSVS=false
-```
-
-The code clamps `PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS` to a maximum of `4`.
-
-Tournament scrape volume is bounded by:
-
-```text
-preflight candidates considered = top PRODUCT_HARNESS_TOURNAMENT_PREFLIGHT_TOP_K ranked candidates
-max tournament batch candidates scraped = PRODUCT_HARNESS_TOURNAMENT_BATCH_SIZE × PRODUCT_HARNESS_TOURNAMENT_MAX_BATCHES
-default max tournament batch candidates scraped = 20 × 3 = 60
-```
-
-Champion confirmation is a fixed post-selection quality gate:
-
-```text
-champion_confirmation.required_attempts = 3
-champion_confirmation.required_successes = 3
-```
-
-These checks are not extra SerpAPI searches. They are post-selection confirmations summarized in the concise review artifacts.
-
-## Input contract
-
-| Field | Required | Role |
-|---|---:|---|
-| `row_id` | Recommended | Stable product/row identifier. |
-| `main_text` | Yes | Primary product identity text. |
-| `country_code` | Yes | Country-first search market. |
-| `ean` / `gtin` | No | Strong user-provided identity anchor. Must remain a string. |
-| `retailer_name` | No | Preferred first evidence source, not always a hard final constraint. |
-| `language_code` | No | Optional search language override. |
-| `region` | No | Optional market hint. |
-
-EAN/GTIN identifiers are read as strings. Invalid/corrupted values are retained for diagnostics but are not used as exact search anchors.
-
-## Output contract
-
-```text
-CSV = final operational answer
-review_summary.md = reviewer-first what / why / how decision summary
-review_decision.json = same decision in machine-readable form
-candidate_decisions.csv = top candidate accept/reject table
-product_coding_input.json = downstream coding evidence
-Deep markdown/trace/debug files = opt-in engineering diagnostics
-Notebook = user-facing execution gateway
-```
-
-### Batch-level outputs
-
-```text
-outputs/
-├── final_submission.csv
-├── review_queue.csv
-├── batch_summary.md
-└── metrics.json
-```
-
-### Default row-level artifact packet
-
-```text
-output/<row_id>/
-├── final_row.csv
-├── review_summary.md
-├── review_decision.json
-├── candidate_decisions.csv
-└── product_coding_input.json
-```
-
-### Optional deep artifact packet
-
-Enable these only when engineering/debug audit requires them:
-
-```env
-PRODUCT_HARNESS_WRITE_MARKDOWN_REPORTS=true
-PRODUCT_HARNESS_WRITE_TRACE_JSON=true
-PRODUCT_HARNESS_WRITE_DEBUG_CSVS=true
-```
-
-That opt-in path can write detailed search plans, scrape evidence, trace JSON, tournament brackets, enterprise evidence graphs, and debug CSVs.
-
-## Optional offline artifact
-
-Offline page freezing is optional and separate from the main discovery workflow.
-
-```mermaid
-flowchart LR
-    A[Confirmed champion URL] --> B[Notebook 03 only]
-    B --> C[Live capture once]
-    C --> D[Download CSS/images]
-    D --> E[Rewrite local references]
-    E --> F[Disable live scripts/forms/links]
-    F --> G[offline/offline_page.html]
-```
-
-Use it only through:
-
-```text
-notebooks/03_offline_product_artifact.ipynb
-```
-
-It is intentionally not part of `main.py`, `batch_main.py`, or notebooks `01`/`02`.
-
-## Documentation map
-
-| Document | Purpose |
-|---|---|
-| `docs/BUSINESS_OVERVIEW.md` | Leadership/business value explanation. |
-| `docs/NOTEBOOK_GATEWAY.md` | Notebook-first user journey. |
-| `docs/VISUAL_PIPELINE_GUIDE.md` | Graphical architecture and non-linear flow. |
-| `docs/CODEBASE_FUNCTIONALITY_MAP.md` | Maps business capabilities to code areas and notebooks. |
-| `docs/DECISION_CONTRACTS.md` | Meaning of output fields/statuses. |
-| `docs/PRODUCTION_GRADE_PRODUCT_URL.md` | Production URL gate and rendered-page handoff contract. |
-| `docs/STRICT_PRODUCT_URL_POLICY.md` | Safe URL promotion policy. |
-| `docs/HANDOFF_VALIDATION_CHECKLIST.md` | Final handoff validation checklist. |
-| `docs/ARTIFACT_GUIDE.md` | Output files, row artifacts, and audit trail. |
-| `docs/CONCISE_REVIEW_ARTIFACTS.md` | Reviewer-first artifact strategy and file contract. |
-| `docs/ASSUMPTIONS_AND_CONSTRAINTS.md` | Explicit assumptions, limits, and risk boundaries. |
-| `docs/ADOPTION_PLAYBOOK.md` | How to demo, roll out, and standardize the repo. |
-| `docs/OFFLINE_PRODUCT_ARTIFACT.md` | Optional offline capture contract. |
+Rows outside this filter are review-only. Hard-rejected candidates remain in `candidate_decisions.csv`; they must not be promoted into selected evidence.
 
 ## Minimal single-product usage
 
@@ -265,7 +90,6 @@ production = ProductionURLGate().assess_url_in_state(trace.state, match.product_
 print(match.product_url)
 print(production.to_dict() if production else "No production assessment")
 print(confirmation.to_dict() if confirmation else "No champion confirmation")
-print("Review artifact: output/<row_id>/review_summary.md")
 ```
 
 ## Batch usage
@@ -288,4 +112,4 @@ PYTHONPATH=src pytest -q
 
 ## Import path note
 
-This project uses a standard `src/` package layout. In notebooks, add `<repo>/src` to `sys.path`, then import with `product_evidence_harness`. Do not import with `src.product_evidence_harness`. See `docs/IMPORT_PATH_FIX.md`.
+This project uses a standard `src/` package layout. In notebooks, add `<repo>/src` to `sys.path`, then import with `product_evidence_harness`.
