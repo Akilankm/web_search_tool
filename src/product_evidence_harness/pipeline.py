@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Optional
 
 from loguru import logger
 
 from src.product_evidence_harness.artifacts import ArtifactWriter
+from src.product_evidence_harness.browser_visible import BrowserVisibleContentVerifier, BrowserVisibleVerifierConfig
 from src.product_evidence_harness.budget import BudgetTracker
 from src.product_evidence_harness.candidate_store import CandidateStore
 from src.product_evidence_harness.config import HarnessConfig, SerpAPIConfig
@@ -49,6 +51,7 @@ class ProductEvidenceHarness:
     llm_search_planner: Optional[LLMSearchPlanner] = None
     enterprise_engine: Optional[EnterpriseEvidenceEngine] = None
     production_gate: Optional[ProductionURLGate] = None
+    browser_visible_verifier: Optional[BrowserVisibleContentVerifier] = None
 
     def __post_init__(self) -> None:
         self.country_profiles = self.country_profiles or CountryProfileRegistry.load(self.config.country_profile_path)
@@ -72,7 +75,23 @@ class ProductEvidenceHarness:
         self.ranker = self.ranker or ProductURLRanker(weights=self.config.score_weights, policy=effective_policy, country_profiles=self.country_profiles)
         self.selector = self.selector or FinalSelector(policy=effective_policy)
         self.enterprise_engine = self.enterprise_engine or EnterpriseEvidenceEngine()
-        self.production_gate = self.production_gate or ProductionURLGate()
+        self.production_gate = self.production_gate or ProductionURLGate(
+            require_user_visible_verification=self.config.require_browser_visible_product_content,
+        )
+        self.browser_visible_verifier = self.browser_visible_verifier or BrowserVisibleContentVerifier(
+            BrowserVisibleVerifierConfig(
+                enabled=self.config.enable_browser_visible_verification,
+                capture_enabled=self.config.browser_visible_capture_enabled,
+                llm_enabled=self.config.browser_visible_llm_enabled,
+                top_k=self.config.browser_visible_top_k,
+                timeout_ms=self.config.browser_visible_timeout_ms,
+                wait_ms=self.config.browser_visible_wait_ms,
+                min_token_overlap=self.config.browser_visible_min_token_overlap,
+                min_title_overlap=self.config.browser_visible_min_title_overlap,
+                min_llm_confidence=self.config.browser_visible_min_llm_confidence,
+                image_detail=self.config.llm_image_detail,
+            )
+        )
         if (self.config.enable_llm_search_planning or self.config.enable_llm_search_feedback) and self.llm_search_planner is None:
             self.llm_search_planner = LLMSearchPlanner(config=self.config, query_builder=self.query_builder, country_profiles=self.country_profiles)
         if self.config.enable_llm_adjudication and self.llm_adjudicator is None:
@@ -110,6 +129,7 @@ class ProductEvidenceHarness:
         # loop adjudication happened but promising candidates exist.
         if self.config.enable_llm_adjudication and self.llm_adjudicator is not None and not state.llm_judgements:
             state = self.llm_adjudicator.adjudicate_state(state)
+        self._verify_browser_visible_content(state)
         best_match = self.selector.select(
             task=product,
             scorecards=state.scorecards,
@@ -143,6 +163,34 @@ class ProductEvidenceHarness:
         trace = HarnessTrace(state=state, best_match=best_match)
         return trace if return_trace else best_match
 
+    def _verify_browser_visible_content(self, state: ProductSearchState, *, candidate_urls: set[str] | None = None) -> None:
+        if not self.config.enable_browser_visible_verification or not self.browser_visible_verifier:
+            return
+        ranked = sorted(state.scorecards, key=lambda c: (c.final_confidence, c.richness_score), reverse=True)
+        if candidate_urls:
+            cards = [c for c in ranked if c.candidate.url in candidate_urls]
+            extras = [c for c in ranked if c.candidate.url not in candidate_urls]
+            cards.extend(extras[: max(0, self.config.browser_visible_top_k - len(cards))])
+        else:
+            cards = ranked[: max(1, self.config.browser_visible_top_k)]
+        if not cards:
+            return
+        output_dir = Path(self.config.output_dir) / state.task.row_id / "browser_visible" if self.config.write_outputs else None
+        verdicts: dict[str, dict] = dict(getattr(state, "browser_visible_verdicts", {}) or {})
+        for card in cards:
+            if getattr(card, "browser_visible_verdict", None):
+                verdict = getattr(card, "browser_visible_verdict")
+            else:
+                try:
+                    verdict = self.browser_visible_verifier.verify_card(state.task, card, output_dir=output_dir)
+                except Exception as exc:
+                    logger.warning("Browser-visible verification failed | row_id={} | url={} | error={}", state.task.row_id, card.candidate.url, exc)
+                    from src.product_evidence_harness.browser_visible import BrowserVisibleProductVerdict
+                    verdict = BrowserVisibleProductVerdict.failed(card.candidate.url, status="BROWSER_VISIBLE_VERIFICATION_FAILED_NEEDS_REVIEW", reason=str(exc))
+                object.__setattr__(card, "browser_visible_verdict", verdict)
+            verdicts[card.candidate.url] = verdict.to_dict() if hasattr(verdict, "to_dict") else dict(verdict)
+        setattr(state, "browser_visible_verdicts", verdicts)
+
     def _write_reviewer_first_outputs(self, state: ProductSearchState, product_dir) -> None:
         """Write concise default artifacts only.
 
@@ -155,6 +203,11 @@ class ProductEvidenceHarness:
             json.dumps(assessment.product_coding_input, indent=2, ensure_ascii=False, default=str) + "\n",
             encoding="utf-8",
         )
+        if getattr(state, "browser_visible_verdicts", None):
+            (product_dir / "browser_visible_verdicts.json").write_text(
+                json.dumps(getattr(state, "browser_visible_verdicts"), indent=2, ensure_ascii=False, default=str) + "\n",
+                encoding="utf-8",
+            )
         if self.config.write_review_pack:
             ReviewArtifactWriter().write_state(product_dir, state)
 
@@ -162,14 +215,10 @@ class ProductEvidenceHarness:
     def _enforce_production_grade_product_url(match: ProductURLMatch, state: ProductSearchState, *, production_gate: ProductionURLGate | None = None) -> ProductURLMatch:
         """Prefer production-grade URLs; still keep strict non-empty fallback.
 
-        Production-grade means the URL is browser-openable, scrape-usable,
-        product-page-like, rich enough for downstream scraping/coding, and exact
-        product verified. This is the URL the browser and scraping teams should
-        be able to use directly.
-
-        If no production-grade URL exists, product_url is still filled with the
-        best discovered URL per the non-empty business rule, but it is marked
-        review-only/non-production through status fields.
+        Production-grade means the URL is browser-openable, user-visible product
+        content confirmed, scrape-usable, product-page-like, rich enough for
+        downstream scraping/coding, and exact product verified. This is the URL
+        the browser and scraping teams should be able to use directly.
         """
         gate = production_gate or ProductionURLGate()
         production_card, production_assessment = gate.best_production_card(state)
@@ -178,7 +227,7 @@ class ProductEvidenceHarness:
                 match,
                 production_card,
                 status=production_assessment.status,
-                reason="Production-grade product URL selected: browser-openable, highly scrapable, and exact-product verified.",
+                reason="Production-grade product URL selected: browser-openable, user-visible product content confirmed, highly scrapable, and exact-product verified.",
             )
             return promoted
 
