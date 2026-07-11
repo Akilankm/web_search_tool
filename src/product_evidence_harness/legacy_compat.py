@@ -57,6 +57,8 @@ class ProductEvidenceHarness(BaseProductEvidenceHarness):
         card = card_for_url(state, url)
         scrape = state.scrapes.get(url) or (card.scrape if card else None)
         existing_status = (match.url_decision_status or "").strip()
+        if existing_status in {"UNRESOLVED", "NO_MATCH", "NO_SAFE_REVIEW_CANDIDATE"}:
+            existing_status = ""
         if scrape is None:
             status = existing_status or "DISCOVERED_CANDIDATE_URL_UNSCRAPED_NEEDS_REVIEW"
             scrapable = False
