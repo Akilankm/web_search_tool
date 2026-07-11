@@ -1,462 +1,413 @@
-# Product Evidence Harness Documentation
+# Product Evidence Harness — Operating Reference
 
-This is the single canonical documentation page for the Product Evidence Harness.
+This is the canonical operating documentation for the one-credit, feature-aware workflow.
 
-The root `README.md` is the short entrypoint. This file is the complete operating reference.
+## 1. Design objective
 
----
+The workflow answers two separate questions:
 
-## 1. What this system does
+1. **Which URLs represent the exact requested product?**
+2. **Which accepted URLs contain enough evidence to code the known feature schema?**
 
-The Product Evidence Harness turns product web search into verified, auditable, product-coding-ready evidence.
-
-It is not a simple scraper and it is not a loose search utility. It is a controlled decision pipeline:
-
-```text
-Input product identity
-  -> candidate URL discovery
-  -> evidence extraction
-  -> identity verification
-  -> rendered page relevance validation
-  -> production champion gate
-  -> concise review artifacts
-  -> product-coding evidence
-```
-
-The core business problem is that a URL can be easy to discover but still be wrong, weak, blocked, non-product, or unrelated to the intended product. This harness makes those differences explicit.
-
----
-
-## 2. Start with notebooks
-
-Users should start from notebooks, not from `src/`.
-
-| Notebook | Use when | Output |
-|---|---|---|
-| `notebooks/00_notebook_gateway.ipynb` | You are new to the repo. | Which notebook/workflow to use. |
-| `notebooks/01_single_product_harness.ipynb` | You want to test one product end to end. | Champion URL decision, rendered-page gate, production gate, review packet. |
-| `notebooks/02_batch_product_harness.ipynb` | You want to run many products. | `final_submission.csv`, `review_queue.csv`, metrics, row artifacts. |
-| `notebooks/03_offline_product_artifact.ipynb` | You already have a confirmed champion and need local/offline evidence. | `offline_page.html` and local evidence assets. |
-
----
-
-## 3. Inputs
-
-| Field | Required | Purpose |
-|---|---:|---|
-| `row_id` | Recommended | Stable row/product identifier. |
-| `main_text` | Yes | Primary product identity text. |
-| `country_code` | Yes | Target market/country. |
-| `ean` / `gtin` | No | Strong identity anchor when available. Kept as string. |
-| `retailer_name` | No | Preferred first evidence source. |
-| `language_code` | No | Optional search language override. |
-| `region` | No | Optional market hint. |
-
-EAN/GTIN values are read as strings. Invalid or corrupted EAN values are retained for diagnostics but are not treated as exact anchors.
-
----
-
-## 4. Primary architecture
+These concerns must remain separated.
 
 ```text
-Input product identity
-  -> SerpAPI search fan-out
+Product identity
+  -> one SerpAPI search
   -> candidate URL pool
-  -> preflight ranking
-  -> bounded tournament scraping
-  -> evidence extraction
-  -> identity / EAN / title / variant checks
-  -> country / retailer checks
-  -> scrapability / richness checks
-  -> rendered page relevance check
-  -> candidate scorecards
-  -> champion candidate
-  -> champion confirmation
-  -> production URL gate
-  -> final CSV + concise row artifact packet
+  -> local scraping and identity validation
+  -> feature-aware evidence extraction
+  -> primary + supplementary evidence set
+  -> coding-ready / review-required decision
 ```
 
-Tournament mode is the default path. The older iterative loop is retained only for explicit debugging/A-B comparison.
+## 2. Non-negotiable invariants
 
-```env
-PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE=true
-PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS=4
-PRODUCT_HARNESS_TOURNAMENT_CANDIDATE_POOL=150
-PRODUCT_HARNESS_TOURNAMENT_PREFLIGHT_TOP_K=60
-PRODUCT_HARNESS_TOURNAMENT_BATCH_SIZE=20
-PRODUCT_HARNESS_TOURNAMENT_MAX_BATCHES=3
-```
+| Invariant | Enforcement |
+|---|---|
+| Maximum SerpAPI requests per product | `1` |
+| Search pagination | Disabled |
+| Alternate query retries | Disabled |
+| AI Mode search | Disabled in the new workflow |
+| Second provider search | Disabled |
+| Feature names in search query | Prohibited |
+| Feature-aware scraping | Enabled after candidate discovery |
+| Exact identity before feature use | Required |
+| Wrong product with rich details | Rejected |
+| Missing feature evidence | Reported, never invented |
 
-The code clamps `PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS` to a maximum of `4`.
+A technical HTTP retry can consume another paid request. Therefore the new workflow forces `SerpAPIConfig.max_retries=1` at runtime.
 
----
+## 3. Responsibility boundaries
 
-## 5. Final URL contract
+| Component | Inputs | Responsibility |
+|---|---|---|
+| Query builder | Product identity only | Construct one high-information search query |
+| SerpAPI client | Query + market localization | Return one complete Google SERP response |
+| SERP harvester | Raw response | Extract every useful external URL already present |
+| Candidate store | Harvested URL occurrences | Normalize, deduplicate, retain cross-module support |
+| Preflight ranker | Product identity + SERP metadata | Choose which candidates are worth scraping |
+| Scraper | Candidate URL + product identity | Extract product page evidence |
+| Identity verifier | Product identity + scraped page | Accept/reject exact product and variant |
+| Feature extractor | Accepted page + feature schema | Map explicit evidence to required features |
+| Optional LLM reasoner | Scraped evidence + feature schema | Resolve semantic ambiguity only after scraping |
+| Evidence-set selector | URL-level feature evidence | Choose one primary and minimum supplementary sources |
 
-The current contract is intentionally strict:
+## 4. Product input contract
+
+| Field | Required | Notes |
+|---|:---:|---|
+| `row_id` | Recommended | Used for output folder and audit trail |
+| `main_text` | Yes | Primary product identity |
+| `country_code` | Yes | ISO-style market code |
+| `ean` / `gtin` | No | Preserved as text; scientific notation is rejected as unsafe |
+| `retailer_name` | No | Search/ranking preference, not a hardcoded domain map |
+| `language_code` | No | Derived from country profile when omitted |
+| `region` | No | Optional market context |
+
+### Canonical search query
+
+The query is built from identity anchors only:
 
 ```text
-product_url = production-ready champion only
-best_available_url = safe review-only candidate only
-candidate_decisions.csv = full candidate audit table, including rejected candidates
+EAN + main product text + retailer signal + localized market terms
 ```
 
-Hard rejected candidates must not be promoted into `product_url`, `best_available_url`, or selected evidence in `review_summary.md`.
+The following are deliberately excluded:
 
-If no safe candidate exists:
+- feature names;
+- allowed feature values;
+- coding rules;
+- feature criticality;
+- prompts such as material, colour, age, dimensions, or battery.
+
+Adding feature names to the search query can bias retrieval toward manuals, blogs, category pages, and generic informational documents instead of exact product pages.
+
+## 5. Feature schema contract
+
+The feature schema is introduced after search.
+
+```json
+{
+  "schema_id": "toy-v1",
+  "pg_name": "TOYS",
+  "required_coverage_threshold": 0.8,
+  "features": [
+    {
+      "feature_id": "BRAND",
+      "feature_name": "Brand",
+      "value_type": "text",
+      "criticality": "critical",
+      "aliases": ["brand", "manufacturer"]
+    },
+    {
+      "feature_id": "BATTERY_REQUIRED",
+      "feature_name": "Battery required",
+      "value_type": "boolean",
+      "criticality": "required",
+      "allowed_values": ["YES", "NO"],
+      "aliases": ["battery required", "batteries required"]
+    }
+  ]
+}
+```
+
+### Supported criticality levels
+
+| Value | Meaning |
+|---|---|
+| `critical` | Must be covered before automatic coding handoff |
+| `required` | Included in the required-coverage threshold |
+| `optional` | Useful but not required for readiness |
+| `conditional` | Evaluated when applicable |
+
+### Feature evidence statuses
+
+| Status | Meaning |
+|---|---|
+| `STRUCTURED_FOUND` | Found in specifications, attributes, JSON-LD, or normalized fields |
+| `EXPLICITLY_FOUND` | Found explicitly in visible page text |
+| `LLM_FOUND` | Optional post-scrape semantic extraction |
+| `NOT_FOUND` | No supporting evidence |
+| `CONFLICTING_EVIDENCE` | More than one incompatible value was found |
+| `NOT_APPLICABLE` | Feature does not apply |
+| `NEEDS_REVIEW` | Evidence is present but ambiguous |
+
+## 6. One-response URL harvesting
+
+`GoogleSERPHarvester` inspects useful URL-bearing sections in the one paid response:
+
+- `organic_results`;
+- organic sitelinks;
+- `shopping_results`;
+- `inline_shopping_results`;
+- `product_results`;
+- `product_sites`;
+- `knowledge_graph`;
+- `local_results`;
+- related-question source links;
+- selected image source pages.
+
+The harvester does not follow:
+
+- Google pagination;
+- related-search query links;
+- SerpAPI detail links;
+- Google search URLs;
+- cached-page links;
+- YouTube/video URLs.
+
+### Within-response consensus
+
+The same normalized URL may appear in multiple SERP modules. The candidate store retains all module labels:
 
 ```text
-product_url = blank
-best_available_url = blank
-url_decision_status = NO_SAFE_REVIEW_CANDIDATE
-needs_review = true
+serp_organic_results
+serp_shopping_results
+serp_product_sites
 ```
 
-Rejected URLs remain visible in `candidate_decisions.csv` for audit.
+Cross-module repetition increases preflight priority, but it does not prove correctness. Scraped identity evidence remains authoritative.
 
----
+## 7. Candidate funnel
 
-## 6. Production handoff rule
+| Stage | Default purpose |
+|---|---|
+| Harvest all response URLs | Maximize value from the single paid request |
+| Normalize and deduplicate | Collapse tracking variants and repeated links |
+| Keep up to 30 candidates | Bound local processing |
+| Scrape top 8 | Retrieve evidence without another search |
+| Browser fallback where required | Handle dynamic pages |
+| Validate every scraped candidate | Reject wrong product, variant, listing, or homepage |
+| Select production URL | Exact, rendered, scrapable product page only |
 
-A row is safe for automated browser-opening, scraping, or product-coding handoff only when all of these are true:
+Search-result rank is a prioritization signal. It is not the final decision.
+
+## 8. Identity acceptance
+
+A URL may support feature coding only after identity acceptance.
+
+Typical rejection conditions:
+
+- EAN conflict without independently strong exact identity;
+- sibling variant or pack-size conflict;
+- weak title/product-form match;
+- category, search, homepage, login, consent, anti-bot, or soft-404 page;
+- inaccessible or non-scrapable page;
+- rendered content unrelated to the input product.
+
+The existing deterministic identity verifier, rendered-page verifier, and production URL gate remain in use.
+
+## 9. Feature-aware scraping and evidence extraction
+
+The extractor prioritizes:
+
+- product title and structured product name;
+- JSON-LD and product metadata;
+- specification tables;
+- normalized label/value attributes;
+- description and bullet text;
+- feature aliases and multilingual labels;
+- images and manuals through future feature-specific adapters.
+
+The deterministic extractor runs first. An optional `FeatureReasoner` can be supplied for semantic extraction, but it is called only after search and scraping. The LLM cannot initiate another search and cannot override hard identity rejection.
+
+## 10. Primary and supplementary URL selection
+
+The system does not require one URL to contain every feature.
+
+| URL role | Definition |
+|---|---|
+| Primary URL | Best exact-product identity source |
+| Supplementary URL | Another exact-product source that adds uncovered feature evidence |
+| Identity-only URL | Exact product but no material feature gain |
+| Rejected URL | Identity failed or page unusable |
+
+`EvidenceSetSelector` uses a bounded greedy set-cover strategy:
+
+1. Start with the preferred production/review identity URL.
+2. Measure covered feature IDs.
+3. Add the exact-product source with the largest uncovered-feature gain.
+4. Stop when there is no gain or the supplementary-source limit is reached.
+
+The default maximum is three supplementary URLs.
+
+## 11. Coding readiness
 
 ```text
-product_url is not blank
-production_url_ready = true
-production_url_status = PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL
-browser_openable = true
-rendered_page_check_passed = true
-highly_scrapable = true
-critical_product_evidence_complete = true
-exact_product_url_match = true
-champion_confirmation.passed = true
-champion_confirmation.success_count = champion_confirmation.required_successes
-needs_review = false
+coding_ready =
+    all critical features covered
+    AND required coverage >= schema threshold
+    AND no feature conflicts
 ```
 
-In plain terms:
+Possible statuses:
+
+| Status | Meaning |
+|---|---|
+| `CODING_READY` | Identity and feature acceptance passed |
+| `CODING_READY_WITH_FEATURE_REVIEW` | Useful evidence exists, but gaps or conflicts remain |
+| `IDENTITY_READY_EVIDENCE_INCOMPLETE` | Exact product found, insufficient coding evidence |
+| `NO_IDENTITY_ACCEPTED_SOURCE` | No candidate can be used for product coding |
+
+## 12. Outputs
+
+### Per-product packet
 
 ```text
-Champion = browser-openable
-        + rendered product page visible
-        + exact product identity validated
-        + rich enough product evidence
-        + scrapable
-        + country/retailer policy acceptable
-        + repeated champion confirmation passed
+output/<row_id>/
+├── result.json
+├── candidates.csv
+├── feature_evidence.csv
+└── review.md
 ```
 
-Rows outside this filter are review-only.
+| File | Purpose |
+|---|---|
+| `result.json` | Full product, URL, feature schema, evidence, and evidence-set decision |
+| `candidates.csv` | Candidate-level identity and scrape audit |
+| `feature_evidence.csv` | One row per URL × feature evidence item |
+| `review.md` | Concise human-readable decision |
 
----
-
-## 7. Rendered-page relevance gate
-
-`browser_openable=true` is necessary but not sufficient.
-
-A URL can open in a browser and still be wrong if it renders:
-
-```text
-homepage
-category page
-search result page
-consent/intermediate page
-login/access page
-store selector
-anti-bot/blocked page
-empty or broken render
-unrelated product content
-```
-
-The rendered gate uses rendered/scraped page evidence to answer:
-
-```text
-Does the user-visible page actually show the intended product content?
-```
-
-Important rendered fields:
-
-```text
-rendered_page_check_passed
-rendered_page_type
-rendered_product_visible
-rendered_content_related
-rendered_match_confidence
-rendered_verdict
-rendered_mismatch_reasons
-rendered_visible_title
-rendered_visible_product_name
-rendered_screenshot_path
-rendered_screenshot_captured
-rendered_llm_used
-```
-
-Passing page types:
-
-```text
-PRODUCT_DETAIL_PAGE
-PRODUCT_VARIANT_PAGE
-```
-
-Rendered failure statuses include:
-
-```text
-PRODUCT_URL_RENDERED_CONTENT_MISMATCH_NEEDS_REVIEW
-PRODUCT_URL_RENDERED_HOMEPAGE_NEEDS_REVIEW
-PRODUCT_URL_RENDERED_LISTING_OR_SEARCH_NEEDS_REVIEW
-PRODUCT_URL_RENDERED_INTERSTITIAL_NEEDS_REVIEW
-```
-
-A candidate with `browser_openable=true` but `rendered_page_check_passed=false` cannot be production champion.
-
----
-
-## 8. Champion confirmation
-
-Tournament mode confirms the selected champion repeatedly before handoff.
-
-Default requirement:
-
-```text
-champion_confirmation.required_attempts = 3
-champion_confirmation.required_successes = 3
-champion_confirmation.passed = true
-champion_confirmation.final_url_stable = true
-champion_confirmation.evidence_stable = true
-```
-
-These checks are not extra SerpAPI searches. They are post-selection confirmation scrapes/checks.
-
-When deep tournament artifacts are enabled, confirmation details are written to:
-
-```text
-champion_confirmation.json
-champion_confirmation.md
-```
-
----
-
-## 9. Outputs
-
-### Batch-level outputs
+### Batch packet
 
 ```text
 outputs/
 ├── final_submission.csv
 ├── review_queue.csv
-├── batch_summary.md
-└── metrics.json
+├── metrics.json
+└── batch_summary.md
 ```
 
-### Default row packet
+Important batch fields include:
 
-```text
-output/<row_id>/
-├── final_row.csv
-├── review_summary.md
-├── review_decision.json
-├── candidate_decisions.csv
-└── product_coding_input.json
-```
+- `product_url`;
+- `best_available_url`;
+- `serpapi_requests_used`;
+- `primary_evidence_url`;
+- `supplementary_urls`;
+- `selected_evidence_urls`;
+- `required_feature_coverage`;
+- `critical_feature_coverage`;
+- `missing_features`;
+- `conflicting_features`;
+- `coding_status`;
+- `coding_ready`.
 
-Open `review_summary.md` first. It is the human-facing explanation of what was selected, why, how it was decided, what was rejected, and what to do next.
+## 13. Running the workflow
 
-`candidate_decisions.csv` is the candidate audit table. A URL appearing there is not automatically selected evidence.
-
-### Optional deep/debug artifacts
-
-Deep artifacts are opt-in and should be enabled only for engineering/debugging:
+### Environment
 
 ```env
-PRODUCT_HARNESS_WRITE_MARKDOWN_REPORTS=true
-PRODUCT_HARNESS_WRITE_TRACE_JSON=true
-PRODUCT_HARNESS_WRITE_DEBUG_CSVS=true
+SERPAPI_API_KEY=...
+PRODUCT_HARNESS_OUTPUT_DIR=output
+PRODUCT_HARNESS_SCRAPE_CONCURRENCY=6
+PRODUCT_HARNESS_STATIC_FETCH_FIRST=true
+PRODUCT_HARNESS_BROWSER_FALLBACK_ONLY=true
 ```
 
----
+### Single product
 
-## 10. Important CSV fields
-
-Inspect these first:
-
-```text
-row_id
-main_text
-country_code
-retailer_name
-ean
-product_url
-verified_exact_url
-best_available_url
-production_url_ready
-production_url_status
-browser_openable
-rendered_page_check_passed
-rendered_page_type
-rendered_verdict
-rendered_mismatch_reasons
-highly_scrapable
-exact_product_url_match
-needs_review
-confidence
-quality_tier
-failure_taxonomy
-review_summary_path
-candidate_decisions_path
-product_coding_input_path
+```bash
+python main.py \
+  --row-id CH-TOY-0001 \
+  --main-text "Hitster Original Musik-Partyspiel" \
+  --country-code CH \
+  --retailer-name "Orell Füssli" \
+  --ean 8710126198872 \
+  --feature-schema examples/toy_feature_schema.json
 ```
 
-Ready filter:
-
-```python
-ready = df[
-    df["product_url"].astype(str).str.strip().ne("")
-    & df["production_url_ready"].astype(str).str.lower().isin(["true", "1", "yes"])
-    & (df["production_url_status"] == "PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL")
-    & df["browser_openable"].astype(str).str.lower().isin(["true", "1", "yes"])
-    & df["rendered_page_check_passed"].astype(str).str.lower().isin(["true", "1", "yes"])
-    & df["highly_scrapable"].astype(str).str.lower().isin(["true", "1", "yes"])
-    & df["exact_product_url_match"].astype(str).str.lower().isin(["true", "1", "yes"])
-    & ~df["needs_review"].astype(str).str.lower().isin(["true", "1", "yes"])
-]
-```
-
-Review filter:
-
-```python
-review = df[
-    df["needs_review"].astype(str).str.lower().isin(["true", "1", "yes"])
-    | ~df["production_url_ready"].astype(str).str.lower().isin(["true", "1", "yes"])
-    | ~df["rendered_page_check_passed"].astype(str).str.lower().isin(["true", "1", "yes"])
-]
-```
-
----
-
-## 11. Key statuses
-
-Production-ready:
-
-```text
-PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL
-```
-
-Review/non-production:
-
-```text
-PRODUCT_URL_NOT_BROWSER_OPENABLE_NEEDS_REVIEW
-PRODUCT_URL_RENDERED_CONTENT_MISMATCH_NEEDS_REVIEW
-PRODUCT_URL_RENDERED_HOMEPAGE_NEEDS_REVIEW
-PRODUCT_URL_RENDERED_LISTING_OR_SEARCH_NEEDS_REVIEW
-PRODUCT_URL_RENDERED_INTERSTITIAL_NEEDS_REVIEW
-PRODUCT_URL_CRITICAL_DETAILS_NOT_EXTRACTED_NEEDS_REVIEW
-PRODUCT_URL_NOT_HIGHLY_SCRAPABLE_NEEDS_REVIEW
-PRODUCT_URL_NOT_EXACT_MATCH_NEEDS_REVIEW
-PRODUCT_URL_GLOBAL_OR_COUNTRY_MISMATCH_NEEDS_REVIEW
-NO_SAFE_REVIEW_CANDIDATE
-```
-
-Champion confirmation:
-
-```text
-CHAMPION_CONFIRMATION_PASSED
-CHAMPION_CONFIRMATION_FAILED
-NO_CHAMPION_CANDIDATE_TO_CONFIRM
-```
-
----
-
-## 12. Optional offline artifact
-
-Offline page capture is optional and separate from discovery.
-
-Use only:
-
-```text
-notebooks/03_offline_product_artifact.ipynb
-```
-
-Flow:
-
-```text
-confirmed champion URL
-  -> notebook 03
-  -> live capture once
-  -> local assets
-  -> offline/offline_page.html
-```
-
-The live URL remains provenance. The offline artifact is used only when a workflow explicitly needs local evidence.
-
----
-
-## 13. Minimal usage
-
-Single product:
-
-```python
-from product_evidence_harness import HarnessConfig, ProductEvidenceHarness, ProductQuery, SerpAPIConfig, ProductionURLGate
-
-product = ProductQuery(
-    row_id="CO-ML-0001",
-    main_text="PUT PRODUCT TEXT HERE",
-    country_code="CO",
-    ean="",
-    retailer_name="Mercado Libre",
-)
-
-config = HarnessConfig.from_env(".env")
-serp_config = SerpAPIConfig.from_env(country_code=product.country_code, language_code="es")
-harness = ProductEvidenceHarness(serp_config=serp_config, config=config)
-trace = harness.run(product, return_trace=True)
-
-match = trace.best_match
-tournament = getattr(trace.state, "tournament_result", None)
-confirmation = getattr(tournament, "champion_confirmation", None) if tournament else None
-production = ProductionURLGate().assess_url_in_state(trace.state, match.product_url or "")
-
-print(match.product_url)
-print(production.to_dict() if production else "No production assessment")
-print(confirmation.to_dict() if confirmation else "No champion confirmation")
-print("Review artifact: output/<row_id>/review_summary.md")
-```
-
-Batch:
+### Batch
 
 ```bash
 python batch_main.py \
   --input data/products.xlsx \
+  --feature-schema examples/toy_feature_schema.json \
   --output outputs/final_submission.csv \
   --workers 4
 ```
 
----
+### Python
 
-## 14. Validation commands
+```python
+from product_evidence_harness import (
+    FeatureAwareProductEvidenceHarness,
+    HarnessConfig,
+    ProductQuery,
+    SerpAPIConfig,
+    load_feature_schema,
+)
 
-Run before release handoff:
+schema = load_feature_schema("examples/toy_feature_schema.json")
+product = ProductQuery(
+    row_id="CH-TOY-0001",
+    main_text="Hitster Original Musik-Partyspiel",
+    country_code="CH",
+    retailer_name="Orell Füssli",
+    ean="8710126198872",
+)
+
+result = FeatureAwareProductEvidenceHarness(
+    serp_config=SerpAPIConfig.from_env(country_code="CH", language_code="de"),
+    config=HarnessConfig.from_env(".env"),
+).run(product, feature_schema=schema, return_trace=True)
+```
+
+## 14. LLM boundary
+
+The feature schema may be passed to an LLM only for post-scrape reasoning.
+
+The LLM may:
+
+- map retailer terminology to known features;
+- interpret ambiguous descriptive language;
+- identify evidence location;
+- explain why a source is primary or supplementary;
+- report conflicts and uncertainty.
+
+The LLM may not:
+
+- add feature names to the SerpAPI query;
+- initiate additional searches;
+- accept a URL that failed deterministic identity validation;
+- invent a feature value when evidence is absent;
+- hide source conflicts.
+
+## 15. Compatibility and migration
+
+The previous tournament workflow remains exported as `ProductEvidenceHarness` so existing notebooks and integrations do not break silently.
+
+Use the new class for all new development:
+
+```python
+FeatureAwareProductEvidenceHarness
+```
+
+Migration strategy:
+
+1. Add a feature-schema file.
+2. Replace the harness import in the calling application.
+3. Pass `feature_schema=` to `run`.
+4. Read `result.evidence_set` and the new compact artifacts.
+5. Retire tournament-only configuration after downstream consumers migrate.
+
+The legacy implementation can be removed in a future major version after migration tests confirm no remaining consumers.
+
+## 16. Validation
 
 ```bash
 PYTHONPATH=src python -m compileall -q src main.py batch_main.py
-PYTHONPATH=src pytest -q tests/test_production_url_gate.py
-PYTHONPATH=src pytest -q tests/test_champion_contract.py
+PYTHONPATH=src pytest -q tests/test_serp_harvester.py
+PYTHONPATH=src pytest -q tests/test_one_credit_feature_workflow.py
 PYTHONPATH=src pytest -q
 ```
 
----
+The critical regression properties are:
 
-## 15. Import path note
-
-This project uses a standard `src/` package layout.
-
-In notebooks, add `<repo>/src` to `sys.path`, then import:
-
-```python
-import product_evidence_harness
-```
-
-Do not import with:
-
-```python
-import src.product_evidence_harness
-```
+- maximum one SerpAPI call;
+- no AI Mode search in the new workflow;
+- multiple SERP modules harvested from one response;
+- exact identity required before feature acceptance;
+- supplementary URL selected only when it adds feature coverage;
+- coding readiness calculated from critical coverage, required coverage, and conflicts.
