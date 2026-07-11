@@ -151,7 +151,7 @@ A rich page for the wrong product is always rejected. Multiple exact-product URL
 
 ## Compatibility
 
-The previous tournament implementation remains available as `ProductEvidenceHarness` for existing consumers. New development should use `FeatureAwareProductEvidenceHarness`. This keeps the refactor deployable without silently breaking existing integrations.
+`ProductEvidenceHarness` remains as the legacy-compatible review workflow for existing consumers. `LegacyTournamentProductEvidenceHarness` exposes the previous tournament implementation explicitly. New development should use `FeatureAwareProductEvidenceHarness`.
 
 ## Documentation and validation
 
