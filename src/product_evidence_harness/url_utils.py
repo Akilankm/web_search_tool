@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from src.product_evidence_harness.constants import (
     BLOCKED_DOMAINS,
@@ -11,6 +11,28 @@ from src.product_evidence_harness.constants import (
 )
 
 _URL_PATTERN = re.compile(URL_REGEX, re.IGNORECASE)
+_TRACKING_QUERY_KEYS = frozenset({
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_term",
+    "utm_content",
+    "utm_id",
+    "gclid",
+    "dclid",
+    "fbclid",
+    "msclkid",
+    "yclid",
+    "mc_cid",
+    "mc_eid",
+    "ref",
+    "referrer",
+    "source",
+    "campaign",
+    "affiliate",
+    "aff_id",
+    "tracking",
+})
 
 
 def domain_of(url: str) -> str:
@@ -18,6 +40,12 @@ def domain_of(url: str) -> str:
 
 
 def normalize_url(url: str | None) -> str | None:
+    """Return a stable comparison URL while preserving product identity parameters.
+
+    Known analytics/affiliate parameters are removed. Other parameters are retained
+    and sorted because keys such as ``sku``, ``pid``, ``variant`` or ``product_id``
+    may be required to identify the exact product page.
+    """
     if not url:
         return None
     url = str(url).strip().strip(".,);]'\"")
@@ -25,7 +53,13 @@ def normalize_url(url: str | None) -> str | None:
     if parsed.scheme.lower() not in VALID_URL_SCHEMES or not parsed.netloc:
         return None
     path = parsed.path.rstrip("/") or "/"
-    normalized = urlunparse((parsed.scheme.lower(), parsed.netloc.lower(), path, "", parsed.query, ""))
+    query_pairs = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key.lower() not in _TRACKING_QUERY_KEYS
+    ]
+    query = urlencode(sorted(query_pairs), doseq=True)
+    normalized = urlunparse((parsed.scheme.lower(), parsed.netloc.lower(), path, "", query, ""))
     if is_blocked_url(normalized):
         return None
     return normalized
