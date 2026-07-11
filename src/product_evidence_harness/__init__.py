@@ -41,16 +41,22 @@ from src.product_evidence_harness.llm import ExactProductLLMAdjudicator, LLMConf
 from src.product_evidence_harness.logging_utils import RichPrinter, configure_logging
 from src.product_evidence_harness.one_credit_pipeline import (
     FeatureAwareHarnessResult,
-    HarnessProductURLFinderPipeline,
-    HybridProductURLFinderPipeline,
     OneCreditConfig,
     OneCreditProductEvidenceHarness,
-    ProductEvidenceHarness,
 )
 from src.product_evidence_harness.production_url import ProductionURLAssessment, ProductionURLGate
 from src.product_evidence_harness.ranker import ProductURLRanker
 from src.product_evidence_harness.scraper import CrawlScraper
-from src.product_evidence_harness.tournament_pipeline import TournamentAwareProductEvidenceHarness as LegacyTournamentProductEvidenceHarness
+from src.product_evidence_harness.schema_io import load_feature_schema
+from src.product_evidence_harness.tournament_pipeline import (
+    HarnessProductURLFinderPipeline,
+    HybridProductURLFinderPipeline,
+    ProductEvidenceHarness,
+    TournamentAwareProductEvidenceHarness,
+)
+
+FeatureAwareProductEvidenceHarness = OneCreditProductEvidenceHarness
+LegacyTournamentProductEvidenceHarness = TournamentAwareProductEvidenceHarness
 
 __all__ = [
     "SerpAPIConfig", "HarnessConfig", "HarnessPolicy", "HarnessBudgetConfig", "OneCreditConfig",
@@ -58,10 +64,11 @@ __all__ = [
     "URLCandidate", "LLMSearchPlan", "LLMSearchQuery", "CandidateScorecard", "ScoredURLCandidate",
     "ScrapeResult", "ProductEvidence", "MatchVerification", "OrganicSearchResponse",
     "OrganicSearchResult", "SerpAIResponse", "ProductSearchState", "AgentAction", "AgentActionRecord",
-    "ProductEvidenceHarness", "OneCreditProductEvidenceHarness", "FeatureAwareHarnessResult",
-    "HarnessProductURLFinderPipeline", "HybridProductURLFinderPipeline", "LegacyTournamentProductEvidenceHarness",
-    "FeatureDefinition", "FeatureSchema", "FeatureCriticality", "FeatureEvidenceStatus", "FeatureEvidence",
-    "URLFeatureAssessment", "EvidenceSetDecision", "FeatureAwareEvidenceExtractor", "EvidenceSetSelector", "FeatureReasoner",
+    "ProductEvidenceHarness", "FeatureAwareProductEvidenceHarness", "OneCreditProductEvidenceHarness",
+    "FeatureAwareHarnessResult", "HarnessProductURLFinderPipeline", "HybridProductURLFinderPipeline",
+    "LegacyTournamentProductEvidenceHarness", "FeatureDefinition", "FeatureSchema", "FeatureCriticality",
+    "FeatureEvidenceStatus", "FeatureEvidence", "URLFeatureAssessment", "EvidenceSetDecision",
+    "FeatureAwareEvidenceExtractor", "EvidenceSetSelector", "FeatureReasoner", "load_feature_schema",
     "CrawlScraper", "ProductIdentityVerifier", "ProductIdentityGraph", "ProductIdentityGraphBuilder",
     "DetectorFinding", "VariantConflictDetector", "ProductURLRanker", "RichPrinter", "configure_logging", "CSVProductIO",
     "CountryProfile", "CountryProfileRegistry", "LanguageProfile", "ExactProductLLMAdjudicator", "LLMConfig", "LLMService",
