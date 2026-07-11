@@ -46,6 +46,7 @@ def _scrape() -> ScrapeResult:
         success=True,
         reachable=True,
         is_scrapable=True,
+        status_code=200,
         looks_like_product_page=True,
         title="Acme Rocket",
         description="The product body is made from ABS plastic and includes 18 pieces.",
