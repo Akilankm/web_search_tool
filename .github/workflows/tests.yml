@@ -25,13 +25,14 @@ jobs:
             requests python-dotenv loguru rich nest-asyncio \
             pandas openpyxl tqdm openai httpx pytest
       - name: Compile
-        run: PYTHONPATH=src python -m compileall -q src main.py batch_main.py
+        run: PYTHONPATH=src python -m compileall -q src scripts main.py batch_main.py
       - name: Run focused production-contract tests
         run: |
           PYTHONPATH=src pytest -q \
             tests/test_serp_harvester.py \
             tests/test_one_credit_feature_workflow.py \
             tests/test_environment_security.py \
+            tests/test_env_example_contract.py \
             tests/test_llm_feature_reasoner.py \
             --junitxml=focused-report-${{ matrix.python-version }}.xml
       - name: Run full unit suite
