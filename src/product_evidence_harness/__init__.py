@@ -23,6 +23,11 @@ from src.product_evidence_harness.contracts import (
 from src.product_evidence_harness.country_profiles import CountryProfile, CountryProfileRegistry, LanguageProfile
 from src.product_evidence_harness.detectors import DetectorFinding, VariantConflictDetector
 from src.product_evidence_harness.elite import CodingReadiness, ConfidenceBreakdown, EnterpriseEvidenceAssessment, EnterpriseEvidenceEngine
+from src.product_evidence_harness.environment import (
+    EnvironmentValidationError,
+    EnvironmentValidationReport,
+    validate_runtime_environment,
+)
 from src.product_evidence_harness.feature_evidence import EvidenceSetSelector, FeatureAwareEvidenceExtractor, FeatureReasoner
 from src.product_evidence_harness.feature_schema import (
     EvidenceSetDecision,
@@ -43,6 +48,7 @@ from src.product_evidence_harness.legacy_compat import (
     ProductEvidenceHarness,
 )
 from src.product_evidence_harness.llm import ExactProductLLMAdjudicator, LLMConfig, LLMService
+from src.product_evidence_harness.llm.feature_reasoner import LLMFeatureReasoner
 from src.product_evidence_harness.logging_utils import RichPrinter, configure_logging
 from src.product_evidence_harness.one_credit_pipeline import (
     FeatureAwareHarnessResult,
@@ -75,6 +81,7 @@ __all__ = [
     "CrawlScraper", "ProductIdentityVerifier", "ProductIdentityGraph", "ProductIdentityGraphBuilder",
     "DetectorFinding", "VariantConflictDetector", "ProductURLRanker", "RichPrinter", "configure_logging", "CSVProductIO",
     "CountryProfile", "CountryProfileRegistry", "LanguageProfile", "ExactProductLLMAdjudicator", "LLMConfig", "LLMService",
+    "LLMFeatureReasoner", "EnvironmentValidationError", "EnvironmentValidationReport", "validate_runtime_environment",
     "EnterpriseEvidenceEngine", "EnterpriseEvidenceAssessment", "ConfidenceBreakdown", "CodingReadiness",
     "ReviewFeedbackRecord", "ReviewFeedbackStore", "RetailerDomainMemory", "ProductionURLGate", "ProductionURLAssessment",
 ]
