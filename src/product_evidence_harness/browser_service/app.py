@@ -27,7 +27,7 @@ def _expected_token() -> str:
 def require_token(authorization: str | None = Header(default=None)) -> None:
     expected = _expected_token()
     if not expected:
-        return
+        raise HTTPException(status_code=503, detail="Browser service token is not configured")
     supplied = ""
     if authorization and authorization.lower().startswith("bearer "):
         supplied = authorization[7:].strip()
@@ -42,11 +42,13 @@ async def lifespan(_: FastAPI):
     await _controller.close()
 
 
-app = FastAPI(title="Product Browser Evidence Service", version="0.5.0", lifespan=lifespan)
+app = FastAPI(title="Product Browser Evidence Service", version="0.6.0", lifespan=lifespan)
 
 
 @app.get("/health")
 async def health() -> dict:
+    if not _expected_token():
+        raise HTTPException(status_code=503, detail="Browser service token is not configured")
     return await _controller.health()
 
 
