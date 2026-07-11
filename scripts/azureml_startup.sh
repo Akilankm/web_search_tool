@@ -4,8 +4,6 @@ set -euo pipefail
 PROJECT_DIR="${PRODUCT_EVIDENCE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$PROJECT_DIR"
 
-python scripts/preflight_azureml.py --project-dir "$PROJECT_DIR"
-
 mkdir -p artifacts inputs/private secrets
 if [[ ! -s secrets/browser_api_token.txt ]]; then
   python - <<'PY'
@@ -16,6 +14,8 @@ path.write_text(secrets.token_urlsafe(48), encoding="utf-8")
 path.chmod(0o600)
 PY
 fi
+
+python scripts/preflight_azureml.py --project-dir "$PROJECT_DIR"
 
 # Bind-mounted folders must be writable by the same Azure ML user that owns the
 # checkout. When this script is launched by a root startup hook, use the checkout
