@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import sys
+from dataclasses import replace
 from html import escape
 
 from src.product_evidence_harness.gtin import digits_only, normalize_gtin
@@ -16,6 +17,13 @@ def _searchable_ean(self: QueryBuilder, task) -> str | None:
         return normalized
     raw = digits_only(task.ean)
     return raw if len(raw) in {8, 12, 13, 14} else None
+
+
+def _strict_requested_retailer_search(self: QueryBuilder, task) -> str:
+    """Suppress invalid GTINs for retailer-targeted strict retrieval."""
+    if task.ean and normalize_gtin(task.ean) is None:
+        task = replace(task, ean=None)
+    return self.country_language_search(task, language_index=0, include_retailer=True)
 
 
 def _remove_network_primitives(self: LivePageOfflineArtifactBuilder, html: str) -> str:
@@ -60,6 +68,7 @@ def _role_directory(self: LivePageOfflineArtifactBuilder, role: str) -> str:
 
 def apply_compatibility_patches() -> None:
     QueryBuilder._valid_ean = _searchable_ean  # type: ignore[method-assign]
+    QueryBuilder.requested_retailer_search = _strict_requested_retailer_search  # type: ignore[method-assign]
     LivePageOfflineArtifactBuilder._remove_network_primitives = _remove_network_primitives  # type: ignore[method-assign]
     LivePageOfflineArtifactBuilder._role_directory = _role_directory  # type: ignore[method-assign]
 
