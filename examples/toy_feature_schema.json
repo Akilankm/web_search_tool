@@ -1,64 +1,16 @@
 {
-  "schema_id": "toy-feature-schema-v1",
-  "pg_name": "TOYS",
-  "required_coverage_threshold": 0.8,
-  "features": [
+  "features_to_code": [
+    "brand",
+    "manufacturer",
+    "product type",
+    "minimum recommended age",
     {
-      "feature_id": "BRAND",
-      "feature_name": "Brand",
-      "value_type": "text",
-      "criticality": "critical",
-      "aliases": ["brand", "manufacturer", "marke", "hersteller"]
+      "name": "material",
+      "description": "Primary material used to manufacture the toy"
     },
-    {
-      "feature_id": "PRODUCT_TYPE",
-      "feature_name": "Product type",
-      "value_type": "text",
-      "criticality": "critical",
-      "aliases": ["product type", "type", "spielart", "produkttyp"]
-    },
-    {
-      "feature_id": "MINIMUM_RECOMMENDED_AGE",
-      "feature_name": "Minimum recommended age",
-      "value_type": "integer",
-      "criticality": "required",
-      "aliases": ["recommended age", "minimum age", "age from", "altersempfehlung", "ab jahren"]
-    },
-    {
-      "feature_id": "MATERIAL",
-      "feature_name": "Material",
-      "value_type": "text",
-      "criticality": "required",
-      "aliases": ["material", "materials", "made of", "werkstoff"]
-    },
-    {
-      "feature_id": "BATTERY_REQUIRED",
-      "feature_name": "Battery required",
-      "value_type": "boolean",
-      "criticality": "conditional",
-      "allowed_values": ["YES", "NO"],
-      "aliases": ["battery required", "batteries required", "batteries included", "batterie erforderlich", "batterien benötigt"]
-    },
-    {
-      "feature_id": "NUMBER_OF_PLAYERS",
-      "feature_name": "Number of players",
-      "value_type": "text",
-      "criticality": "optional",
-      "aliases": ["number of players", "players", "spieleranzahl"]
-    },
-    {
-      "feature_id": "PLAY_DURATION",
-      "feature_name": "Play duration",
-      "value_type": "text",
-      "criticality": "optional",
-      "aliases": ["play duration", "playing time", "spieldauer"]
-    },
-    {
-      "feature_id": "LANGUAGE",
-      "feature_name": "Language",
-      "value_type": "text",
-      "criticality": "optional",
-      "aliases": ["language", "sprache"]
-    }
+    "battery required",
+    "number of players",
+    "play duration",
+    "language"
   ]
 }
