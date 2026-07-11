@@ -18,10 +18,21 @@ class FakeLLMService:
     def __init__(self, content: str) -> None:
         self.content = content
         self.calls = 0
+        self.prompts: list[str] = []
+
+    def predict(self, prompt, *args, **kwargs):
+        self.calls += 1
+        self.prompts.append(prompt)
+        return SimpleNamespace(content=self.content)
+
+
+class FailingLLMService:
+    def __init__(self) -> None:
+        self.calls = 0
 
     def predict(self, *args, **kwargs):
         self.calls += 1
-        return SimpleNamespace(content=self.content)
+        raise RuntimeError("provider unavailable")
 
 
 def _schema() -> FeatureSchema:
@@ -79,6 +90,7 @@ def test_reasoner_accepts_only_quote_grounded_allowed_value() -> None:
     )
 
     assert service.calls == 1
+    assert "https://shop.example/product/1" in service.prompts[0]
     assert len(evidence) == 1
     assert evidence[0].value == "ABS plastic"
     assert evidence[0].status == FeatureEvidenceStatus.LLM_FOUND
@@ -116,3 +128,18 @@ def test_reasoner_obeys_call_budget() -> None:
         )
 
     assert service.calls == 1
+
+
+def test_reasoner_provider_failure_returns_no_evidence() -> None:
+    service = FailingLLMService()
+    reasoner = LLMFeatureReasoner(service=service, max_calls=1)
+
+    evidence = reasoner.evaluate(
+        product=ProductQuery(main_text="Acme Rocket", country_code="US"),
+        schema=_schema(),
+        scrape=_scrape(),
+        deterministic_evidence=_missing(),
+    )
+
+    assert service.calls == 1
+    assert evidence == ()
