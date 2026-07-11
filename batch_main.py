@@ -17,8 +17,14 @@ if str(SRC_PATH) not in sys.path:
 import pandas as pd  # noqa: E402
 from tqdm.auto import tqdm  # noqa: E402
 
-from product_evidence_harness import CSVProductIO, HarnessConfig, ProductEvidenceHarness, SerpAPIConfig, configure_logging  # noqa: E402
-from product_evidence_harness.schema_io import load_feature_schema  # noqa: E402
+from product_evidence_harness import (  # noqa: E402
+    CSVProductIO,
+    FeatureAwareProductEvidenceHarness,
+    HarnessConfig,
+    SerpAPIConfig,
+    configure_logging,
+    load_feature_schema,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -41,7 +47,7 @@ def process(product, schema, env_file: str) -> dict[str, Any]:
             env_file=env_file,
             no_cache=False,
         )
-        result = ProductEvidenceHarness(serp_config=serp_config, config=config).run(
+        result = FeatureAwareProductEvidenceHarness(serp_config=serp_config, config=config).run(
             product,
             feature_schema=schema,
             return_trace=True,
