@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from product_evidence_harness import (
+    FeatureAwareProductEvidenceHarness,
     FeatureCriticality,
     FeatureDefinition,
     FeatureSchema,
     HarnessConfig,
     OneCreditConfig,
-    ProductEvidenceHarness,
     ProductQuery,
     SerpAPIConfig,
 )
@@ -95,7 +95,7 @@ def test_one_credit_search_and_multi_url_feature_coverage(tmp_path):
             FeatureDefinition("MATERIAL", "Material", criticality=FeatureCriticality.REQUIRED),
         ),
     )
-    harness = ProductEvidenceHarness(
+    harness = FeatureAwareProductEvidenceHarness(
         serp_config=SerpAPIConfig(api_key="test", max_retries=3),
         config=HarnessConfig(write_outputs=False),
         one_credit=OneCreditConfig(output_dir=str(tmp_path), write_outputs=False, scrape_top_k=2),
