@@ -2,21 +2,21 @@ from __future__ import annotations
 
 import base64
 import os
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
+from urllib.parse import urlparse
 
 from loguru import logger
 
 
+_PLACEHOLDER_MARKERS = ("replace_", "replace-", "your_", "your-", "example", "placeholder", "<", ">")
+
+
 @dataclass(frozen=True)
 class LLMConfig:
-    """Azure OpenAI configuration for exact-product adjudication.
-
-    Values are loaded from environment by default. The class intentionally does
-    not import OpenAI until a service instance is created, so the package can be
-    imported and tested without the optional `openai` dependency installed.
-    """
+    """Azure OpenAI-compatible configuration for post-scrape reasoning."""
 
     api_key: str
     api_version: str
@@ -27,12 +27,64 @@ class LLMConfig:
     temperature: float = 0.0
     connect_timeout: float = 15.0
     read_timeout: float = 120.0
-    max_retries: int = 3
+    max_retries: int = 2
+
+    def __post_init__(self) -> None:
+        required = {
+            "api_key": self.api_key,
+            "api_version": self.api_version,
+            "endpoint": self.endpoint,
+            "deployment": self.deployment,
+        }
+        missing = [name for name, value in required.items() if not str(value or "").strip()]
+        if missing:
+            raise ValueError("Missing LLM configuration fields: " + ", ".join(missing))
+        if self._placeholder(self.api_key) or self._placeholder(self.api_version) or self._placeholder(self.endpoint) or self._placeholder(self.deployment):
+            raise ValueError("LLM configuration contains an example or placeholder value")
+        if any(ch.isspace() or ord(ch) < 32 for ch in self.api_key):
+            raise ValueError("LLM API key contains whitespace or control characters")
+
+        parsed = urlparse(self.endpoint)
+        if parsed.scheme.lower() != "https" or not parsed.netloc:
+            raise ValueError("LLM endpoint must be an absolute HTTPS URL")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("LLM endpoint must not contain credentials, query parameters, or fragments")
+        if parsed.hostname in {"localhost", "127.0.0.1", "0.0.0.0"}:
+            raise ValueError("Loopback LLM endpoints are not permitted")
+        if not 1 <= int(self.max_tokens) <= 32768:
+            raise ValueError("LLM max_tokens must be between 1 and 32768")
+        if not 0.0 <= float(self.temperature) <= 2.0:
+            raise ValueError("LLM temperature must be between 0.0 and 2.0")
+        if not 1.0 <= float(self.connect_timeout) <= 120.0:
+            raise ValueError("LLM connect_timeout must be between 1 and 120 seconds")
+        if not 5.0 <= float(self.read_timeout) <= 600.0:
+            raise ValueError("LLM read_timeout must be between 5 and 600 seconds")
+        if not 0 <= int(self.max_retries) <= 5:
+            raise ValueError("LLM max_retries must be between 0 and 5")
+
+    @staticmethod
+    def _placeholder(value: str) -> bool:
+        lowered = str(value or "").strip().lower()
+        return not lowered or any(marker in lowered for marker in _PLACEHOLDER_MARKERS)
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
         def _get(name: str, default: str = "") -> str:
             return os.getenv(name, default).strip()
+
+        def _int(name: str, default: int) -> int:
+            raw = _get(name, str(default))
+            try:
+                return int(raw)
+            except ValueError as exc:
+                raise ValueError(f"{name} must be an integer") from exc
+
+        def _float(name: str, default: float) -> float:
+            raw = _get(name, str(default))
+            try:
+                return float(raw)
+            except ValueError as exc:
+                raise ValueError(f"{name} must be numeric") from exc
 
         api_key = _get("AZURE_OPENAI_API_KEY") or _get("LLM_API_KEY")
         api_version = _get("AZURE_OPENAI_API_VERSION") or _get("LLM_API_VERSION")
@@ -55,11 +107,11 @@ class LLMConfig:
             endpoint=endpoint,
             deployment=deployment,
             consumer_id=consumer_id,
-            max_tokens=int(_get("LLM_MAX_TOKENS", "1600")),
-            temperature=float(_get("LLM_TEMPERATURE", "0.0")),
-            connect_timeout=float(_get("LLM_CONNECT_TIMEOUT", "15")),
-            read_timeout=float(_get("LLM_READ_TIMEOUT", "120")),
-            max_retries=int(_get("LLM_MAX_RETRIES", "3")),
+            max_tokens=_int("LLM_MAX_TOKENS", 1600),
+            temperature=_float("LLM_TEMPERATURE", 0.0),
+            connect_timeout=_float("LLM_CONNECT_TIMEOUT", 15.0),
+            read_timeout=_float("LLM_READ_TIMEOUT", 120.0),
+            max_retries=_int("LLM_MAX_RETRIES", 2),
         )
 
     @property
@@ -77,21 +129,25 @@ class LLMResponse:
 
 
 _DEFAULT_SERVICE: Optional["LLMService"] = None
+_DEFAULT_SERVICE_LOCK = threading.Lock()
 
 
 def get_llm_service(config: Optional[LLMConfig] = None) -> "LLMService":
     global _DEFAULT_SERVICE
     if _DEFAULT_SERVICE is None:
-        _DEFAULT_SERVICE = LLMService(config)
+        with _DEFAULT_SERVICE_LOCK:
+            if _DEFAULT_SERVICE is None:
+                _DEFAULT_SERVICE = LLMService(config)
     return _DEFAULT_SERVICE
 
 
 class LLMService:
-    """Unified Azure OpenAI LLM service for text and one-image calls."""
+    """Unified Azure OpenAI-compatible LLM service for text and one-image calls."""
 
     _cumulative_prompt: int = 0
     _cumulative_completion: int = 0
     _cumulative_calls: int = 0
+    _counter_lock = threading.Lock()
 
     def __init__(self, config: Optional[LLMConfig] = None) -> None:
         self.config = config or LLMConfig.from_env()
@@ -100,8 +156,8 @@ class LLMService:
             from openai import AzureOpenAI
         except Exception as exc:
             raise ImportError(
-                "LLM adjudication requires the optional `openai` and `httpx` packages. "
-                "Install them or disable enable_llm_adjudication."
+                "LLM feature reasoning requires the `openai` and `httpx` packages. "
+                "Install them or disable PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING."
             ) from exc
         self._client = AzureOpenAI(
             api_key=self.config.api_key,
@@ -162,11 +218,19 @@ class LLMService:
         try:
             completion = self._client.chat.completions.create(**kwargs)
         except Exception as exc:
-            body = getattr(getattr(exc, "response", None), "text", None)
-            if body:
-                logger.error("LLM call failed: {} — body={}", exc, body[:1000])
-            else:
-                logger.exception("LLM call failed")
+            response = getattr(exc, "response", None)
+            status_code = getattr(response, "status_code", None)
+            request_id = (
+                getattr(exc, "request_id", None)
+                or getattr(response, "headers", {}).get("x-request-id") if response is not None else None
+            )
+            logger.error(
+                "LLM call failed | purpose={} | error_type={} | status_code={} | request_id={}",
+                purpose or "unknown",
+                type(exc).__name__,
+                status_code,
+                request_id or "unavailable",
+            )
             raise
 
         choice = completion.choices[0]
@@ -177,9 +241,10 @@ class LLMService:
                 "completion_tokens": completion.usage.completion_tokens,
                 "total_tokens": completion.usage.total_tokens,
             }
-            LLMService._cumulative_prompt += completion.usage.prompt_tokens
-            LLMService._cumulative_completion += completion.usage.completion_tokens
-            LLMService._cumulative_calls += 1
+            with LLMService._counter_lock:
+                LLMService._cumulative_prompt += completion.usage.prompt_tokens
+                LLMService._cumulative_completion += completion.usage.completion_tokens
+                LLMService._cumulative_calls += 1
             logger.info(
                 "LLM [{}] prompt={} completion={} total={}",
                 purpose or "unknown",
@@ -197,16 +262,21 @@ class LLMService:
 
     @classmethod
     def reset_token_counters(cls) -> None:
-        cls._cumulative_prompt = 0
-        cls._cumulative_completion = 0
-        cls._cumulative_calls = 0
+        with cls._counter_lock:
+            cls._cumulative_prompt = 0
+            cls._cumulative_completion = 0
+            cls._cumulative_calls = 0
 
     @classmethod
     def token_summary(cls) -> str:
-        total = cls._cumulative_prompt + cls._cumulative_completion
+        with cls._counter_lock:
+            total = cls._cumulative_prompt + cls._cumulative_completion
+            calls = cls._cumulative_calls
+            prompt = cls._cumulative_prompt
+            completion = cls._cumulative_completion
         return (
-            f"LLM totals: {cls._cumulative_calls} calls | "
-            f"prompt={cls._cumulative_prompt:,} completion={cls._cumulative_completion:,} "
+            f"LLM totals: {calls} calls | "
+            f"prompt={prompt:,} completion={completion:,} "
             f"total={total:,} tokens"
         )
 
