@@ -49,6 +49,7 @@ from src.product_evidence_harness.legacy_compat import (
 )
 from src.product_evidence_harness.llm import ExactProductLLMAdjudicator, LLMConfig, LLMService
 from src.product_evidence_harness.llm.feature_reasoner import LLMFeatureReasoner
+from src.product_evidence_harness.llm.vision_reasoner import MultimodalFeatureReasoner, VisionReasonerConfig
 from src.product_evidence_harness.logging_utils import RichPrinter, configure_logging
 from src.product_evidence_harness.one_credit_pipeline import (
     FeatureAwareHarnessResult,
@@ -61,6 +62,18 @@ from src.product_evidence_harness.scraper import CrawlScraper
 from src.product_evidence_harness.schema_io import load_feature_schema
 from src.product_evidence_harness.tournament_pipeline import TournamentAwareProductEvidenceHarness
 from src.product_evidence_harness.compat_patches import apply_compatibility_patches
+from src.product_evidence_harness.browser_contracts import (
+    AcquisitionMethod,
+    BrowserActionRecord,
+    BrowserEvidenceBundle,
+    BrowserEvidenceRequest,
+    BrowserEvidenceStatus,
+    EvidenceIntent,
+    ProductIdentityPayload,
+    VisualAsset,
+)
+from src.product_evidence_harness.browser_client import BrowserEvidenceClient, BrowserServiceConfig, BrowserServiceError
+from src.product_evidence_harness.agent_service.orchestrator import AgentRuntimeConfig, FeatureSetRegistry, ProductEvidenceOrchestrator
 
 apply_compatibility_patches()
 
@@ -81,7 +94,12 @@ __all__ = [
     "CrawlScraper", "ProductIdentityVerifier", "ProductIdentityGraph", "ProductIdentityGraphBuilder",
     "DetectorFinding", "VariantConflictDetector", "ProductURLRanker", "RichPrinter", "configure_logging", "CSVProductIO",
     "CountryProfile", "CountryProfileRegistry", "LanguageProfile", "ExactProductLLMAdjudicator", "LLMConfig", "LLMService",
-    "LLMFeatureReasoner", "EnvironmentValidationError", "EnvironmentValidationReport", "validate_runtime_environment",
+    "LLMFeatureReasoner", "MultimodalFeatureReasoner", "VisionReasonerConfig",
+    "EnvironmentValidationError", "EnvironmentValidationReport", "validate_runtime_environment",
     "EnterpriseEvidenceEngine", "EnterpriseEvidenceAssessment", "ConfidenceBreakdown", "CodingReadiness",
     "ReviewFeedbackRecord", "ReviewFeedbackStore", "RetailerDomainMemory", "ProductionURLGate", "ProductionURLAssessment",
+    "AcquisitionMethod", "BrowserActionRecord", "BrowserEvidenceBundle", "BrowserEvidenceRequest",
+    "BrowserEvidenceStatus", "EvidenceIntent", "ProductIdentityPayload", "VisualAsset",
+    "BrowserEvidenceClient", "BrowserServiceConfig", "BrowserServiceError",
+    "AgentRuntimeConfig", "FeatureSetRegistry", "ProductEvidenceOrchestrator",
 ]

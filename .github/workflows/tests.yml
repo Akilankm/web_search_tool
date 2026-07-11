@@ -31,6 +31,7 @@ jobs:
           PYTHONPATH=src pytest -q \
             tests/test_serp_harvester.py \
             tests/test_one_credit_feature_workflow.py \
+            tests/test_simple_feature_schema.py \
             tests/test_environment_security.py \
             tests/test_env_example_contract.py \
             tests/test_llm_feature_reasoner.py \
