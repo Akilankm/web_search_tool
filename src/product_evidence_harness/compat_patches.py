@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from html import escape
 
 from src.product_evidence_harness.gtin import digits_only, normalize_gtin
@@ -44,6 +45,30 @@ def _remove_network_primitives(self: LivePageOfflineArtifactBuilder, html: str) 
     return output
 
 
+def _role_directory(self: LivePageOfflineArtifactBuilder, role: str) -> str:
+    role_l = (role or "").lower()
+    if role_l in {"link.href", "link.stylesheet"} or "css" in role_l or "stylesheet" in role_l:
+        return "css"
+    if any(key in role_l for key in ["img", "image", "srcset", "poster", "source"]):
+        return "images"
+    if "icon" in role_l:
+        return "images"
+    if "font" in role_l:
+        return "fonts"
+    return "other"
+
+
 def apply_compatibility_patches() -> None:
     QueryBuilder._valid_ean = _searchable_ean  # type: ignore[method-assign]
     LivePageOfflineArtifactBuilder._remove_network_primitives = _remove_network_primitives  # type: ignore[method-assign]
+    LivePageOfflineArtifactBuilder._role_directory = _role_directory  # type: ignore[method-assign]
+
+    # The historical package uses both ``product_evidence_harness`` and
+    # ``src.product_evidence_harness`` imports. Alias the patched modules so both
+    # names resolve to the same class objects instead of creating duplicate trees.
+    query_module = sys.modules.get("src.product_evidence_harness.query_builder")
+    offline_module = sys.modules.get("src.product_evidence_harness.offline_capture")
+    if query_module is not None:
+        sys.modules.setdefault("product_evidence_harness.query_builder", query_module)
+    if offline_module is not None:
+        sys.modules.setdefault("product_evidence_harness.offline_capture", offline_module)
