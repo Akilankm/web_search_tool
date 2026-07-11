@@ -32,13 +32,10 @@ def _base_env() -> str:
     )
 
 
-def test_valid_environment_returns_secret_free_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    for key in list(os.environ):
-        if key.startswith(("SERPAPI_", "PRODUCT_HARNESS_", "LLM_", "AZURE_OPENAI_")):
-            monkeypatch.delenv(key, raising=False)
+def test_valid_environment_returns_secret_free_report(tmp_path: Path) -> None:
     env_file = _write_env(tmp_path / ".env", _base_env())
 
-    report = validate_runtime_environment(env_file)
+    report = validate_runtime_environment(env_file, environ={})
 
     rendered = str(report.to_dict())
     assert report.serpapi_configured is True
@@ -46,31 +43,27 @@ def test_valid_environment_returns_secret_free_report(tmp_path: Path, monkeypatc
     assert "serp_live_" not in rendered
 
 
-def test_placeholder_serpapi_key_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
+def test_placeholder_serpapi_key_is_rejected(tmp_path: Path) -> None:
     env_file = _write_env(
         tmp_path / ".env",
         _base_env().replace("serp_live_abcdefghijklmnopqrstuvwxyz0123456789", "replace_with_real_serpapi_key"),
     )
 
     with pytest.raises(EnvironmentValidationError, match="placeholder"):
-        validate_runtime_environment(env_file)
+        validate_runtime_environment(env_file, environ={})
 
 
-def test_unsafe_search_expansion_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE", raising=False)
+def test_unsafe_search_expansion_is_rejected(tmp_path: Path) -> None:
     env_file = _write_env(
         tmp_path / ".env",
         _base_env().replace("PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE=false", "PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE=true"),
     )
 
     with pytest.raises(EnvironmentValidationError, match="forbids"):
-        validate_runtime_environment(env_file)
+        validate_runtime_environment(env_file, environ={})
 
 
-def test_llm_enabled_requires_secure_complete_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    for key in ("LLM_API_KEY", "LLM_API_VERSION", "LLM_ENDPOINT", "LLM_DEPLOYMENT"):
-        monkeypatch.delenv(key, raising=False)
+def test_llm_enabled_requires_secure_complete_configuration(tmp_path: Path) -> None:
     env_file = _write_env(
         tmp_path / ".env",
         _base_env().replace(
@@ -80,14 +73,14 @@ def test_llm_enabled_requires_secure_complete_configuration(tmp_path: Path, monk
     )
 
     with pytest.raises(EnvironmentValidationError, match="LLM_API_KEY"):
-        validate_runtime_environment(env_file)
+        validate_runtime_environment(env_file, environ={})
 
 
 def test_duplicate_keys_are_rejected(tmp_path: Path) -> None:
     env_file = _write_env(tmp_path / ".env", _base_env() + "SERPAPI_API_KEY=second_value_that_must_not_win\n")
 
     with pytest.raises(EnvironmentValidationError, match="Duplicate"):
-        validate_runtime_environment(env_file)
+        validate_runtime_environment(env_file, environ={})
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits are required")
@@ -97,4 +90,4 @@ def test_group_readable_env_file_is_rejected(tmp_path: Path) -> None:
     env_file.chmod(0o644)
 
     with pytest.raises(EnvironmentValidationError, match="chmod 600"):
-        validate_runtime_environment(env_file)
+        validate_runtime_environment(env_file, environ={})
