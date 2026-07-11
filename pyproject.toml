@@ -1,7 +1,7 @@
 [project]
 name = "product-evidence-harness"
-version = "0.3.0"
-description = "LLM-guided search-scrape harness for exact product URL discovery and evidence extraction"
+version = "0.4.0"
+description = "One-credit product URL discovery with feature-aware evidence extraction and auditable coding handoff"
 requires-python = ">=3.10,<3.12"
 dependencies = [
     "requests>=2.32.0",

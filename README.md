@@ -1,115 +1,216 @@
 # Product Evidence Harness
 
-The Product Evidence Harness turns product web search into verified, auditable, product-coding-ready evidence.
+A cost-bounded product evidence workflow for exact product URL discovery and feature-aware product coding.
 
-It is a controlled decision pipeline, not a simple scraper or loose search utility.
-
-```text
-Input product identity
-  -> candidate URL discovery
-  -> evidence extraction
-  -> identity verification
-  -> rendered page relevance validation
-  -> production champion gate
-  -> concise review artifacts
-  -> product-coding evidence
-```
-
-## Canonical documentation
-
-All detailed documentation is consolidated here:
+## Core contract
 
 ```text
-docs/README.md
+Product identity inputs
+  -> exactly one SerpAPI search
+  -> harvest every useful URL from that response
+  -> normalize and rank the candidate pool
+  -> scrape selected candidates locally
+  -> verify exact product identity
+  -> extract evidence for the known feature schema
+  -> select one primary URL plus only useful supplementary URLs
+  -> coding-ready or review-required decision
 ```
 
-Older specialized docs were removed to avoid stale or conflicting references. Use `docs/README.md` as the source of truth for:
+| Stage | Uses feature list? | Objective |
+|---|:---:|---|
+| SerpAPI search | No | Discover exact-product candidate URLs from identity inputs |
+| Candidate preflight | No | Prioritize likely exact product pages |
+| Scraping | Yes | Retain evidence relevant to required features |
+| Evidence evaluation | Yes | Map page evidence to features and detect gaps/conflicts |
+| Coding handoff | Yes | Produce feature values with URL-level provenance |
 
-```text
-notebook workflow
-input contract
-production URL contract
-rendered-page gate
-safe review fallback behavior
-CSV/output fields
-row artifact packet
-validation commands
+The production workflow enforces **one successful SerpAPI request per product**. It does not paginate, retry with another query, invoke AI Mode, or call a second search provider.
+
+## Secure environment setup
+
+```bash
+cp .env.example .env
+chmod 600 .env
 ```
 
-## Start with notebooks
+Store SerpAPI and optional LLM credentials only in `.env` or in process-level secret injection. Never place keys in notebooks, YAML files, source code, command-line arguments, reports, or logs.
 
-| Notebook | Use when | Output |
-|---|---|---|
-| `notebooks/00_notebook_gateway.ipynb` | You are new to the repo. | Choose the right workflow. |
-| `notebooks/01_single_product_harness.ipynb` | Test one product end to end. | Champion URL decision, rendered-page gate, production gate, review packet. |
-| `notebooks/02_batch_product_harness.ipynb` | Run many products. | `final_submission.csv`, `review_queue.csv`, metrics, row artifacts. |
-| `notebooks/03_offline_product_artifact.ipynb` | Capture local/offline evidence for a confirmed champion. | `offline_page.html` and local assets. |
+Before any paid request, both production runners call `validate_runtime_environment()`. It fails closed when it detects:
 
-## High-stakes handoff rule
+- missing, placeholder, malformed, or whitespace-containing secrets;
+- duplicate `.env` keys;
+- symlinked or group/world-readable local `.env` files;
+- conflicting `AZURE_OPENAI_*` and `LLM_*` aliases;
+- non-HTTPS, credential-bearing, or loopback LLM endpoints;
+- invalid timeout, retry, token, temperature, or call-budget values;
+- tournament mode, AI Mode, LLM search planning, or more than one organic search;
+- configuration that violates the `one_credit_feature_aware` workflow identity.
 
-Use automated browser-opening, scraping, or product-coding handoff only when:
+The validation report contains only booleans and check names. Secret values are never returned.
 
-```text
-product_url is not blank
-production_url_ready = true
-production_url_status = PRODUCTION_READY_EXACT_SCRAPABLE_BROWSER_URL
-browser_openable = true
-rendered_page_check_passed = true
-highly_scrapable = true
-exact_product_url_match = true
-champion_confirmation.passed = true
-champion_confirmation.success_count = champion_confirmation.required_successes
-needs_review = false
+### Optional LLM boundary
+
+`PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING=false` by default. When enabled:
+
+1. the product URL must already pass deterministic identity acceptance;
+2. the page must already be scraped locally;
+3. the LLM receives only bounded scraped-page evidence and missing feature definitions;
+4. the LLM cannot search or follow URLs;
+5. closed-set values must match the declared allowed values exactly;
+6. every accepted LLM value must include a quote found in the scraped page text;
+7. LLM confidence is capped below deterministic structured evidence;
+8. calls are bounded by `PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT`.
+
+This is defense-in-depth configuration hardening, not a claim of formal military or government security certification.
+
+## Inputs
+
+### Product input
+
+| Field | Required | Purpose |
+|---|:---:|---|
+| `row_id` | Recommended | Stable product identifier |
+| `main_text` | Yes | Product identity text |
+| `country_code` | Yes | Target market |
+| `ean` / `gtin` | No | Exact identity anchor |
+| `retailer_name` | No | Preferred retailer signal |
+| `language_code` | No | Search and extraction language override |
+
+### Feature schema
+
+```json
+{
+  "schema_id": "toy-board-game-v1",
+  "pg_name": "BOARD_GAMES",
+  "required_coverage_threshold": 0.8,
+  "features": [
+    {
+      "feature_id": "MIN_AGE",
+      "feature_name": "Minimum recommended age",
+      "value_type": "integer",
+      "criticality": "critical",
+      "aliases": ["recommended age", "age from"]
+    },
+    {
+      "feature_id": "MATERIAL",
+      "feature_name": "Material",
+      "value_type": "text",
+      "criticality": "required"
+    }
+  ]
+}
 ```
 
-Rows outside this filter are review-only. Hard-rejected candidates remain in `candidate_decisions.csv`; they must not be promoted into selected evidence.
+The feature list is intentionally **not added to the SerpAPI query**. It is introduced after candidate discovery and drives scraping, evidence extraction, coverage measurement, and supplementary-source selection.
 
-## Minimal single-product usage
+## Single-product run
+
+```bash
+python main.py \
+  --row-id CH-TOY-0001 \
+  --main-text "Hitster Original Musik-Partyspiel" \
+  --country-code CH \
+  --retailer-name "Orell Füssli" \
+  --ean 8710126198872 \
+  --feature-schema examples/toy_feature_schema.json
+```
+
+Python API:
 
 ```python
-from product_evidence_harness import HarnessConfig, ProductEvidenceHarness, ProductQuery, SerpAPIConfig, ProductionURLGate
+import os
 
-product = ProductQuery(
-    row_id="CO-ML-0001",
-    main_text="PUT PRODUCT TEXT HERE",
-    country_code="CO",
-    ean="",
-    retailer_name="Mercado Libre",
+from product_evidence_harness import (
+    FeatureAwareProductEvidenceHarness,
+    HarnessConfig,
+    LLMFeatureReasoner,
+    ProductQuery,
+    SerpAPIConfig,
+    load_feature_schema,
+    validate_runtime_environment,
 )
 
-config = HarnessConfig.from_env(".env")
-serp_config = SerpAPIConfig.from_env(country_code=product.country_code, language_code="es")
-harness = ProductEvidenceHarness(serp_config=serp_config, config=config)
-trace = harness.run(product, return_trace=True)
+environment = validate_runtime_environment(".env")
+product = ProductQuery(
+    row_id="CH-TOY-0001",
+    main_text="Hitster Original Musik-Partyspiel",
+    country_code="CH",
+    retailer_name="Orell Füssli",
+    ean="8710126198872",
+)
 
-match = trace.best_match
-tournament = getattr(trace.state, "tournament_result", None)
-confirmation = getattr(tournament, "champion_confirmation", None) if tournament else None
-production = ProductionURLGate().assess_url_in_state(trace.state, match.product_url or "")
+schema = load_feature_schema("examples/toy_feature_schema.json")
+reasoner = None
+if environment.llm_feature_reasoning_enabled:
+    reasoner = LLMFeatureReasoner.from_env(
+        max_calls=int(os.getenv("PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT", "2"))
+    )
 
-print(match.product_url)
-print(production.to_dict() if production else "No production assessment")
-print(confirmation.to_dict() if confirmation else "No champion confirmation")
+harness = FeatureAwareProductEvidenceHarness(
+    serp_config=SerpAPIConfig.from_env(country_code="CH", language_code="de"),
+    config=HarnessConfig.from_env(".env"),
+    feature_reasoner=reasoner,
+)
+result = harness.run(product, feature_schema=schema, return_trace=True)
+
+print(result.best_match.product_url)
+print(result.evidence_set.to_dict())
 ```
 
-## Batch usage
+## Batch run
 
 ```bash
 python batch_main.py \
   --input data/products.xlsx \
+  --feature-schema examples/toy_feature_schema.json \
   --output outputs/final_submission.csv \
   --workers 4
 ```
 
-## Validation
+Batch output includes:
+
+- final product URL and review fallback;
+- SerpAPI requests used;
+- primary evidence URL;
+- supplementary evidence URLs;
+- required and critical feature coverage;
+- missing and conflicting features;
+- coding-ready status.
+
+## Per-product artifacts
+
+```text
+output/<row_id>/
+├── result.json
+├── candidates.csv
+├── feature_evidence.csv
+└── review.md
+```
+
+`result.json` is the complete machine-readable decision. `review.md` is the first file for human review.
+
+## Acceptance model
+
+A candidate URL is evaluated in two independent stages:
+
+1. **Identity acceptance:** exact product, correct variant, valid product page, accessible and scrapable.
+2. **Feature utility:** explicit or structured evidence for one or more required features.
+
+A rich page for the wrong product is always rejected. Multiple exact-product URLs may be retained only when they add feature evidence not covered by the primary source.
+
+## Compatibility
+
+`ProductEvidenceHarness` remains as the legacy-compatible review workflow for existing consumers. `LegacyTournamentProductEvidenceHarness` exposes the previous tournament implementation explicitly. New development should use `FeatureAwareProductEvidenceHarness`.
+
+## Documentation and validation
+
+The complete operating reference is in [`docs/README.md`](docs/README.md).
 
 ```bash
 PYTHONPATH=src python -m compileall -q src main.py batch_main.py
-PYTHONPATH=src pytest -q tests/test_production_url_gate.py
-PYTHONPATH=src pytest -q tests/test_champion_contract.py
+PYTHONPATH=src pytest -q tests/test_environment_security.py
+PYTHONPATH=src pytest -q tests/test_llm_feature_reasoner.py
+PYTHONPATH=src pytest -q tests/test_serp_harvester.py
+PYTHONPATH=src pytest -q tests/test_one_credit_feature_workflow.py
 PYTHONPATH=src pytest -q
 ```
-
-## Import path note
-
-This project uses a standard `src/` package layout. In notebooks, add `<repo>/src` to `sys.path`, then import with `product_evidence_harness`.

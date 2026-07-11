@@ -13,8 +13,6 @@ class CandidateStore:
 
     def merge_organic(self, existing: list[URLCandidate], response: OrganicSearchResponse) -> list[URLCandidate]:
         records = {c.url: self._record(c) for c in existing}
-        source = f"organic_{len({s for c in existing for s in c.source_types if s.startswith('organic_')}) + 1}"
-        # More reliable source naming comes from response count in state; the exact label is not scoring-critical.
         for result in response.results:
             url = normalize_url(result.url)
             if not url:
@@ -22,7 +20,8 @@ class CandidateStore:
             rec = records.setdefault(url, self._empty_record(url))
             rec["title"] = self._best(rec["title"], result.title)
             rec["snippet"] = self._best(rec["snippet"], result.snippet)
-            rec["source_types"].add(source)
+            section = (result.source or "organic_results").strip().lower().replace(" ", "_")
+            rec["source_types"].add(f"serp_{section}")
             rec["organic_count"] += 1
             rec["query_sources"].add(response.query)
             if result.position is not None:
@@ -108,14 +107,34 @@ class CandidateStore:
         }
 
     def _candidates(self, records: dict[str, dict[str, Any]]) -> list[URLCandidate]:
-        candidates = [URLCandidate(
-            url=r["url"], title=r["title"], snippet=r["snippet"], domain=r["domain"],
-            source_types=tuple(sorted(r["source_types"])), query_sources=tuple(sorted(r["query_sources"])),
-            best_position=r["best_position"], organic_count=r["organic_count"],
-            ai_reference_count=r["ai_reference_count"], ai_declared_final=r["ai_declared_final"],
-            lifecycle_status=r["lifecycle_status"],
-        ) for r in records.values()]
-        return sorted(candidates, key=lambda c: (c.ai_declared_final, c.organic_count, c.ai_reference_count, -(c.best_position or 999)), reverse=True)[: self.max_pool_size]
+        candidates = [
+            URLCandidate(
+                url=r["url"],
+                title=r["title"],
+                snippet=r["snippet"],
+                domain=r["domain"],
+                source_types=tuple(sorted(r["source_types"])),
+                query_sources=tuple(sorted(r["query_sources"])),
+                best_position=r["best_position"],
+                organic_count=r["organic_count"],
+                ai_reference_count=r["ai_reference_count"],
+                ai_declared_final=r["ai_declared_final"],
+                lifecycle_status=r["lifecycle_status"],
+            )
+            for r in records.values()
+        ]
+        return sorted(
+            candidates,
+            key=lambda c: (
+                c.ai_declared_final,
+                len(c.source_types),
+                c.organic_count,
+                c.ai_reference_count,
+                -(c.best_position or 999),
+            ),
+            reverse=True,
+        )[: self.max_pool_size]
 
-    def _best(self, old: str, new: str) -> str:
+    @staticmethod
+    def _best(old: str, new: str) -> str:
         return new if len(new or "") > len(old or "") else old

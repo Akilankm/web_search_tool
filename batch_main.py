@@ -1,24 +1,11 @@
-"""Batch runner for the Exact Product Discovery Harness.
-
-Usage:
-  python batch_main.py --input data/products.xlsx --output outputs/final_submission.csv --workers 4
-
-The runner reads all columns as strings to protect EAN/GTIN identifiers. It
-creates one harness per worker call to avoid shared crawl/browser/session state.
-
-Batch outputs:
-  - final_submission.csv: compact file to submit/share.
-  - review_queue.csv: rows that need human review.
-  - batch_summary.md: human-readable run summary.
-  - output/<row_id>/: concise review packet for each product.
-"""
+"""Batch runner for the one-credit, feature-aware product evidence workflow."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
-from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -29,104 +16,81 @@ if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
 import pandas as pd  # noqa: E402
-from rich import print  # noqa: E402
 from tqdm.auto import tqdm  # noqa: E402
 
 from product_evidence_harness import (  # noqa: E402
     CSVProductIO,
+    FeatureAwareProductEvidenceHarness,
     HarnessConfig,
-    ProductEvidenceHarness,
+    LLMFeatureReasoner,
     SerpAPIConfig,
     configure_logging,
+    load_feature_schema,
+    validate_runtime_environment,
 )
-from product_evidence_harness.artifacts import ArtifactWriter  # noqa: E402
-from product_evidence_harness.elite import EnterpriseEvidenceEngine  # noqa: E402
-from product_evidence_harness.production_url import ProductionURLGate  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run exact-product URL discovery for a batch file.")
-    parser.add_argument("--input", required=True, help="CSV/XLSX with row_id, main_text, country_code, optional ean, retailer_name")
-    parser.add_argument("--output", default="outputs/final_submission.csv", help="Submission-ready final CSV path")
+    parser = argparse.ArgumentParser(description="Run one SerpAPI search per product and extract evidence for a known feature schema.")
+    parser.add_argument("--input", required=True, help="CSV/XLSX containing row_id, main_text, country_code and optional EAN/retailer")
+    parser.add_argument("--feature-schema", required=True, help="JSON/CSV/XLSX feature schema")
+    parser.add_argument("--output", default="outputs/final_submission.csv")
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--env-file", default=".env")
     parser.add_argument("--log-level", default="INFO")
     return parser.parse_args()
 
 
-def build_harness(product, env_file: str) -> tuple[ProductEvidenceHarness, HarnessConfig]:
-    config = HarnessConfig.from_env(env_file)
-    serp_config = SerpAPIConfig.from_env(
-        country_code=product.country_code,
-        language_code=product.language_code or "en",
-        env_file=env_file,
-        no_cache=False,
-    )
-    return ProductEvidenceHarness(serp_config=serp_config, config=config), config
-
-
-def _production_fields(production_assessment) -> dict[str, Any]:
-    if not production_assessment:
-        return {
-            "production_url_ready": False,
-            "production_url_status": "PRODUCT_URL_NOT_ASSESSED_OR_NO_SCORECARD",
-            "browser_openable": False,
-            "highly_scrapable": False,
-            "exact_product_url_match": False,
-            "production_url_score": 0.0,
-            "production_url_reasons": "NO_SCORECARD_FOR_SELECTED_PRODUCT_URL",
-            "rendered_page_check_passed": False,
-            "rendered_page_type": "UNKNOWN_PAGE",
-            "rendered_product_visible": False,
-            "rendered_content_related": False,
-            "rendered_match_confidence": 0.0,
-            "rendered_verdict": "NOT_EVALUATED",
-            "rendered_mismatch_reasons": "NO_SCORECARD_FOR_SELECTED_PRODUCT_URL",
-            "rendered_visible_title": "",
-            "rendered_visible_product_name": "",
-            "rendered_screenshot_path": "",
-            "rendered_screenshot_captured": False,
-            "rendered_llm_used": False,
-        }
-    return {
-        "production_url_ready": production_assessment.production_ready,
-        "production_url_status": production_assessment.status,
-        "browser_openable": production_assessment.browser_openable,
-        "highly_scrapable": production_assessment.highly_scrapable,
-        "exact_product_url_match": production_assessment.exact_product_match,
-        "production_url_score": production_assessment.score,
-        "production_url_reasons": "|".join(production_assessment.reasons),
-        "rendered_page_check_passed": production_assessment.rendered_page_check_passed,
-        "rendered_page_type": production_assessment.rendered_page_type,
-        "rendered_product_visible": production_assessment.rendered_product_visible,
-        "rendered_content_related": production_assessment.rendered_content_related,
-        "rendered_match_confidence": production_assessment.rendered_match_confidence,
-        "rendered_verdict": production_assessment.rendered_verdict,
-        "rendered_mismatch_reasons": "|".join(production_assessment.rendered_mismatch_reasons),
-        "rendered_visible_title": production_assessment.rendered_visible_title,
-        "rendered_visible_product_name": production_assessment.rendered_visible_product_name,
-        "rendered_screenshot_path": production_assessment.rendered_screenshot_path or "",
-        "rendered_screenshot_captured": production_assessment.rendered_screenshot_captured,
-        "rendered_llm_used": production_assessment.rendered_llm_used,
-    }
-
-
-def process(product, env_file: str) -> dict[str, Any]:
+def process(product, schema, env_file: str, *, llm_enabled: bool, llm_max_calls: int) -> dict[str, Any]:
     try:
-        harness, config = build_harness(product, env_file)
-        trace = harness.run(product, return_trace=True)
-        row_dir = Path(config.output_dir) / product.row_id
-        row = ArtifactWriter(config.output_dir, country_profiles=harness.country_profiles).final_submission_row(trace.state, product_dir=row_dir)
-        row.update(EnterpriseEvidenceEngine().assess(trace.state).final_submission_extras())
-        production_assessment = ProductionURLGate().assess_url_in_state(trace.state, row.get("product_url") or "")
-        row.update(_production_fields(production_assessment))
-        row["review_summary_path"] = str(row_dir / "review_summary.md")
-        row["review_decision_path"] = str(row_dir / "review_decision.json")
-        row["candidate_decisions_path"] = str(row_dir / "candidate_decisions.csv")
-        row["product_coding_input_path"] = str(row_dir / "product_coding_input.json")
-        row["status"] = "success"
-        row["error"] = None
-        return row
+        config = HarnessConfig.from_env(env_file)
+        serp_config = SerpAPIConfig.from_env(
+            country_code=product.country_code,
+            language_code=product.language_code or "en",
+            env_file=env_file,
+            no_cache=False,
+        )
+        reasoner = LLMFeatureReasoner.from_env(max_calls=llm_max_calls) if llm_enabled else None
+        result = FeatureAwareProductEvidenceHarness(
+            serp_config=serp_config,
+            config=config,
+            feature_reasoner=reasoner,
+        ).run(
+            product,
+            feature_schema=schema,
+            return_trace=True,
+        )
+        match = result.best_match
+        evidence_set = result.evidence_set
+        return {
+            "row_id": product.row_id,
+            "main_text": product.main_text,
+            "country_code": product.country_code,
+            "retailer_name": product.retailer_name,
+            "ean": product.ean,
+            "product_url": match.product_url,
+            "best_available_url": match.best_available_url,
+            "url_decision_status": match.url_decision_status,
+            "is_exact_product_match": match.is_exact_product_match,
+            "is_scrapable": match.is_scrapable,
+            "confidence": match.confidence,
+            "serpapi_requests_used": match.organic_calls_used,
+            "scrape_calls_used": match.scrape_calls_used,
+            "llm_feature_reasoning_enabled": llm_enabled,
+            "coding_status": evidence_set.status if evidence_set else "FEATURE_SCHEMA_NOT_EVALUATED",
+            "coding_ready": evidence_set.coding_ready if evidence_set else False,
+            "primary_evidence_url": evidence_set.primary_url if evidence_set else None,
+            "supplementary_urls": "|".join(evidence_set.supplementary_urls) if evidence_set else "",
+            "selected_evidence_urls": "|".join(evidence_set.selected_urls) if evidence_set else "",
+            "total_feature_coverage": evidence_set.total_coverage if evidence_set else 0.0,
+            "required_feature_coverage": evidence_set.required_coverage if evidence_set else 0.0,
+            "critical_feature_coverage": evidence_set.critical_coverage if evidence_set else 0.0,
+            "missing_features": "|".join(evidence_set.missing_features) if evidence_set else "",
+            "conflicting_features": "|".join(evidence_set.conflicting_features) if evidence_set else "",
+            "artifact_dir": result.artifact_dir,
+            "status": "success",
+            "error": None,
+        }
     except Exception as exc:
         return {
             "row_id": product.row_id,
@@ -135,193 +99,101 @@ def process(product, env_file: str) -> dict[str, Any]:
             "retailer_name": product.retailer_name,
             "ean": product.ean,
             "product_url": None,
-            "verified_exact_url": None,
             "best_available_url": None,
-            "best_reference_url": None,
             "url_decision_status": "ERROR",
-            "selection_scope": "ERROR",
             "is_exact_product_match": False,
             "is_scrapable": False,
-            "needs_review": True,
             "confidence": 0.0,
-            "production_url_ready": False,
-            "production_url_status": "RUN_ERROR",
-            "browser_openable": False,
-            "highly_scrapable": False,
-            "exact_product_url_match": False,
-            "production_url_score": 0.0,
-            "production_url_reasons": "RUN_ERROR",
-            "rendered_page_check_passed": False,
-            "rendered_page_type": "RUN_ERROR",
-            "rendered_product_visible": False,
-            "rendered_content_related": False,
-            "rendered_match_confidence": 0.0,
-            "rendered_verdict": "RUN_ERROR",
-            "rendered_mismatch_reasons": "RUN_ERROR",
-            "rendered_visible_title": "",
-            "rendered_visible_product_name": "",
-            "rendered_screenshot_path": "",
-            "rendered_screenshot_captured": False,
-            "rendered_llm_used": False,
-            "quality_tier": "E",
-            "quality_tier_reason": "Run failed before final decision.",
-            "coding_readiness_status": "NEEDS_REVIEW",
-            "coding_readiness_score": 0.0,
-            "identity_confidence": 0.0,
-            "scrapability_confidence": 0.0,
-            "country_confidence": 0.0,
-            "retailer_confidence": 0.0,
-            "variant_confidence": 0.0,
-            "source_consensus_score": 0.0,
-            "failure_taxonomy": "RUN_ERROR",
-            "candidate_urls": "",
-            "candidate_count": 0,
-            "scraped_candidate_count": 0,
-            "serp_calls_used": 0,
-            "llm_calls_used": 0,
+            "serpapi_requests_used": 0,
             "scrape_calls_used": 0,
-            "final_justification": "Run failed before final decision.",
-            "row_report_path": "",
-            "review_summary_path": "",
-            "review_decision_path": "",
-            "candidate_decisions_path": "",
-            "product_coding_input_path": "",
+            "llm_feature_reasoning_enabled": llm_enabled,
+            "coding_status": "ERROR",
+            "coding_ready": False,
+            "primary_evidence_url": None,
+            "supplementary_urls": "",
+            "selected_evidence_urls": "",
+            "total_feature_coverage": 0.0,
+            "required_feature_coverage": 0.0,
+            "critical_feature_coverage": 0.0,
+            "missing_features": "",
+            "conflicting_features": "",
+            "artifact_dir": "",
             "status": "error",
             "error": str(exc),
         }
 
 
-def _counter_lines(title: str, counter: Counter) -> list[str]:
-    lines = [f"## {title}", ""]
-    if not counter:
-        lines.append("No values recorded.")
-        lines.append("")
-        return lines
-    lines.extend(["| Value | Count |", "|---|---:|"])
-    for key, count in sorted(counter.items(), key=lambda kv: (-kv[1], str(kv[0]))):
-        lines.append(f"| `{key or 'BLANK'}` | {count} |")
-    lines.append("")
-    return lines
-
-
-def write_batch_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
+def write_summary(output_dir: Path, rows: list[dict[str, Any]], *, environment_checks: tuple[str, ...]) -> None:
     total = len(rows)
-    exact = sum(1 for r in rows if str(r.get("verified_exact_url") or "").strip())
-    product_url = sum(1 for r in rows if str(r.get("product_url") or "").strip())
-    production_ready = sum(1 for r in rows if str(r.get("production_url_ready")).lower() in {"true", "1", "yes"})
-    browser_openable = sum(1 for r in rows if str(r.get("browser_openable")).lower() in {"true", "1", "yes"})
-    rendered_passed = sum(1 for r in rows if str(r.get("rendered_page_check_passed")).lower() in {"true", "1", "yes"})
-    highly_scrapable = sum(1 for r in rows if str(r.get("highly_scrapable")).lower() in {"true", "1", "yes"})
-    exact_product_url = sum(1 for r in rows if str(r.get("exact_product_url_match")).lower() in {"true", "1", "yes"})
-    coding_ready = sum(1 for r in rows if r.get("coding_readiness_status") == "CODING_READY")
-    needs_review = sum(1 for r in rows if str(r.get("needs_review")).lower() in {"true", "1", "yes"} or r.get("status") == "error")
-    errors = sum(1 for r in rows if r.get("status") == "error")
-    requested_retailer = sum(1 for r in rows if str(r.get("selected_from_requested_retailer")).lower() in {"true", "1", "yes"})
-    country_alt = sum(1 for r in rows if str(r.get("selected_from_other_country_retailer")).lower() in {"true", "1", "yes"})
-    global_fallback = sum(1 for r in rows if str(r.get("selected_from_global_fallback")).lower() in {"true", "1", "yes"})
-    serp_calls = sum(int(float(r.get("serp_calls_used") or 0)) for r in rows)
-    llm_calls = sum(int(float(r.get("llm_calls_used") or 0)) for r in rows)
-    scrapes = sum(int(float(r.get("scrape_calls_used") or 0)) for r in rows)
-    tier_counts = Counter(str(r.get("quality_tier") or "UNKNOWN") for r in rows)
-    readiness_counts = Counter(str(r.get("coding_readiness_status") or "UNKNOWN") for r in rows)
-    production_counts = Counter(str(r.get("production_url_status") or "UNKNOWN") for r in rows)
-    rendered_counts = Counter(str(r.get("rendered_page_type") or "UNKNOWN") for r in rows)
-    rendered_verdict_counts = Counter(str(r.get("rendered_verdict") or "UNKNOWN") for r in rows)
-    failure_counts: Counter[str] = Counter()
-    for r in rows:
-        for failure in str(r.get("failure_taxonomy") or "").split("|"):
-            if failure:
-                failure_counts[failure] += 1
-        for failure in str(r.get("rendered_mismatch_reasons") or "").split("|"):
-            if failure:
-                failure_counts[failure] += 1
-
-    metrics = {
-        "total_rows": total,
-        "product_url_count": product_url,
-        "production_ready_product_url_count": production_ready,
-        "browser_openable_product_url_count": browser_openable,
-        "rendered_page_check_passed_count": rendered_passed,
-        "highly_scrapable_product_url_count": highly_scrapable,
-        "exact_product_url_match_count": exact_product_url,
-        "verified_exact_count": exact,
-        "coding_ready_count": coding_ready,
-        "needs_review_count": needs_review,
-        "error_count": errors,
-        "requested_retailer_selected_count": requested_retailer,
-        "country_alternative_selected_count": country_alt,
-        "global_fallback_selected_count": global_fallback,
-        "serp_calls": serp_calls,
-        "llm_calls": llm_calls,
-        "scrape_calls": scrapes,
-        "quality_tiers": dict(tier_counts),
-        "coding_readiness": dict(readiness_counts),
-        "production_url_status": dict(production_counts),
-        "rendered_page_type": dict(rendered_counts),
-        "rendered_verdict": dict(rendered_verdict_counts),
-        "failure_taxonomy": dict(failure_counts),
+    resolved = sum(bool(row.get("product_url")) for row in rows)
+    coding_ready = sum(bool(row.get("coding_ready")) for row in rows)
+    errors = sum(row.get("status") == "error" for row in rows)
+    serp_calls = sum(int(row.get("serpapi_requests_used") or 0) for row in rows)
+    summary = {
+        "total_products": total,
+        "resolved_product_urls": resolved,
+        "coding_ready_products": coding_ready,
+        "errors": errors,
+        "serpapi_requests_used": serp_calls,
+        "average_serpapi_requests_per_product": round(serp_calls / max(1, total), 4),
+        "one_credit_contract_respected": all(int(row.get("serpapi_requests_used") or 0) <= 1 for row in rows),
+        "environment_checks": list(environment_checks),
     }
-    (output_dir / "metrics.json").write_text(json.dumps(metrics, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
+    (output_dir / "metrics.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     lines = [
-        "# Batch Product URL Discovery Summary",
-        "",
-        "## Executive metrics",
+        "# Batch summary",
         "",
         "| Metric | Value |",
         "|---|---:|",
-        f"| Total rows | {total} |",
-        f"| Rows with product_url | {product_url} |",
-        f"| Production-ready URLs | {production_ready} |",
-        f"| Browser-openable URLs | {browser_openable} |",
-        f"| Rendered product-content checks passed | {rendered_passed} |",
-        f"| Highly scrapable URLs | {highly_scrapable} |",
-        f"| Exact product URL matches | {exact_product_url} |",
-        f"| Coding-ready rows | {coding_ready} |",
-        f"| Needs review | {needs_review} |",
+        f"| Products | {total} |",
+        f"| Product URLs resolved | {resolved} |",
+        f"| Coding-ready products | {coding_ready} |",
         f"| Errors | {errors} |",
-        f"| Requested retailer selected | {requested_retailer} |",
-        f"| Other country retailer selected | {country_alt} |",
-        f"| Global fallback selected | {global_fallback} |",
-        f"| SerpAPI organic calls | {serp_calls} |",
-        f"| LLM calls | {llm_calls} |",
-        f"| Scrape calls | {scrapes} |",
+        f"| SerpAPI requests | {serp_calls} |",
+        f"| One-credit contract respected | {summary['one_credit_contract_respected']} |",
         "",
     ]
-    lines.extend(_counter_lines("Production URL status", production_counts))
-    lines.extend(_counter_lines("Rendered page type", rendered_counts))
-    lines.extend(_counter_lines("Rendered verdict", rendered_verdict_counts))
-    lines.extend(_counter_lines("Coding readiness", readiness_counts))
-    lines.extend(_counter_lines("Quality tiers", tier_counts))
-    lines.extend(_counter_lines("Failure taxonomy", failure_counts))
-    (output_dir / "batch_summary.md").write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    (output_dir / "batch_summary.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 def main() -> None:
     args = parse_args()
     configure_logging(args.log_level)
-    products = CSVProductIO().read_products(args.input)
+
+    # Validate exactly once before creating worker threads or making paid calls.
+    environment = validate_runtime_environment(args.env_file)
+    llm_max_calls = int(os.getenv("PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT", "2"))
+
+    products = CSVProductIO.read_products(args.input)
+    schema = load_feature_schema(args.feature_schema)
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"[bold]Running batch[/bold] rows={len(products)} workers={args.workers}")
     rows: list[dict[str, Any]] = []
-    if args.workers <= 1:
-        for product in tqdm(products):
-            rows.append(process(product, args.env_file))
-    else:
-        with ThreadPoolExecutor(max_workers=args.workers) as pool:
-            future_map = {pool.submit(process, product, args.env_file): product for product in products}
-            for future in tqdm(as_completed(future_map), total=len(future_map)):
-                rows.append(future.result())
+    workers = max(1, int(args.workers))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(
+                process,
+                product,
+                schema,
+                args.env_file,
+                llm_enabled=environment.llm_feature_reasoning_enabled,
+                llm_max_calls=llm_max_calls,
+            ): product.row_id
+            for product in products
+        }
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Products"):
+            rows.append(future.result())
 
-    df = pd.DataFrame(rows)
-    df.to_csv(output_path, index=False)
-    review = df[(df["needs_review"].astype(str).str.lower().isin(["true", "1", "yes"])) | (df["status"] == "error")]
+    frame = pd.DataFrame(rows)
+    if "row_id" in frame.columns:
+        frame = frame.sort_values("row_id")
+    frame.to_csv(output_path, index=False)
+    review = frame[(frame["coding_ready"] != True) | (frame["status"] == "error")]  # noqa: E712
     review.to_csv(output_path.parent / "review_queue.csv", index=False)
-    write_batch_summary(output_path.parent, rows)
-    print(f"[green]Wrote[/green] {output_path}")
-    print(f"[yellow]Review queue[/yellow] {output_path.parent / 'review_queue.csv'} rows={len(review)}")
+    write_summary(output_path.parent, rows, environment_checks=environment.checks_passed)
+    print(f"Wrote {output_path}")
 
 
 if __name__ == "__main__":
