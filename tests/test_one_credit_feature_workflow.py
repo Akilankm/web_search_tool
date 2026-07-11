@@ -13,6 +13,9 @@ from product_evidence_harness import (
 from product_evidence_harness.contracts import OrganicSearchResponse, OrganicSearchResult, ScrapeResult
 
 
+VALID_EAN = "4002051612344"
+
+
 class FakeOrganicClient:
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -27,7 +30,7 @@ class FakeOrganicClient:
                 OrganicSearchResult(
                     url="https://shop.ch/acme-rocket-18-pieces",
                     title="Acme Rocket 18 pieces",
-                    snippet="Acme Rocket 18 pieces 4002051612345",
+                    snippet=f"Acme Rocket 18 pieces {VALID_EAN}",
                     source="organic_results",
                     position=1,
                     query=query,
@@ -35,7 +38,7 @@ class FakeOrganicClient:
                 OrganicSearchResult(
                     url="https://manufacturer.example/acme-rocket-18-pieces",
                     title="Acme Rocket 18 pieces specifications",
-                    snippet="Official product specifications 4002051612345",
+                    snippet=f"Official product specifications {VALID_EAN}",
                     source="product_sites",
                     position=1,
                     query=query,
@@ -50,7 +53,8 @@ class FakeScraper:
 
     def scrape(self, url, *, product=None):
         retailer = "shop.ch" in url
-        specs = {"Brand": "Acme", "Recommended age": "8 years"} if retailer else {"Material": "ABS plastic"}
+        specs = {"Brand": "Acme", "Recommended age": "8 years"} if retailer else {"Brand": "Acme", "Material": "ABS plastic"}
+        feature_text = "Brand Acme Recommended age 8 years" if retailer else "Brand Acme Material ABS plastic"
         return ScrapeResult(
             url=url,
             scraped=True,
@@ -62,7 +66,7 @@ class FakeScraper:
             title="Acme Rocket 18 pieces",
             h1="Acme Rocket 18 pieces",
             page_product_name="Acme Rocket 18 pieces",
-            structured_eans=("4002051612345",),
+            structured_eans=(VALID_EAN,),
             has_price=retailer,
             price=29.99 if retailer else None,
             currency="CHF" if retailer else "",
@@ -73,14 +77,14 @@ class FakeScraper:
             specs=specs,
             image_urls=("https://cdn.example/acme.jpg",),
             richness_score=0.90,
-            markdown_excerpt="Acme Rocket 18 pieces 4002051612345 Brand Acme Recommended age 8 years Material ABS plastic",
+            markdown_excerpt=f"Acme Rocket 18 pieces {VALID_EAN} {feature_text}",
             markdown_chars=1200,
             word_count=220,
             image_count=1,
             looks_like_product_page=True,
             contains_ean=True,
             text_overlap=1.0,
-            verification_text="Acme Rocket 18 pieces 4002051612345 add to cart Brand Acme Recommended age 8 years Material ABS plastic",
+            verification_text=f"Acme Rocket 18 pieces {VALID_EAN} add to cart {feature_text}",
         )
 
 
@@ -108,7 +112,7 @@ def test_one_credit_search_and_multi_url_feature_coverage(tmp_path):
             main_text="Acme Rocket 18 pieces",
             country_code="CH",
             retailer_name="shop.ch",
-            ean="4002051612345",
+            ean=VALID_EAN,
         ),
         feature_schema=schema,
         return_trace=True,
