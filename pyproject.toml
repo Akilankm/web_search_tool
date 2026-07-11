@@ -1,7 +1,7 @@
 [project]
 name = "product-evidence-harness"
-version = "0.4.0"
-description = "One-credit product URL discovery with feature-aware evidence extraction and auditable coding handoff"
+version = "0.5.0"
+description = "Two-container product evidence platform with one-credit search, controlled browser acquisition, and multimodal coding evidence"
 requires-python = ">=3.10,<3.12"
 dependencies = [
     "requests>=2.32.0",
@@ -15,6 +15,10 @@ dependencies = [
     "tqdm>=4.66.0",
     "openai>=1.0.0",
     "httpx>=0.27.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "playwright==1.52.0",
+    "pillow>=11.0.0",
 ]
 
 [dependency-groups]
@@ -34,6 +38,7 @@ notebook = [
 ]
 dev = [
     "pytest>=8.0.0",
+    "pytest-asyncio>=0.25.0",
 ]
 
 [tool.pdm]
