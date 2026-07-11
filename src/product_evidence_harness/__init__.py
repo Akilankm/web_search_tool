@@ -54,6 +54,9 @@ from src.product_evidence_harness.ranker import ProductURLRanker
 from src.product_evidence_harness.scraper import CrawlScraper
 from src.product_evidence_harness.schema_io import load_feature_schema
 from src.product_evidence_harness.tournament_pipeline import TournamentAwareProductEvidenceHarness
+from src.product_evidence_harness.compat_patches import apply_compatibility_patches
+
+apply_compatibility_patches()
 
 FeatureAwareProductEvidenceHarness = OneCreditProductEvidenceHarness
 LegacyTournamentProductEvidenceHarness = TournamentAwareProductEvidenceHarness
