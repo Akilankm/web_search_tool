@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from src.product_evidence_harness.contracts import ProductSearchState, ProductURLMatch
+from src.product_evidence_harness.contracts import HarnessTrace, ProductSearchState, ProductURLMatch
 from src.product_evidence_harness.pipeline import ProductEvidenceHarness as BaseProductEvidenceHarness
 from src.product_evidence_harness.production_url import ProductionURLGate
+from src.product_evidence_harness.review_safety import card_for_url
 
 
 class ProductEvidenceHarness(BaseProductEvidenceHarness):
@@ -15,6 +16,36 @@ class ProductEvidenceHarness(BaseProductEvidenceHarness):
     ``product_url`` with an explicit review status when it is not production-ready.
     """
 
+    def __post_init__(self) -> None:
+        # Legacy notebooks/tests expect the complete trace and markdown packet.
+        self.config = replace(
+            self.config,
+            write_trace_json=True,
+            write_markdown_reports=True,
+        )
+        super().__post_init__()
+
+    def run(self, product, *, return_trace: bool = False):
+        result = super().run(product, return_trace=return_trace)
+        if return_trace:
+            match = self._legacy_run_status(result.best_match)
+            result.state.final_result = match
+            return HarnessTrace(state=result.state, best_match=match)
+        return self._legacy_run_status(result)
+
+    @staticmethod
+    def _legacy_run_status(match: ProductURLMatch) -> ProductURLMatch:
+        if not match.product_url:
+            return match
+        status = match.url_decision_status
+        if not match.is_scrapable:
+            status = "BEST_AVAILABLE_NOT_SCRAPABLE"
+        return replace(
+            match,
+            url_decision_status=status,
+            resolution_status="RESOLVED",
+        )
+
     @staticmethod
     def _enforce_nonempty_product_url(match: ProductURLMatch, state: ProductSearchState) -> ProductURLMatch:
         url = match.product_url or match.best_available_url or match.best_reference_url
@@ -23,12 +54,14 @@ class ProductEvidenceHarness(BaseProductEvidenceHarness):
         if not url:
             return match
 
-        scrape = state.scrapes.get(url)
+        card = card_for_url(state, url)
+        scrape = state.scrapes.get(url) or (card.scrape if card else None)
+        existing_status = (match.url_decision_status or "").strip()
         if scrape is None:
-            status = "DISCOVERED_CANDIDATE_URL_UNSCRAPED_NEEDS_REVIEW"
+            status = existing_status or "DISCOVERED_CANDIDATE_URL_UNSCRAPED_NEEDS_REVIEW"
             scrapable = False
         elif scrape.is_scrapable:
-            status = match.url_decision_status or "BEST_AVAILABLE_PRODUCT_URL_NEEDS_REVIEW"
+            status = existing_status or "BEST_AVAILABLE_PRODUCT_URL_NEEDS_REVIEW"
             scrapable = True
         else:
             status = "BEST_AVAILABLE_PRODUCT_URL_NOT_SCRAPABLE_NEEDS_REVIEW"
@@ -42,7 +75,7 @@ class ProductEvidenceHarness(BaseProductEvidenceHarness):
             needs_review=True,
             is_scrapable=scrapable,
             url_decision_status=status,
-            resolution_status=status,
+            resolution_status="RESOLVED",
             selected_with_warning=True,
         )
 
@@ -59,7 +92,7 @@ class ProductEvidenceHarness(BaseProductEvidenceHarness):
             production_gate=production_gate,
         )
         if strict.product_url:
-            return strict
+            return replace(strict, resolution_status="RESOLVED")
 
         fallback_seed = replace(
             match,
@@ -77,6 +110,7 @@ class ProductEvidenceHarness(BaseProductEvidenceHarness):
             is_exact_product_match=False,
             primary_reject_reason="PRODUCT_URL_NOT_PRODUCTION_GRADE",
             match_reason="best available URL retained for compatibility review",
+            resolution_status="RESOLVED",
         )
 
 
