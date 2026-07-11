@@ -12,8 +12,14 @@ SRC_PATH = PROJECT_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-from product_evidence_harness import HarnessConfig, ProductEvidenceHarness, ProductQuery, SerpAPIConfig, configure_logging  # noqa: E402
-from product_evidence_harness.schema_io import load_feature_schema  # noqa: E402
+from product_evidence_harness import (  # noqa: E402
+    FeatureAwareProductEvidenceHarness,
+    HarnessConfig,
+    ProductQuery,
+    SerpAPIConfig,
+    configure_logging,
+    load_feature_schema,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,7 +55,7 @@ def main() -> None:
         no_cache=False,
     )
     config = HarnessConfig.from_env(args.env_file)
-    result = ProductEvidenceHarness(serp_config=serp_config, config=config).run(
+    result = FeatureAwareProductEvidenceHarness(serp_config=serp_config, config=config).run(
         product,
         feature_schema=schema,
         return_trace=True,
