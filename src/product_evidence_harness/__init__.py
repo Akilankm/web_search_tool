@@ -37,6 +37,11 @@ from src.product_evidence_harness.feedback import ReviewFeedbackRecord, ReviewFe
 from src.product_evidence_harness.identity import ProductIdentityGraph, ProductIdentityGraphBuilder
 from src.product_evidence_harness.identity_verifier import ProductIdentityVerifier
 from src.product_evidence_harness.io import CSVProductIO
+from src.product_evidence_harness.legacy_compat import (
+    HarnessProductURLFinderPipeline,
+    HybridProductURLFinderPipeline,
+    ProductEvidenceHarness,
+)
 from src.product_evidence_harness.llm import ExactProductLLMAdjudicator, LLMConfig, LLMService
 from src.product_evidence_harness.logging_utils import RichPrinter, configure_logging
 from src.product_evidence_harness.one_credit_pipeline import (
@@ -48,12 +53,7 @@ from src.product_evidence_harness.production_url import ProductionURLAssessment,
 from src.product_evidence_harness.ranker import ProductURLRanker
 from src.product_evidence_harness.scraper import CrawlScraper
 from src.product_evidence_harness.schema_io import load_feature_schema
-from src.product_evidence_harness.tournament_pipeline import (
-    HarnessProductURLFinderPipeline,
-    HybridProductURLFinderPipeline,
-    ProductEvidenceHarness,
-    TournamentAwareProductEvidenceHarness,
-)
+from src.product_evidence_harness.tournament_pipeline import TournamentAwareProductEvidenceHarness
 
 FeatureAwareProductEvidenceHarness = OneCreditProductEvidenceHarness
 LegacyTournamentProductEvidenceHarness = TournamentAwareProductEvidenceHarness
