@@ -25,7 +25,7 @@ def valid_env() -> str:
             "PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING=false",
             "LLM_API_KEY=llm_key_with_more_than_sixteen_chars",
             "LLM_API_VERSION=2025-01-01-preview",
-            "LLM_ENDPOINT=https://approved.example.net/",
+            "LLM_ENDPOINT=https://approved.company.net/",
             "LLM_DEPLOYMENT=vision-deployment",
             "AGENT_HOST_PORT=8788",
             "",
