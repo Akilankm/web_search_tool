@@ -1,195 +1,103 @@
-# Product Evidence Harness
+# Product Evidence Platform
 
-A cost-bounded workflow for exact product URL discovery and feature-aware product coding.
-
-## Core workflow
+A two-container product evidence system for Azure ML Compute Instances.
 
 ```text
-Product identity inputs
-  -> exactly one SerpAPI search
-  -> harvest every useful URL from that response
-  -> normalize and rank the candidate pool
-  -> scrape selected candidates locally
-  -> verify exact product identity
-  -> extract evidence for the requested feature list
-  -> select one primary URL plus only useful supplementary URLs
-  -> coding-ready or review-required decision
+Notebook / API client
+        -> Agent container
+             -> one SerpAPI identity search
+             -> static extraction and exact-product validation
+             -> private feature-gap analysis
+             -> Browser container on demand
+                    -> Playwright rendering and safe interaction
+                    -> direct image acquisition
+                    -> element/viewport screenshot fallback
+             -> multimodal LLM reasoning
+             -> primary URL + supplementary evidence URLs
+             -> coding-ready or review-required dossier
 ```
 
-| Stage | Uses feature list? | Objective |
-|---|:---:|---|
-| SerpAPI search | No | Discover exact-product candidate URLs from identity inputs |
-| Candidate preflight | No | Prioritize likely exact product pages |
-| Scraping | Yes | Retain evidence relevant to requested features |
-| Evidence evaluation | Yes | Map page evidence to features and detect gaps/conflicts |
-| Coding handoff | Yes | Produce feature values with URL-level provenance |
+## Responsibility boundaries
 
-The production workflow permits one SerpAPI request per product. It does not paginate, retry with another query, invoke AI Mode, or call a second search provider.
+| Service | Owns |
+|---|---|
+| Agent | Product inputs, private feature files, SerpAPI, static scraping, identity verification, LLM/vision reasoning, final outputs |
+| Browser | Rendering, safe overlay handling, section expansion, gallery interaction, image download, screenshots, action trace |
+| Notebook | Input preparation, job submission, progress monitoring, evidence inspection |
 
-## Secure environment setup
+The browser service never receives the proprietary feature schema. It receives only product identity and generic evidence-acquisition categories.
+
+## Azure ML Compute Instance workflow
 
 ```bash
 cp .env.example .env
 chmod 600 .env
-python scripts/validate_environment.py --env-file .env
+mkdir -p inputs/private artifacts secrets
+cp /secure/location/my_feature_set.json inputs/private/toy_features.json
+./scripts/azureml_startup.sh
 ```
 
-Store SerpAPI and optional LLM credentials only in `.env` or managed process-level secret injection. The production runners validate configuration before any paid request.
+The startup script verifies Docker daemon access, generates the internal browser-service token when missing, builds both images, starts Compose, and waits for the agent health endpoint.
 
-## Inputs
+Open `notebooks/01_run_product_evidence.ipynb` in Azure ML Studio and submit jobs to:
 
-### Product input
+```text
+http://127.0.0.1:8788
+```
 
-| Field | Required | Purpose |
-|---|:---:|---|
-| `row_id` | Recommended | Stable product identifier |
-| `main_text` | Yes | Product identity text |
-| `country_code` | Yes | Target market |
-| `ean` / `gtin` | No | Exact identity anchor |
-| `retailer_name` | No | Preferred retailer signal |
-| `language_code` | No | Search and extraction language override |
+## Private feature input
 
-### Feature input
-
-The external feature file is intentionally minimal.
+Store private feature files under `inputs/private/`. The notebook sends only a logical name:
 
 ```json
 {
-  "features_to_code": [
-    "brand",
-    "manufacturer",
-    "product type",
-    "minimum recommended age",
-    {
-      "name": "material",
-      "description": "Primary material used to manufacture the toy"
-    },
-    "battery required"
-  ]
+  "product": {
+    "row_id": "ROW-001",
+    "main_text": "Product identity text",
+    "country_code": "CH",
+    "retailer_name": "Preferred retailer",
+    "ean": "1234567890123"
+  },
+  "feature_set": "toy_features"
 }
 ```
 
-Each entry must be one of:
+The agent resolves `toy_features` to `/data/private/toy_features.json` inside the agent container.
 
-```json
-"brand"
-```
+## Browser fallback ladder
 
-or:
+1. Static HTML and structured data.
+2. Browser rendering.
+3. Safe overlay dismissal.
+4. Product-detail/specification expansion.
+5. Direct image download with browser cookies and referer.
+6. Gallery interaction.
+7. Product-element screenshot.
+8. Viewport screenshot fallback.
+9. Vision reasoning over validated assets.
 
-```json
-{
-  "name": "material",
-  "description": "Primary material used to manufacture the toy"
-}
-```
+CAPTCHA, login walls, paywalls, checkout actions, credential entry, and arbitrary navigation are not bypassed.
 
-Only `name` and optional `description` are accepted for a feature object. No schema ID, feature ID, value type, criticality, aliases, thresholds, or allowed values are required from the user.
-
-The loader derives the internal representation automatically:
-
-- a stable normalized feature ID, such as `minimum recommended age` -> `MINIMUM_RECOMMENDED_AGE`;
-- the feature name exactly as supplied;
-- `text` as the default internal value type;
-- `required` as the default internal criticality;
-- the feature name as the initial extraction alias;
-- `100%` requested-feature coverage as the coding-ready threshold.
-
-The description is optional and is used only as extraction context. Adding a new feature requires adding another string or `{name, description}` object to `features_to_code`.
-
-The feature list is never added to the SerpAPI query. It is introduced only after candidate discovery and drives scraping, evidence extraction, coverage measurement, and supplementary-source selection.
-
-## Single-product run
+## Commands
 
 ```bash
-python main.py \
-  --row-id CH-TOY-0001 \
-  --main-text "Hitster Original Musik-Partyspiel" \
-  --country-code CH \
-  --retailer-name "Orell Füssli" \
-  --ean 8710126198872 \
-  --feature-schema examples/toy_feature_schema.json
+docker compose up -d --build
+docker compose ps
+docker compose logs -f agent browser
+python scripts/wait_for_stack.py
 ```
 
-Python API:
-
-```python
-import os
-
-from product_evidence_harness import (
-    FeatureAwareProductEvidenceHarness,
-    HarnessConfig,
-    LLMFeatureReasoner,
-    ProductQuery,
-    SerpAPIConfig,
-    load_feature_schema,
-    validate_runtime_environment,
-)
-
-environment = validate_runtime_environment(".env")
-product = ProductQuery(
-    row_id="CH-TOY-0001",
-    main_text="Hitster Original Musik-Partyspiel",
-    country_code="CH",
-    retailer_name="Orell Füssli",
-    ean="8710126198872",
-)
-
-features = load_feature_schema("examples/toy_feature_schema.json")
-reasoner = None
-if environment.llm_feature_reasoning_enabled:
-    reasoner = LLMFeatureReasoner.from_env(
-        max_calls=int(os.getenv("PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT", "2"))
-    )
-
-harness = FeatureAwareProductEvidenceHarness(
-    serp_config=SerpAPIConfig.from_env(country_code="CH", language_code="de"),
-    config=HarnessConfig.from_env(".env"),
-    feature_reasoner=reasoner,
-)
-result = harness.run(product, feature_schema=features, return_trace=True)
-```
-
-## Batch run
+Stop without deleting artifacts:
 
 ```bash
-python batch_main.py \
-  --input data/products.xlsx \
-  --feature-schema examples/toy_feature_schema.json \
-  --output outputs/final_submission.csv \
-  --workers 4
+docker compose down
 ```
-
-## Outputs
-
-Per product:
-
-```text
-output/<row_id>/
-├── result.json
-├── candidates.csv
-├── feature_evidence.csv
-└── review.md
-```
-
-Batch:
-
-```text
-outputs/
-├── final_submission.csv
-├── review_queue.csv
-├── metrics.json
-└── batch_summary.md
-```
-
-A candidate URL must first pass exact-product identity acceptance. Multiple URLs are retained only when an additional exact-product source adds evidence for requested features not covered by the primary URL.
 
 ## Validation
 
 ```bash
-PYTHONPATH=src python -m compileall -q src scripts main.py batch_main.py
-PYTHONPATH=src pytest -q tests/test_simple_feature_schema.py
+PYTHONPATH=src python -m compileall -q src scripts
 PYTHONPATH=src pytest -q
 ```
 
-The canonical operating reference is in [`docs/README.md`](docs/README.md), and secret-handling procedures are in [`docs/SECURE_ENVIRONMENT.md`](docs/SECURE_ENVIRONMENT.md).
+See [`docs/README.md`](docs/README.md) for the full operating contract.
