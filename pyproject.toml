@@ -1,48 +1,29 @@
 [project]
-name = "product-evidence-harness"
-version = "0.5.0"
-description = "Two-container product evidence platform with one-credit search, controlled browser acquisition, and multimodal coding evidence"
+name = "product-evidence-platform"
+version = "0.6.0"
+description = "Azure ML two-container product evidence platform with one-credit search and controlled multimodal browser acquisition"
 requires-python = ">=3.10,<3.12"
 dependencies = [
-    "requests>=2.32.0",
-    "python-dotenv>=1.0.1",
-    "loguru>=0.7.2",
-    "rich>=13.7.1",
-    "crawl4ai>=0.8.9",
-    "nest-asyncio>=1.6.0",
-    "pandas>=2.2.0",
-    "openpyxl>=3.1.5",
-    "tqdm>=4.66.0",
-    "openai>=1.0.0",
-    "httpx>=0.27.0",
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.30.0",
+    "requests>=2.32.0,<3",
+    "python-dotenv>=1.0.1,<2",
+    "loguru>=0.7.2,<1",
+    "rich>=13.7.1,<15",
+    "pandas>=2.2.0,<3",
+    "openpyxl>=3.1.5,<4",
+    "tqdm>=4.66.0,<5",
+    "openai>=1.0.0,<3",
+    "httpx>=0.27.0,<1",
+    "fastapi>=0.115.0,<1",
+    "uvicorn[standard]>=0.30.0,<1",
     "playwright==1.52.0",
-    "pillow>=11.0.0",
+    "pillow>=11.0.0,<12",
 ]
 
 [dependency-groups]
-notebook = [
-    "ipykernel>=6.29.5",
-    "jupyter-client>=8.6.3",
-    "jupyter-core>=5.7.2",
-    "traitlets>=5.14.3",
-    "comm>=0.2.2",
-    "debugpy>=1.8.9",
-    "nest-asyncio>=1.6.0",
-    "matplotlib-inline>=0.1.7",
-    "ipython>=8.18.1",
-    "jedi>=0.19.2",
-    "prompt-toolkit>=3.0.48",
-    "pygments>=2.18.0",
-]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.25.0",
+    "pytest>=8.0.0,<9",
+    "pytest-asyncio>=0.25.0,<1",
 ]
-
-[tool.pdm]
-distribution = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
