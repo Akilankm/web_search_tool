@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -21,9 +22,11 @@ from product_evidence_harness import (  # noqa: E402
     CSVProductIO,
     FeatureAwareProductEvidenceHarness,
     HarnessConfig,
+    LLMFeatureReasoner,
     SerpAPIConfig,
     configure_logging,
     load_feature_schema,
+    validate_runtime_environment,
 )
 
 
@@ -38,7 +41,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def process(product, schema, env_file: str) -> dict[str, Any]:
+def process(product, schema, env_file: str, *, llm_enabled: bool, llm_max_calls: int) -> dict[str, Any]:
     try:
         config = HarnessConfig.from_env(env_file)
         serp_config = SerpAPIConfig.from_env(
@@ -47,7 +50,12 @@ def process(product, schema, env_file: str) -> dict[str, Any]:
             env_file=env_file,
             no_cache=False,
         )
-        result = FeatureAwareProductEvidenceHarness(serp_config=serp_config, config=config).run(
+        reasoner = LLMFeatureReasoner.from_env(max_calls=llm_max_calls) if llm_enabled else None
+        result = FeatureAwareProductEvidenceHarness(
+            serp_config=serp_config,
+            config=config,
+            feature_reasoner=reasoner,
+        ).run(
             product,
             feature_schema=schema,
             return_trace=True,
@@ -68,6 +76,7 @@ def process(product, schema, env_file: str) -> dict[str, Any]:
             "confidence": match.confidence,
             "serpapi_requests_used": match.organic_calls_used,
             "scrape_calls_used": match.scrape_calls_used,
+            "llm_feature_reasoning_enabled": llm_enabled,
             "coding_status": evidence_set.status if evidence_set else "FEATURE_SCHEMA_NOT_EVALUATED",
             "coding_ready": evidence_set.coding_ready if evidence_set else False,
             "primary_evidence_url": evidence_set.primary_url if evidence_set else None,
@@ -97,6 +106,7 @@ def process(product, schema, env_file: str) -> dict[str, Any]:
             "confidence": 0.0,
             "serpapi_requests_used": 0,
             "scrape_calls_used": 0,
+            "llm_feature_reasoning_enabled": llm_enabled,
             "coding_status": "ERROR",
             "coding_ready": False,
             "primary_evidence_url": None,
@@ -113,7 +123,7 @@ def process(product, schema, env_file: str) -> dict[str, Any]:
         }
 
 
-def write_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
+def write_summary(output_dir: Path, rows: list[dict[str, Any]], *, environment_checks: tuple[str, ...]) -> None:
     total = len(rows)
     resolved = sum(bool(row.get("product_url")) for row in rows)
     coding_ready = sum(bool(row.get("coding_ready")) for row in rows)
@@ -127,6 +137,7 @@ def write_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
         "serpapi_requests_used": serp_calls,
         "average_serpapi_requests_per_product": round(serp_calls / max(1, total), 4),
         "one_credit_contract_respected": all(int(row.get("serpapi_requests_used") or 0) <= 1 for row in rows),
+        "environment_checks": list(environment_checks),
     }
     (output_dir / "metrics.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     lines = [
@@ -148,6 +159,11 @@ def write_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
 def main() -> None:
     args = parse_args()
     configure_logging(args.log_level)
+
+    # Validate exactly once before creating worker threads or making paid calls.
+    environment = validate_runtime_environment(args.env_file)
+    llm_max_calls = int(os.getenv("PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT", "2"))
+
     products = CSVProductIO.read_products(args.input)
     schema = load_feature_schema(args.feature_schema)
     output_path = Path(args.output)
@@ -156,7 +172,17 @@ def main() -> None:
     rows: list[dict[str, Any]] = []
     workers = max(1, int(args.workers))
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(process, product, schema, args.env_file): product.row_id for product in products}
+        futures = {
+            pool.submit(
+                process,
+                product,
+                schema,
+                args.env_file,
+                llm_enabled=environment.llm_feature_reasoning_enabled,
+                llm_max_calls=llm_max_calls,
+            ): product.row_id
+            for product in products
+        }
         for future in tqdm(as_completed(futures), total=len(futures), desc="Products"):
             rows.append(future.result())
 
@@ -166,7 +192,7 @@ def main() -> None:
     frame.to_csv(output_path, index=False)
     review = frame[(frame["coding_ready"] != True) | (frame["status"] == "error")]  # noqa: E712
     review.to_csv(output_path.parent / "review_queue.csv", index=False)
-    write_summary(output_path.parent, rows)
+    write_summary(output_path.parent, rows, environment_checks=environment.checks_passed)
     print(f"Wrote {output_path}")
 
 
