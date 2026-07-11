@@ -1,0 +1,9 @@
+{
+  "features_to_code": [
+    "feature one",
+    {
+      "name": "feature two",
+      "description": "Optional private guidance used only after candidate discovery"
+    }
+  ]
+}

@@ -1,9 +1,0 @@
-{
-  "features_to_code": [
-    "feature_a",
-    {
-      "name": "feature_b",
-      "description": "Optional internal extraction guidance"
-    }
-  ]
-}

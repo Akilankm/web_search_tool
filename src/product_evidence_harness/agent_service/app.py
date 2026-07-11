@@ -7,21 +7,58 @@ from fastapi import FastAPI, HTTPException
 
 from src.product_evidence_harness.agent_service.jobs import InMemoryJobStore, JobStatus
 from src.product_evidence_harness.agent_service.orchestrator import ProductEvidenceOrchestrator
+from src.product_evidence_harness.environment import validate_runtime_environment
+from src.product_evidence_harness.llm.service import LLMConfig
 
 
-app = FastAPI(title="Product Evidence Agent", version="0.5.0")
+app = FastAPI(title="Product Evidence Agent", version="0.6.0")
 store = InMemoryJobStore()
 executor = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("AGENT_WORKERS", "2"))))
 orchestrator = ProductEvidenceOrchestrator()
 
 
+def _validate_runtime() -> tuple[dict | None, str | None]:
+    try:
+        report = validate_runtime_environment(
+            None,
+            strict_file_permissions=False,
+        )
+        vision_enabled = os.getenv("PRODUCT_HARNESS_ENABLE_VISION_REASONING", "true").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if vision_enabled:
+            LLMConfig.from_env()
+        return report.to_dict(), None
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+
 @app.get("/health")
 def health() -> dict:
-    return orchestrator.health()
+    configuration, configuration_error = _validate_runtime()
+    service = orchestrator.health()
+    if configuration_error:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "unhealthy",
+                "configuration_error": configuration_error,
+                "browser_service": service.get("browser_service"),
+            },
+        )
+    if service.get("status") != "healthy":
+        raise HTTPException(status_code=503, detail=service)
+    return {**service, "configuration": configuration}
 
 
 @app.post("/v1/jobs", status_code=202)
 def create_job(payload: dict) -> dict:
+    _configuration, configuration_error = _validate_runtime()
+    if configuration_error:
+        raise HTTPException(status_code=503, detail=configuration_error)
     requested_id = str(payload.get("row_id") or payload.get("product", {}).get("row_id") or "job")
     record = store.create(payload, requested_id=requested_id)
     executor.submit(_run_job, record.job_id)

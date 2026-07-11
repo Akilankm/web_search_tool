@@ -1,103 +1,180 @@
 # Product Evidence Platform
 
-A two-container product evidence system for Azure ML Compute Instances.
+A production-oriented, two-container product evidence workflow designed for Azure ML Compute Instances.
 
 ```text
-Notebook / API client
-        -> Agent container
-             -> one SerpAPI identity search
-             -> static extraction and exact-product validation
-             -> private feature-gap analysis
-             -> Browser container on demand
-                    -> Playwright rendering and safe interaction
-                    -> direct image acquisition
-                    -> element/viewport screenshot fallback
-             -> multimodal LLM reasoning
-             -> primary URL + supplementary evidence URLs
-             -> coding-ready or review-required dossier
+Azure ML notebook
+  -> Agent container
+       -> one identity-only SerpAPI request
+       -> static extraction and exact-product validation
+       -> Browser container only when rendered or visual evidence is needed
+            -> Playwright interaction
+            -> direct image acquisition
+            -> screenshot fallback
+       -> text and vision reasoning
+       -> primary URL + supplementary evidence URLs
+       -> coding-ready or review-required dossier
 ```
 
-## Responsibility boundaries
+## One supported workflow
 
-| Service | Owns |
-|---|---|
-| Agent | Product inputs, private feature files, SerpAPI, static scraping, identity verification, LLM/vision reasoning, final outputs |
-| Browser | Rendering, safe overlay handling, section expansion, gallery interaction, image download, screenshots, action trace |
-| Notebook | Input preparation, job submission, progress monitoring, evidence inspection |
+This repository intentionally exposes:
 
-The browser service never receives the proprietary feature schema. It receives only product identity and generic evidence-acquisition categories.
+- one startup command: `./scripts/azureml_startup.sh`;
+- one notebook: `notebooks/01_run_product_evidence.ipynb`;
+- one agent API on `http://127.0.0.1:8788`;
+- one internal browser API available only inside Docker Compose.
 
-## Azure ML Compute Instance workflow
+Old direct-run notebooks and CLI entry points have been removed.
+
+## Fresh Azure ML setup
 
 ```bash
+git clone https://github.com/Akilankm/web_search_tool.git
+cd web_search_tool
+
 cp .env.example .env
 chmod 600 .env
-mkdir -p inputs/private artifacts secrets
-cp /secure/location/my_feature_set.json inputs/private/toy_features.json
-./scripts/azureml_startup.sh
 ```
 
-The startup script verifies Docker daemon access, generates the internal browser-service token when missing, builds both images, starts Compose, and waits for the agent health endpoint.
+Replace every placeholder in `.env`, including the SerpAPI and LLM settings.
 
-Open `notebooks/01_run_product_evidence.ipynb` in Azure ML Studio and submit jobs to:
+Add your private feature set:
 
-```text
-http://127.0.0.1:8788
+```bash
+mkdir -p inputs/private
+cp /secure/location/toy_features.json inputs/private/toy_features.json
 ```
 
-## Private feature input
-
-Store private feature files under `inputs/private/`. The notebook sends only a logical name:
+Feature-file contract:
 
 ```json
 {
-  "product": {
-    "row_id": "ROW-001",
-    "main_text": "Product identity text",
-    "country_code": "CH",
-    "retailer_name": "Preferred retailer",
-    "ean": "1234567890123"
-  },
-  "feature_set": "toy_features"
+  "features_to_code": [
+    "private feature name",
+    {
+      "name": "another private feature",
+      "description": "Optional extraction guidance"
+    }
+  ]
 }
 ```
 
-The agent resolves `toy_features` to `/data/private/toy_features.json` inside the agent container.
+Start the complete platform:
+
+```bash
+./scripts/azureml_startup.sh
+```
+
+The command validates configuration and Docker access, builds both images, starts both services, waits for health, and prints logs automatically if startup fails.
+
+Then open:
+
+```text
+notebooks/01_run_product_evidence.ipynb
+```
+
+Set the notebook's `FEATURE_SET` to the feature-file name without `.json`.
+
+## Azure ML prerequisites
+
+These commands must succeed on the Compute Instance:
+
+```bash
+docker info
+docker compose version
+docker ps
+```
+
+Recommended starting capacity:
+
+- 4 vCPU;
+- 16 GB RAM;
+- outbound access to SerpAPI, the approved LLM endpoint, public product pages, image CDNs, and container registries.
+
+If Docker reports permission denied for `/var/run/docker.sock`, an Azure ML administrator must enable Docker access before the platform can start.
+
+## Service responsibilities
+
+| Service | Responsibility |
+|---|---|
+| Agent | Private feature files, SerpAPI, static extraction, identity validation, LLM/vision reasoning, source selection, outputs |
+| Browser | Rendering, safe overlay handling, section expansion, gallery interaction, image downloads, screenshots, action traces |
+| Notebook | Input preparation, job submission, progress monitoring, result inspection, optional CSV batching |
+
+The browser never receives the private feature schema or SerpAPI/LLM credentials.
 
 ## Browser fallback ladder
 
 1. Static HTML and structured data.
 2. Browser rendering.
-3. Safe overlay dismissal.
+3. Ordinary overlay dismissal.
 4. Product-detail/specification expansion.
-5. Direct image download with browser cookies and referer.
+5. Direct image download using browser context.
 6. Gallery interaction.
 7. Product-element screenshot.
 8. Viewport screenshot fallback.
 9. Vision reasoning over validated assets.
 
-CAPTCHA, login walls, paywalls, checkout actions, credential entry, and arbitrary navigation are not bypassed.
+CAPTCHA, login walls, paywalls, purchases, credential entry, and anti-bot bypass are outside the browser contract.
 
-## Commands
+## Repository layout
 
-```bash
-docker compose up -d --build
-docker compose ps
-docker compose logs -f agent browser
-python scripts/wait_for_stack.py
+```text
+.
+├── docker-compose.yml
+├── docker/
+│   ├── agent.Dockerfile
+│   └── browser.Dockerfile
+├── requirements/
+│   ├── agent.txt
+│   ├── browser.txt
+│   └── test.txt
+├── scripts/
+│   ├── azureml_startup.sh
+│   ├── preflight_azureml.py
+│   └── wait_for_stack.py
+├── notebooks/
+│   └── 01_run_product_evidence.ipynb
+├── examples/
+│   └── features_to_code.example.json
+├── docs/
+│   ├── AZUREML_OPERATIONS.md
+│   └── SECURITY.md
+├── src/product_evidence_harness/
+├── tests/
+├── inputs/private/     # ignored by Git
+└── artifacts/          # ignored by Git
 ```
 
-Stop without deleting artifacts:
+## Operations
 
 ```bash
+# Status
+docker compose ps
+
+# Logs
+docker compose logs -f --tail=200 agent browser
+
+# Stop without deleting artifacts
 docker compose down
+
+# Rebuild after a pull
+git pull
+docker compose down
+./scripts/azureml_startup.sh
 ```
 
 ## Validation
 
 ```bash
-PYTHONPATH=src python -m compileall -q src scripts
-PYTHONPATH=src pytest -q
+python -m compileall -q src scripts
+python -m json.tool notebooks/01_run_product_evidence.ipynb >/dev/null
+python -m pytest -q
+docker compose config --quiet
 ```
 
-See [`docs/README.md`](docs/README.md) for the full operating contract.
+## Documentation
+
+- [Azure ML operations runbook](docs/AZUREML_OPERATIONS.md)
+- [Security contract](docs/SECURITY.md)
