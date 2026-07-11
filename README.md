@@ -1,8 +1,8 @@
 # Product Evidence Harness
 
-A cost-bounded product evidence workflow for exact product URL discovery and feature-aware product coding.
+A cost-bounded workflow for exact product URL discovery and feature-aware product coding.
 
-## Core contract
+## Core workflow
 
 ```text
 Product identity inputs
@@ -11,7 +11,7 @@ Product identity inputs
   -> normalize and rank the candidate pool
   -> scrape selected candidates locally
   -> verify exact product identity
-  -> extract evidence for the known feature schema
+  -> extract evidence for the requested feature list
   -> select one primary URL plus only useful supplementary URLs
   -> coding-ready or review-required decision
 ```
@@ -20,48 +20,21 @@ Product identity inputs
 |---|:---:|---|
 | SerpAPI search | No | Discover exact-product candidate URLs from identity inputs |
 | Candidate preflight | No | Prioritize likely exact product pages |
-| Scraping | Yes | Retain evidence relevant to required features |
+| Scraping | Yes | Retain evidence relevant to requested features |
 | Evidence evaluation | Yes | Map page evidence to features and detect gaps/conflicts |
 | Coding handoff | Yes | Produce feature values with URL-level provenance |
 
-The production workflow enforces **one successful SerpAPI request per product**. It does not paginate, retry with another query, invoke AI Mode, or call a second search provider.
+The production workflow permits one SerpAPI request per product. It does not paginate, retry with another query, invoke AI Mode, or call a second search provider.
 
 ## Secure environment setup
 
 ```bash
 cp .env.example .env
 chmod 600 .env
+python scripts/validate_environment.py --env-file .env
 ```
 
-Store SerpAPI and optional LLM credentials only in `.env` or in process-level secret injection. Never place keys in notebooks, YAML files, source code, command-line arguments, reports, or logs.
-
-Before any paid request, both production runners call `validate_runtime_environment()`. It fails closed when it detects:
-
-- missing, placeholder, malformed, or whitespace-containing secrets;
-- duplicate `.env` keys;
-- symlinked or group/world-readable local `.env` files;
-- conflicting `AZURE_OPENAI_*` and `LLM_*` aliases;
-- non-HTTPS, credential-bearing, or loopback LLM endpoints;
-- invalid timeout, retry, token, temperature, or call-budget values;
-- tournament mode, AI Mode, LLM search planning, or more than one organic search;
-- configuration that violates the `one_credit_feature_aware` workflow identity.
-
-The validation report contains only booleans and check names. Secret values are never returned.
-
-### Optional LLM boundary
-
-`PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING=false` by default. When enabled:
-
-1. the product URL must already pass deterministic identity acceptance;
-2. the page must already be scraped locally;
-3. the LLM receives only bounded scraped-page evidence and missing feature definitions;
-4. the LLM cannot search or follow URLs;
-5. closed-set values must match the declared allowed values exactly;
-6. every accepted LLM value must include a quote found in the scraped page text;
-7. LLM confidence is capped below deterministic structured evidence;
-8. calls are bounded by `PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT`.
-
-This is defense-in-depth configuration hardening, not a claim of formal military or government security certification.
+Store SerpAPI and optional LLM credentials only in `.env` or managed process-level secret injection. The production runners validate configuration before any paid request.
 
 ## Inputs
 
@@ -76,32 +49,55 @@ This is defense-in-depth configuration hardening, not a claim of formal military
 | `retailer_name` | No | Preferred retailer signal |
 | `language_code` | No | Search and extraction language override |
 
-### Feature schema
+### Feature input
+
+The external feature file is intentionally minimal.
 
 ```json
 {
-  "schema_id": "toy-board-game-v1",
-  "pg_name": "BOARD_GAMES",
-  "required_coverage_threshold": 0.8,
-  "features": [
+  "features_to_code": [
+    "brand",
+    "manufacturer",
+    "product type",
+    "minimum recommended age",
     {
-      "feature_id": "MIN_AGE",
-      "feature_name": "Minimum recommended age",
-      "value_type": "integer",
-      "criticality": "critical",
-      "aliases": ["recommended age", "age from"]
+      "name": "material",
+      "description": "Primary material used to manufacture the toy"
     },
-    {
-      "feature_id": "MATERIAL",
-      "feature_name": "Material",
-      "value_type": "text",
-      "criticality": "required"
-    }
+    "battery required"
   ]
 }
 ```
 
-The feature list is intentionally **not added to the SerpAPI query**. It is introduced after candidate discovery and drives scraping, evidence extraction, coverage measurement, and supplementary-source selection.
+Each entry must be one of:
+
+```json
+"brand"
+```
+
+or:
+
+```json
+{
+  "name": "material",
+  "description": "Primary material used to manufacture the toy"
+}
+```
+
+Only `name` and optional `description` are accepted for a feature object. No schema ID, feature ID, value type, criticality, aliases, thresholds, or allowed values are required from the user.
+
+The loader derives the internal representation automatically:
+
+- a stable normalized feature ID, such as `minimum recommended age` -> `MINIMUM_RECOMMENDED_AGE`;
+- the feature name exactly as supplied;
+- `text` as the default internal value type;
+- `required` as the default internal criticality;
+- the feature name as the initial extraction alias;
+- `100%` requested-feature coverage as the coding-ready threshold.
+
+The description is optional and is used only as extraction context. Adding a new feature requires adding another string or `{name, description}` object to `features_to_code`.
+
+The feature list is never added to the SerpAPI query. It is introduced only after candidate discovery and drives scraping, evidence extraction, coverage measurement, and supplementary-source selection.
 
 ## Single-product run
 
@@ -139,7 +135,7 @@ product = ProductQuery(
     ean="8710126198872",
 )
 
-schema = load_feature_schema("examples/toy_feature_schema.json")
+features = load_feature_schema("examples/toy_feature_schema.json")
 reasoner = None
 if environment.llm_feature_reasoning_enabled:
     reasoner = LLMFeatureReasoner.from_env(
@@ -151,10 +147,7 @@ harness = FeatureAwareProductEvidenceHarness(
     config=HarnessConfig.from_env(".env"),
     feature_reasoner=reasoner,
 )
-result = harness.run(product, feature_schema=schema, return_trace=True)
-
-print(result.best_match.product_url)
-print(result.evidence_set.to_dict())
+result = harness.run(product, feature_schema=features, return_trace=True)
 ```
 
 ## Batch run
@@ -167,17 +160,9 @@ python batch_main.py \
   --workers 4
 ```
 
-Batch output includes:
+## Outputs
 
-- final product URL and review fallback;
-- SerpAPI requests used;
-- primary evidence URL;
-- supplementary evidence URLs;
-- required and critical feature coverage;
-- missing and conflicting features;
-- coding-ready status.
-
-## Per-product artifacts
+Per product:
 
 ```text
 output/<row_id>/
@@ -187,30 +172,24 @@ output/<row_id>/
 └── review.md
 ```
 
-`result.json` is the complete machine-readable decision. `review.md` is the first file for human review.
+Batch:
 
-## Acceptance model
+```text
+outputs/
+├── final_submission.csv
+├── review_queue.csv
+├── metrics.json
+└── batch_summary.md
+```
 
-A candidate URL is evaluated in two independent stages:
+A candidate URL must first pass exact-product identity acceptance. Multiple URLs are retained only when an additional exact-product source adds evidence for requested features not covered by the primary URL.
 
-1. **Identity acceptance:** exact product, correct variant, valid product page, accessible and scrapable.
-2. **Feature utility:** explicit or structured evidence for one or more required features.
-
-A rich page for the wrong product is always rejected. Multiple exact-product URLs may be retained only when they add feature evidence not covered by the primary source.
-
-## Compatibility
-
-`ProductEvidenceHarness` remains as the legacy-compatible review workflow for existing consumers. `LegacyTournamentProductEvidenceHarness` exposes the previous tournament implementation explicitly. New development should use `FeatureAwareProductEvidenceHarness`.
-
-## Documentation and validation
-
-The complete operating reference is in [`docs/README.md`](docs/README.md).
+## Validation
 
 ```bash
-PYTHONPATH=src python -m compileall -q src main.py batch_main.py
-PYTHONPATH=src pytest -q tests/test_environment_security.py
-PYTHONPATH=src pytest -q tests/test_llm_feature_reasoner.py
-PYTHONPATH=src pytest -q tests/test_serp_harvester.py
-PYTHONPATH=src pytest -q tests/test_one_credit_feature_workflow.py
+PYTHONPATH=src python -m compileall -q src scripts main.py batch_main.py
+PYTHONPATH=src pytest -q tests/test_simple_feature_schema.py
 PYTHONPATH=src pytest -q
 ```
+
+The canonical operating reference is in [`docs/README.md`](docs/README.md), and secret-handling procedures are in [`docs/SECURE_ENVIRONMENT.md`](docs/SECURE_ENVIRONMENT.md).
