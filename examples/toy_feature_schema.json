@@ -1,16 +1,9 @@
 {
   "features_to_code": [
-    "brand",
-    "manufacturer",
-    "product type",
-    "minimum recommended age",
+    "feature_a",
     {
-      "name": "material",
-      "description": "Primary material used to manufacture the toy"
-    },
-    "battery required",
-    "number of players",
-    "play duration",
-    "language"
+      "name": "feature_b",
+      "description": "Optional internal extraction guidance"
+    }
   ]
 }
