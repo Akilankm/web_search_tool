@@ -14,13 +14,8 @@ from src.product_evidence_harness.constants import (
     SERPAPI_OUTPUT_JSON,
     SERPAPI_SEARCH_URL,
 )
-from src.product_evidence_harness.contracts import (
-    AIReference,
-    OrganicSearchResponse,
-    OrganicSearchResult,
-    ProductQuery,
-    SerpAIResponse,
-)
+from src.product_evidence_harness.contracts import AIReference, OrganicSearchResponse, ProductQuery, SerpAIResponse
+from src.product_evidence_harness.serp_harvester import GoogleSERPHarvester
 
 
 class SerpAPIClientError(RuntimeError):
@@ -47,14 +42,6 @@ class _BaseSerpClient:
         language_code: Optional[str] = None,
         country_code: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Build SerpAPI parameters from an explicit execution context.
-
-        Scope is intentionally honored here. Older versions labelled a query as
-        global but still sent the product country in ``gl``. That made global
-        fallback country-biased. For ``scope=global`` we omit ``gl`` and
-        location by default, and use an English/global language unless the
-        planned query provided another language.
-        """
         scope_l = (scope or "country").lower()
         hl = (language_code or (product.language_code if product and product.language_code else self.config.language_code) or "en").lower()
         params: dict[str, Any] = {
@@ -104,12 +91,29 @@ class _BaseSerpClient:
 
 @dataclass
 class GoogleOrganicSearchClient(_BaseSerpClient):
-    def search(self, query: str, *, product: Optional[ProductQuery] = None, scope: str = "country", language_code: Optional[str] = None, country_code: Optional[str] = None) -> OrganicSearchResponse:
+    harvester: GoogleSERPHarvester = field(default_factory=GoogleSERPHarvester)
+
+    def search(
+        self,
+        query: str,
+        *,
+        product: Optional[ProductQuery] = None,
+        scope: str = "country",
+        language_code: Optional[str] = None,
+        country_code: Optional[str] = None,
+    ) -> OrganicSearchResponse:
         if not query.strip():
             raise ValueError("query cannot be empty")
-        params = self._params(engine=SERPAPI_ENGINE_GOOGLE, query=query, product=product, scope=scope, language_code=language_code, country_code=country_code)
+        params = self._params(
+            engine=SERPAPI_ENGINE_GOOGLE,
+            query=query,
+            product=product,
+            scope=scope,
+            language_code=language_code,
+            country_code=country_code,
+        )
         params["num"] = self.config.organic_num_results
-        logger.info("Organic search | scope={} | hl={} | query={}", scope, params.get("hl"), query)
+        logger.info("One-response organic search | scope={} | hl={} | query={}", scope, params.get("hl"), query)
         try:
             payload = self._get(params)
         except SerpAPINoResultsError as exc:
@@ -117,27 +121,24 @@ class GoogleOrganicSearchClient(_BaseSerpClient):
         metadata = payload.get("search_metadata", {}) or {}
         search_id = metadata.get("id")
         status = metadata.get("status", "Success")
-        results: list[OrganicSearchResult] = []
-        for item in payload.get("organic_results", []) or []:
-            if not isinstance(item, dict) or not item.get("link"):
-                continue
-            results.append(OrganicSearchResult(
-                url=str(item.get("link") or ""),
-                title=str(item.get("title") or ""),
-                snippet=str(item.get("snippet") or ""),
-                displayed_link=str(item.get("displayed_link") or ""),
-                source=str(item.get("source") or ""),
-                position=item.get("position"),
-                query=query,
-                search_id=search_id,
-                search_status=status,
-            ))
+        results = self.harvester.harvest(payload, query=query, search_id=search_id, status=status)
+        logger.info("Harvested {} candidate URL occurrences from one SerpAPI response", len(results))
         return OrganicSearchResponse(query=query, search_id=search_id, status=status, results=results, raw=payload)
 
 
 @dataclass
 class GoogleAIModeClient(_BaseSerpClient):
-    def search(self, query: str, *, product: Optional[ProductQuery] = None, scope: str = "country", language_code: Optional[str] = None, country_code: Optional[str] = None) -> SerpAIResponse:
+    """Legacy compatibility client; the default one-credit workflow does not call it."""
+
+    def search(
+        self,
+        query: str,
+        *,
+        product: Optional[ProductQuery] = None,
+        scope: str = "country",
+        language_code: Optional[str] = None,
+        country_code: Optional[str] = None,
+    ) -> SerpAIResponse:
         if not query.strip():
             raise ValueError("query cannot be empty")
         logger.info("AI Mode search | scope={} | hl={} | query_chars={}", scope, language_code or (product.language_code if product else self.config.language_code), len(query))
@@ -150,12 +151,14 @@ class GoogleAIModeClient(_BaseSerpClient):
         refs: list[AIReference] = []
         for ref in payload.get("references", []) or []:
             if isinstance(ref, dict):
-                refs.append(AIReference(
-                    title=str(ref.get("title") or ""),
-                    link=str(ref.get("link") or ref.get("url") or ""),
-                    source=str(ref.get("source") or ""),
-                    snippet=str(ref.get("snippet") or ""),
-                ))
+                refs.append(
+                    AIReference(
+                        title=str(ref.get("title") or ""),
+                        link=str(ref.get("link") or ref.get("url") or ""),
+                        source=str(ref.get("source") or ""),
+                        snippet=str(ref.get("snippet") or ""),
+                    )
+                )
         return SerpAIResponse(
             query=query,
             status=metadata.get("status", "Success"),
