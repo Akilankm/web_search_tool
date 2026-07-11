@@ -17,7 +17,9 @@ class EnvironmentValidationError(ValueError):
 
 _PLACEHOLDER_MARKERS = (
     "your_",
+    "your-",
     "replace_",
+    "replace-",
     "changeme",
     "change_me",
     "example",
@@ -29,11 +31,7 @@ _PLACEHOLDER_MARKERS = (
 
 _TRUE_VALUES = {"1", "true", "yes", "y", "on"}
 _FALSE_VALUES = {"0", "false", "no", "n", "off"}
-_SECRET_KEYS = {
-    "SERPAPI_API_KEY",
-    "AZURE_OPENAI_API_KEY",
-    "LLM_API_KEY",
-}
+_ENV_KEY_PATTERN = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +76,7 @@ def validate_runtime_environment(
             raise EnvironmentValidationError(f"Refusing symlinked environment file: {env_path}")
         if not env_path.is_file():
             raise EnvironmentValidationError(f"Environment path is not a regular file: {env_path}")
-        _reject_duplicate_keys(env_path)
+        _validate_env_file_syntax(env_path)
         if strict_file_permissions and os.name == "posix":
             _validate_file_permissions(env_path)
             permissions_checked = True
@@ -112,6 +110,9 @@ def validate_runtime_environment(
         _enforce_one_credit_settings(values)
         checks.append("one_credit_cost_controls_validated")
 
+    _validate_operational_settings(values)
+    checks.append("runtime_bounds_validated")
+
     llm_enabled = _strict_bool(values, "PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING", False)
     llm_configured = False
     if llm_enabled:
@@ -138,11 +139,13 @@ def _enforce_one_credit_settings(values: Mapping[str, str]) -> None:
         "PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE",
         "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_PLANNING",
         "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_FEEDBACK",
+        "PRODUCT_HARNESS_ENABLE_LLM",
+        "PRODUCT_HARNESS_ENABLE_LLM_ADJUDICATION",
     )
     enabled = [name for name in forbidden_true if _strict_bool(values, name, False)]
     if enabled:
         raise EnvironmentValidationError(
-            "One-credit workflow forbids these settings: " + ", ".join(enabled)
+            "One-credit workflow forbids legacy/expansive settings: " + ", ".join(enabled)
         )
 
     organic = _strict_int(values, "PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES", 1, minimum=1, maximum=1)
@@ -150,9 +153,37 @@ def _enforce_one_credit_settings(values: Mapping[str, str]) -> None:
     if organic != 1 or ai_mode != 0:  # defensive; bounds above already enforce this
         raise EnvironmentValidationError("One-credit workflow requires organic=1 and AI Mode=0")
 
-    results = _strict_int(values, "PRODUCT_HARNESS_SERP_RESULTS", 100, minimum=1, maximum=100)
-    if results > 100:
-        raise EnvironmentValidationError("PRODUCT_HARNESS_SERP_RESULTS cannot exceed 100")
+    _strict_int(values, "PRODUCT_HARNESS_SERP_RESULTS", 100, minimum=1, maximum=100)
+    if _text(values, "PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS"):
+        _strict_int(values, "PRODUCT_HARNESS_TOURNAMENT_MAX_SERP_CREDITS", 1, minimum=0, maximum=1)
+
+
+def _validate_operational_settings(values: Mapping[str, str]) -> None:
+    _strict_int(values, "PRODUCT_HARNESS_MAX_SCRAPES", 8, minimum=1, maximum=30)
+    _strict_int(values, "PRODUCT_HARNESS_MAX_CANDIDATE_POOL", 30, minimum=1, maximum=100)
+    _strict_int(values, "PRODUCT_HARNESS_SCRAPE_CONCURRENCY", 4, minimum=1, maximum=16)
+    _strict_int(values, "PRODUCT_HARNESS_STATIC_TIMEOUT_SECONDS", 10, minimum=1, maximum=60)
+    _strict_int(values, "PRODUCT_HARNESS_CRAWL_PAGE_TIMEOUT_MS", 45000, minimum=5000, maximum=120000)
+    _strict_float(values, "PRODUCT_HARNESS_MIN_VERIFIED_CONFIDENCE", 0.80, minimum=0.0, maximum=1.0)
+    _strict_float(values, "PRODUCT_HARNESS_MIN_REVIEW_CONFIDENCE", 0.30, minimum=0.0, maximum=1.0)
+    for name, default in (
+        ("PRODUCT_HARNESS_STATIC_FETCH_FIRST", True),
+        ("PRODUCT_HARNESS_BROWSER_FALLBACK_ONLY", True),
+        ("PRODUCT_HARNESS_COUNTRY_FIRST", True),
+        ("PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK", True),
+        ("PRODUCT_HARNESS_ALLOW_EAN_CONFLICT", False),
+        ("PRODUCT_HARNESS_RETURN_REJECTED_REFERENCE_AS_PRODUCT_URL", False),
+        ("PRODUCT_HARNESS_WRITE_OUTPUTS", True),
+        ("PRODUCT_HARNESS_WRITE_REVIEW_PACK", True),
+        ("PRODUCT_HARNESS_WRITE_MARKDOWN_REPORTS", False),
+        ("PRODUCT_HARNESS_WRITE_TRACE_JSON", False),
+        ("PRODUCT_HARNESS_WRITE_DEBUG_CSVS", False),
+    ):
+        _strict_bool(values, name, default)
+
+    output_dir = _text(values, "PRODUCT_HARNESS_OUTPUT_DIR", "output")
+    if not output_dir or "\x00" in output_dir:
+        raise EnvironmentValidationError("PRODUCT_HARNESS_OUTPUT_DIR is invalid")
 
 
 def _validate_llm_environment(values: Mapping[str, str]) -> None:
@@ -160,11 +191,13 @@ def _validate_llm_environment(values: Mapping[str, str]) -> None:
     version = _coalesced(values, "AZURE_OPENAI_API_VERSION", "LLM_API_VERSION")
     endpoint = _coalesced(values, "AZURE_OPENAI_ENDPOINT", "LLM_ENDPOINT")
     deployment = _coalesced(values, "AZURE_OPENAI_DEPLOYMENT", "LLM_DEPLOYMENT")
+    consumer = _coalesced(values, "AZURE_OPENAI_CONSUMER_ID", "LLM_CONSUMER_ID")
 
     _validate_alias_consistency(values, "AZURE_OPENAI_API_KEY", "LLM_API_KEY")
     _validate_alias_consistency(values, "AZURE_OPENAI_API_VERSION", "LLM_API_VERSION")
     _validate_alias_consistency(values, "AZURE_OPENAI_ENDPOINT", "LLM_ENDPOINT")
     _validate_alias_consistency(values, "AZURE_OPENAI_DEPLOYMENT", "LLM_DEPLOYMENT")
+    _validate_alias_consistency(values, "AZURE_OPENAI_CONSUMER_ID", "LLM_CONSUMER_ID")
 
     _validate_secret("AZURE_OPENAI_API_KEY/LLM_API_KEY", key, minimum_length=16)
     if not version or _looks_like_placeholder(version):
@@ -173,6 +206,10 @@ def _validate_llm_environment(values: Mapping[str, str]) -> None:
         raise EnvironmentValidationError("LLM deployment is missing or still a placeholder")
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", deployment):
         raise EnvironmentValidationError("LLM deployment contains unsupported characters")
+    if consumer and _looks_like_placeholder(consumer):
+        raise EnvironmentValidationError("LLM consumer ID is still a placeholder")
+    if consumer and (len(consumer) > 256 or any(ord(ch) < 32 for ch in consumer)):
+        raise EnvironmentValidationError("LLM consumer ID is malformed")
 
     parsed = urlparse(endpoint)
     if parsed.scheme.lower() != "https" or not parsed.netloc:
@@ -217,21 +254,25 @@ def _looks_like_placeholder(value: str) -> bool:
     return not lowered or any(marker in lowered for marker in _PLACEHOLDER_MARKERS)
 
 
-def _reject_duplicate_keys(path: Path) -> None:
+def _validate_env_file_syntax(path: Path) -> None:
     seen: set[str] = set()
     duplicates: set[str] = set()
-    key_pattern = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    malformed_lines: list[int] = []
+    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
-        match = key_pattern.match(line)
+        match = _ENV_KEY_PATTERN.match(line)
         if not match:
+            malformed_lines.append(line_number)
             continue
         key = match.group(1)
         if key in seen:
             duplicates.add(key)
         seen.add(key)
+    if malformed_lines:
+        rendered = ", ".join(str(number) for number in malformed_lines[:10])
+        raise EnvironmentValidationError(f"Malformed .env assignment line(s): {rendered}")
     if duplicates:
         raise EnvironmentValidationError(
             "Duplicate environment keys are not allowed: " + ", ".join(sorted(duplicates))
