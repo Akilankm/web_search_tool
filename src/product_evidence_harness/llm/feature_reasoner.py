@@ -10,6 +10,7 @@ from loguru import logger
 
 from src.product_evidence_harness.contracts import ProductQuery, ScrapeResult
 from src.product_evidence_harness.feature_schema import (
+    FeatureDefinition,
     FeatureEvidence,
     FeatureEvidenceStatus,
     FeatureSchema,
@@ -48,25 +49,36 @@ class LLMFeatureReasoner:
     ) -> Sequence[FeatureEvidence]:
         missing_ids = {item.feature_id for item in deterministic_evidence if not item.supported}
         features = [feature for feature in schema.features if feature.feature_id in missing_ids]
-        if not features or not self._consume_call():
+        if not features:
             return ()
 
         page_text = self._page_text(scrape)
-        if not page_text:
+        if not page_text or not self._consume_call():
             return ()
 
-        prompt = self._build_prompt(product, features, page_text)
-        response = self.service.predict(
-            prompt,
-            system_prompt=(
-                "You extract product feature evidence from the supplied page text only. "
-                "Do not browse, infer, guess, use world knowledge, or follow URLs. "
-                "Return strict JSON matching the requested schema."
-            ),
-            response_format={"type": "json_object"},
-            temperature=0.0,
-            purpose="post_scrape_feature_evidence",
-        )
+        prompt = self._build_prompt(product, scrape, features, page_text)
+        try:
+            response = self.service.predict(
+                prompt,
+                system_prompt=(
+                    "You extract product feature evidence from the supplied page text only. "
+                    "Do not browse, infer, guess, use world knowledge, or follow URLs. "
+                    "Return strict JSON matching the requested schema."
+                ),
+                response_format={"type": "json_object"},
+                temperature=0.0,
+                purpose="post_scrape_feature_evidence",
+            )
+        except Exception as exc:
+            # Optional reasoning must never weaken deterministic evidence or abort the
+            # product workflow. Fail closed: accept no LLM evidence and keep the item
+            # in feature review.
+            logger.warning(
+                "Optional LLM feature reasoning unavailable | error_type={} | url={}",
+                type(exc).__name__,
+                scrape.final_url or scrape.url,
+            )
+            return ()
         return self._validated_evidence(response.content, schema, scrape, page_text, missing_ids)
 
     def _consume_call(self) -> bool:
@@ -76,7 +88,13 @@ class LLMFeatureReasoner:
             self._calls += 1
             return True
 
-    def _build_prompt(self, product: ProductQuery, features, page_text: str) -> str:
+    def _build_prompt(
+        self,
+        product: ProductQuery,
+        scrape: ScrapeResult,
+        features: Sequence[FeatureDefinition],
+        page_text: str,
+    ) -> str:
         feature_payload = [
             {
                 "feature_id": feature.feature_id,
