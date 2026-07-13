@@ -25,19 +25,37 @@ PLACEHOLDER_MARKERS = (
 )
 TRUE_VALUES = {"1", "true", "yes", "on"}
 ENV_ASSIGNMENT = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+INSECURE_PERMISSION_OVERRIDE_ENV = "PRODUCT_EVIDENCE_ALLOW_INSECURE_ENV_PERMISSIONS"
 
 
 class PreflightError(RuntimeError):
     pass
 
 
-def parse_env(path: Path) -> dict[str, str]:
+def process_flag_enabled(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in TRUE_VALUES
+
+
+def parse_env(path: Path, *, allow_insecure_permissions: bool = False) -> dict[str, str]:
     if not path.is_file():
         raise PreflightError(".env is missing. Run: cp .env.example .env")
     if path.is_symlink():
         raise PreflightError(".env must be a regular file, not a symlink")
-    if os.name == "posix" and stat.S_IMODE(path.stat().st_mode) & 0o077:
-        raise PreflightError(".env permissions are too broad. Run: chmod 600 .env")
+
+    if os.name == "posix":
+        mode = stat.S_IMODE(path.stat().st_mode)
+        if mode & 0o077:
+            if not allow_insecure_permissions:
+                raise PreflightError(
+                    ".env permissions are too broad. Run: chmod 600 .env. "
+                    "If the Azure ML mounted filesystem cannot preserve POSIX modes, rerun with "
+                    "--allow-insecure-env-permissions."
+                )
+            print(
+                f"SECURITY WARNING: accepting .env mode {mode:o}. Group or other users may read or modify "
+                "credentials because the mounted filesystem cannot preserve mode 600.",
+                file=sys.stderr,
+            )
 
     values: dict[str, str] = {}
     for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
@@ -166,10 +184,24 @@ def main() -> int:
     parser.add_argument("--project-dir", default=str(Path(__file__).resolve().parents[1]))
     parser.add_argument("--skip-docker", action="store_true", help="Used only by unit tests")
     parser.add_argument("--skip-port", action="store_true", help="Used only by unit tests")
+    parser.add_argument(
+        "--allow-insecure-env-permissions",
+        action="store_true",
+        help=(
+            "Allow .env modes such as 777 on Azure ML mounted filesystems that cannot preserve mode 600. "
+            "This weakens credential protection and must be explicitly requested."
+        ),
+    )
     args = parser.parse_args()
 
     project_dir = Path(args.project_dir).resolve()
-    values = parse_env(project_dir / ".env")
+    allow_insecure_permissions = args.allow_insecure_env_permissions or process_flag_enabled(
+        INSECURE_PERMISSION_OVERRIDE_ENV
+    )
+    values = parse_env(
+        project_dir / ".env",
+        allow_insecure_permissions=allow_insecure_permissions,
+    )
     validate_env(values)
     feature_files = ensure_feature_set(project_dir)
     (project_dir / "artifacts").mkdir(parents=True, exist_ok=True)
