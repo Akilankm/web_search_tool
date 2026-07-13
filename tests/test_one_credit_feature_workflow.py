@@ -18,13 +18,13 @@ VALID_EAN = "4002051612344"
 
 class FakeOrganicClient:
     def __init__(self) -> None:
-        self.calls: list[str] = []
+        self.calls: list[dict] = []
 
     def search(self, query, *, product=None, **kwargs):
-        self.calls.append(query)
+        self.calls.append({"query": query, **kwargs})
         return OrganicSearchResponse(
             query=query,
-            search_id="one-credit",
+            search_id="three-stage",
             status="Success",
             results=[
                 OrganicSearchResult(
@@ -53,8 +53,16 @@ class FakeScraper:
 
     def scrape(self, url, *, product=None):
         retailer = "shop.ch" in url
-        specs = {"Brand": "Acme", "Recommended age": "8 years"} if retailer else {"Brand": "Acme", "Material": "ABS plastic"}
-        feature_text = "Brand Acme Recommended age 8 years" if retailer else "Brand Acme Material ABS plastic"
+        specs = (
+            {"Brand": "Acme", "Recommended age": "8 years"}
+            if retailer
+            else {"Brand": "Acme", "Material": "ABS plastic"}
+        )
+        feature_text = (
+            "Brand Acme Recommended age 8 years"
+            if retailer
+            else "Brand Acme Material ABS plastic"
+        )
         return ScrapeResult(
             url=url,
             scraped=True,
@@ -88,7 +96,7 @@ class FakeScraper:
         )
 
 
-def test_one_credit_search_and_multi_url_feature_coverage(tmp_path):
+def test_three_stage_search_and_multi_url_diagnostic_coverage(tmp_path):
     organic = FakeOrganicClient()
     schema = FeatureSchema(
         schema_id="toy",
@@ -102,7 +110,11 @@ def test_one_credit_search_and_multi_url_feature_coverage(tmp_path):
     harness = FeatureAwareProductEvidenceHarness(
         serp_config=SerpAPIConfig(api_key="test", max_retries=3),
         config=HarnessConfig(write_outputs=False),
-        one_credit=OneCreditConfig(output_dir=str(tmp_path), write_outputs=False, scrape_top_k=2),
+        one_credit=OneCreditConfig(
+            output_dir=str(tmp_path),
+            write_outputs=False,
+            scrape_top_k=2,
+        ),
         organic_client=organic,
         scraper=FakeScraper(),
     )
@@ -118,10 +130,15 @@ def test_one_credit_search_and_multi_url_feature_coverage(tmp_path):
         return_trace=True,
     )
 
-    assert len(organic.calls) == 1
-    assert result.best_match.organic_calls_used == 1
+    assert len(organic.calls) == 3
+    assert [call["scope"] for call in organic.calls] == ["country", "country", "global"]
+    assert "shop.ch" in organic.calls[0]["query"]
+    assert "shop.ch" not in organic.calls[1]["query"]
+    assert result.best_match.organic_calls_used == 3
     assert result.evidence_set is not None
     assert result.evidence_set.primary_url == "https://shop.ch/acme-rocket-18-pieces"
-    assert result.evidence_set.supplementary_urls == ("https://manufacturer.example/acme-rocket-18-pieces",)
+    assert result.evidence_set.supplementary_urls == (
+        "https://manufacturer.example/acme-rocket-18-pieces",
+    )
     assert result.evidence_set.required_coverage == 1.0
     assert result.evidence_set.coding_ready is True
