@@ -23,12 +23,30 @@ The browser container receives no SerpAPI credential, no LLM credential, and no 
 The startup preflight rejects:
 
 - missing `.env` files;
-- symlinked or broadly readable `.env` files;
+- symlinked `.env` files;
+- broadly readable or writable `.env` files unless the operator explicitly enables the Azure ML mounted-filesystem override;
 - duplicate or malformed assignments;
 - placeholder SerpAPI or LLM values;
 - non-HTTPS LLM endpoints;
 - one-credit settings that permit extra searches;
 - invalid private feature JSON files.
+
+### Mounted-filesystem exception
+
+Some Azure ML `cloudfiles` mounts do not preserve `chmod 600`. The platform remains fail-closed unless the operator explicitly invokes:
+
+```bash
+./scripts/azureml_startup.sh --allow-insecure-env-permissions
+```
+
+or:
+
+```bash
+PRODUCT_EVIDENCE_ALLOW_INSECURE_ENV_PERMISSIONS=true \
+  ./scripts/azureml_startup.sh
+```
+
+This exception is intentionally invocation-scoped and emits a security warning. It does not sanitize or encrypt the `.env` file. A mode such as `777` may allow other users or processes to read or modify SerpAPI and LLM credentials. Local Compute Instance storage with mode `600`, or approved secret injection, remains the preferred deployment.
 
 ## Network boundary
 
@@ -120,10 +138,19 @@ If a credential may have been exposed:
 
 ## Verification
 
+Secure local filesystem:
+
 ```bash
 chmod 600 .env
 python scripts/preflight_azureml.py
 docker compose config --quiet
 docker compose ps
 docker compose logs --tail=100 agent browser
+```
+
+Explicit mounted-filesystem exception:
+
+```bash
+python scripts/preflight_azureml.py \
+  --allow-insecure-env-permissions
 ```
