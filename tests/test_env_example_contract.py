@@ -8,19 +8,24 @@ from dotenv import dotenv_values
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_env_example_exists_and_enforces_one_credit_contract() -> None:
+def test_env_example_exists_and_enforces_three_stage_contract() -> None:
     path = ROOT / ".env.example"
     assert path.is_file()
     values = dotenv_values(path)
 
-    assert values["PRODUCT_HARNESS_WORKFLOW"] == "one_credit_feature_aware"
-    assert values["PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES"] == "1"
+    assert values["PRODUCT_HARNESS_WORKFLOW"] == "three_stage_feature_aware"
+    assert values["PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES"] == "3"
     assert values["PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES"] == "0"
     assert values["PRODUCT_HARNESS_ENABLE_LLM_SEARCH_PLANNING"] == "false"
     assert values["PRODUCT_HARNESS_ENABLE_LLM_SEARCH_FEEDBACK"] == "false"
     assert values["PRODUCT_HARNESS_BROWSER_FALLBACK_ONLY"] == "false"
     assert values["PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE"] == "true"
     assert values["PRODUCT_HARNESS_ENABLE_VISION_REASONING"] == "true"
+    assert values["PRODUCT_HARNESS_COUNTRY_FIRST"] == "true"
+    assert values["PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK"] == "true"
+    assert values["PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY"] == "true"
+    assert values["PRODUCT_HARNESS_REJECT_EXPIRING_URLS"] == "true"
+    assert int(values["PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT"]) >= 3
 
 
 def test_env_example_uses_placeholders_not_live_secrets() -> None:

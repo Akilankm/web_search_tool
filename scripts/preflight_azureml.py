@@ -48,12 +48,13 @@ def parse_env(path: Path, *, allow_insecure_permissions: bool = False) -> dict[s
             if not allow_insecure_permissions:
                 raise PreflightError(
                     ".env permissions are too broad. Run: chmod 600 .env. "
-                    "If the Azure ML mounted filesystem cannot preserve POSIX modes, rerun with "
-                    "--allow-insecure-env-permissions."
+                    "If the Azure ML mounted filesystem cannot preserve POSIX modes, "
+                    "rerun with --allow-insecure-env-permissions."
                 )
             print(
-                f"SECURITY WARNING: accepting .env mode {mode:o}. Group or other users may read or modify "
-                "credentials because the mounted filesystem cannot preserve mode 600.",
+                f"SECURITY WARNING: accepting .env mode {mode:o}. Group or other "
+                "users may read or modify credentials because the mounted filesystem "
+                "cannot preserve mode 600.",
                 file=sys.stderr,
             )
 
@@ -84,13 +85,37 @@ def is_enabled(values: dict[str, str], key: str, default: bool = False) -> bool:
     return raw.strip().lower() in TRUE_VALUES
 
 
+def _require_int(values: dict[str, str], key: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(values.get(key, str(default)))
+    except ValueError as exc:
+        raise PreflightError(f"{key} must be an integer") from exc
+    if not minimum <= value <= maximum:
+        raise PreflightError(f"{key} must be between {minimum} and {maximum}")
+    return value
+
+
 def validate_env(values: dict[str, str]) -> None:
-    if values.get("PRODUCT_HARNESS_WORKFLOW", "one_credit_feature_aware") != "one_credit_feature_aware":
-        raise PreflightError("PRODUCT_HARNESS_WORKFLOW must be one_credit_feature_aware")
-    if values.get("PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES", "1") != "1":
-        raise PreflightError("PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES must be 1")
+    workflow = values.get("PRODUCT_HARNESS_WORKFLOW", "three_stage_feature_aware")
+    if workflow not in {"three_stage_feature_aware", "one_credit_feature_aware"}:
+        raise PreflightError("PRODUCT_HARNESS_WORKFLOW must be three_stage_feature_aware")
+    if values.get("PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES", "3") != "3":
+        raise PreflightError("PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES must be 3")
     if values.get("PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES", "0") != "0":
         raise PreflightError("PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES must be 0")
+
+    for key in (
+        "PRODUCT_HARNESS_COUNTRY_FIRST",
+        "PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK",
+        "PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE",
+        "PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY",
+        "PRODUCT_HARNESS_REJECT_EXPIRING_URLS",
+    ):
+        if not is_enabled(values, key, True):
+            raise PreflightError(f"{key} must be true")
+
+    _require_int(values, "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE", 6, 1, 10)
+    _require_int(values, "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT", 9, 3, 30)
 
     serp_key = values.get("SERPAPI_API_KEY", "")
     if len(serp_key) < 20 or is_placeholder(serp_key):
@@ -102,7 +127,9 @@ def validate_env(values: dict[str, str]) -> None:
         required = ("LLM_API_KEY", "LLM_API_VERSION", "LLM_ENDPOINT", "LLM_DEPLOYMENT")
         missing = [key for key in required if is_placeholder(values.get(key, ""))]
         if missing:
-            raise PreflightError("LLM configuration is missing or still contains examples: " + ", ".join(missing))
+            raise PreflightError(
+                "LLM configuration is missing or still contains examples: " + ", ".join(missing)
+            )
         endpoint = values["LLM_ENDPOINT"]
         if not endpoint.startswith("https://"):
             raise PreflightError("LLM_ENDPOINT must use HTTPS")
@@ -147,8 +174,6 @@ def ensure_feature_set(project_dir: Path) -> list[Path]:
 
 
 def ensure_runtime_directories(project_dir: Path) -> tuple[Path, ...]:
-    """Create the complete generated runtime layout for a fresh clone."""
-
     paths = (
         project_dir / "data" / "artifacts",
         project_dir / "data" / "runtime",
@@ -224,6 +249,8 @@ def main() -> int:
         check_docker(project_dir)
 
     print("Preflight passed.")
+    print("Search contract: requested retailer/country -> country alternative -> global")
+    print("SerpAPI request limit per product: 3")
     print(f"Validated feature sets: {len(feature_files)}")
     print(f"Artifact root: {project_dir / 'data' / 'artifacts'}")
     return 0
