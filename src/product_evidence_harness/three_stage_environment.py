@@ -47,9 +47,9 @@ def validate_runtime_environment(
 ) -> ThreeStageEnvironmentValidationReport:
     """Validate the strict three-stage production contract.
 
-    The legacy validator is reused for secret, endpoint, permission, and
-    operational checks. Its obsolete one-credit value is overridden only in the
-    validation copy; the real runtime value must be exactly three.
+    The legacy validator is reused only for secret, endpoint, permission, and
+    operational checks. Obsolete workflow and cost values are overridden in an
+    internal validation copy; the actual runtime must remain strict three-stage.
     """
 
     values = _effective_values(env_file, environ)
@@ -57,6 +57,7 @@ def validate_runtime_environment(
         _enforce_three_stage_settings(values)
 
     compatibility_values = dict(values)
+    compatibility_values["PRODUCT_HARNESS_WORKFLOW"] = "one_credit_feature_aware"
     compatibility_values["PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES"] = "1"
     compatibility_values["PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES"] = "0"
 
@@ -117,10 +118,7 @@ def _enforce_three_stage_settings(values: Mapping[str, str]) -> None:
     workflow = str(
         values.get("PRODUCT_HARNESS_WORKFLOW", "three_stage_feature_aware")
     ).strip()
-    if workflow not in {
-        "three_stage_feature_aware",
-        "one_credit_feature_aware",
-    }:
+    if workflow != "three_stage_feature_aware":
         raise EnvironmentValidationError(
             "PRODUCT_HARNESS_WORKFLOW must be three_stage_feature_aware"
         )
