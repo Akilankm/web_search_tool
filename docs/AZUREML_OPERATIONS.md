@@ -46,6 +46,23 @@ cp .env.example .env
 chmod 600 .env
 ```
 
+### Azure ML mounted filesystems that cannot preserve mode 600
+
+The platform remains fail-closed by default. If the repository is stored on an Azure ML `cloudfiles` mount where `chmod 600 .env` does not change the reported mode, start with the explicit override:
+
+```bash
+./scripts/azureml_startup.sh --allow-insecure-env-permissions
+```
+
+The equivalent process-level override is:
+
+```bash
+PRODUCT_EVIDENCE_ALLOW_INSECURE_ENV_PERMISSIONS=true \
+  ./scripts/azureml_startup.sh
+```
+
+This override accepts modes such as `777` only for that invocation and prints a security warning. It does not disable credential, endpoint, feature-file, Docker, Compose, or port validation. Prefer a local Compute Instance directory with mode `600` whenever possible because group or other users may read or modify credentials on a permissive mount.
+
 Edit `.env` and replace every placeholder. At minimum, configure:
 
 ```env
@@ -83,13 +100,21 @@ Feature names are never sent to SerpAPI. They are introduced only after URL disc
 
 ## Start the platform
 
+Standard secure startup:
+
 ```bash
 ./scripts/azureml_startup.sh
 ```
 
+Mounted-filesystem override when mode `600` cannot be preserved:
+
+```bash
+./scripts/azureml_startup.sh --allow-insecure-env-permissions
+```
+
 The startup process:
 
-1. validates `.env` syntax, permissions, one-credit controls, and credentials;
+1. validates `.env` syntax, permissions or the explicit permission override, one-credit controls, and credentials;
 2. validates every private feature JSON file;
 3. creates a generic `example_features.json` only when no private file exists;
 4. validates Docker and Compose;
@@ -214,11 +239,15 @@ docker compose down
 ./scripts/azureml_startup.sh
 ```
 
+If the repository remains on a permissive Azure ML mount, include `--allow-insecure-env-permissions` again because the override is intentionally invocation-scoped.
+
 ## Failure guide
 
 | Symptom | Action |
 |---|---|
 | Docker socket permission denied | Request Docker permission from the Azure ML administrator |
+| Docker reports `compose` is not a command | Install the Docker Compose v2 CLI plugin for the Compute Instance user |
+| `.env` remains broadly readable after `chmod 600` | Prefer local Compute Instance storage, or explicitly use `--allow-insecure-env-permissions` and accept the warning |
 | Preflight reports placeholder value | Replace the named `.env` value and rerun |
 | No feature set found | Copy a valid JSON file into `inputs/private/` |
 | Agent port already in use | Stop the conflicting process or change `AGENT_HOST_PORT` |
@@ -229,10 +258,20 @@ docker compose down
 
 ## Validation commands
 
+Secure local filesystem:
+
 ```bash
 python -m compileall -q src scripts
 python -m json.tool notebooks/01_run_product_evidence.ipynb >/dev/null
 python -m pytest -q
 
 docker compose config --quiet
+```
+
+Mounted-filesystem preflight override:
+
+```bash
+python scripts/preflight_azureml.py \
+  --project-dir "$(pwd)" \
+  --allow-insecure-env-permissions
 ```
