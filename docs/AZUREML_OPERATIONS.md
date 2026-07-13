@@ -10,7 +10,9 @@ Azure ML Compute Instance
 │   ├── agent:8000   -> host 127.0.0.1:8788
 │   └── browser:9000 -> internal Compose network only
 ├── inputs/private/  -> read-only inside the agent
-├── artifacts/       -> shared by agent and browser
+├── data/
+│   ├── artifacts/   -> shared by agent and browser
+│   └── runtime/     -> repository-local transient runtime state
 └── notebooks/01_run_product_evidence.ipynb
 ```
 
@@ -34,9 +36,17 @@ docker compose version
 docker ps
 ```
 
-If `docker info` reports permission denied for `/var/run/docker.sock`, the platform cannot start. The Azure ML administrator must grant Docker access or run the startup script through an approved Compute Instance startup hook.
+If `docker info` reports permission denied for `/var/run/docker.sock`, the platform cannot start. The Azure ML administrator must grant Docker access.
 
-## Fresh-clone procedure
+## Supported fresh-clone procedure
+
+The intended workflow is exactly:
+
+1. clone the repository;
+2. configure `.env`;
+3. add the private feature file;
+4. run Docker through the startup script;
+5. open the notebook and submit products.
 
 ```bash
 git clone https://github.com/Akilankm/web_search_tool.git
@@ -45,23 +55,6 @@ cd web_search_tool
 cp .env.example .env
 chmod 600 .env
 ```
-
-### Azure ML mounted filesystems that cannot preserve mode 600
-
-The platform remains fail-closed by default. If the repository is stored on an Azure ML `cloudfiles` mount where `chmod 600 .env` does not change the reported mode, start with the explicit override:
-
-```bash
-./scripts/azureml_startup.sh --allow-insecure-env-permissions
-```
-
-The equivalent process-level override is:
-
-```bash
-PRODUCT_EVIDENCE_ALLOW_INSECURE_ENV_PERMISSIONS=true \
-  ./scripts/azureml_startup.sh
-```
-
-This override accepts modes such as `777` only for that invocation and prints a security warning. It does not disable credential, endpoint, feature-file, Docker, Compose, or port validation. Prefer a local Compute Instance directory with mode `600` whenever possible because group or other users may read or modify credentials on a permissive mount.
 
 Edit `.env` and replace every placeholder. At minimum, configure:
 
@@ -98,6 +91,23 @@ Required JSON contract:
 
 Feature names are never sent to SerpAPI. They are introduced only after URL discovery.
 
+## Azure ML mounted filesystems that cannot preserve mode 600
+
+The platform remains fail-closed by default. If `chmod 600 .env` does not change the reported mode, start with:
+
+```bash
+./scripts/azureml_startup.sh --allow-insecure-env-permissions
+```
+
+The equivalent process-level override is:
+
+```bash
+PRODUCT_EVIDENCE_ALLOW_INSECURE_ENV_PERMISSIONS=true \
+  ./scripts/azureml_startup.sh
+```
+
+The override is invocation-scoped and does not disable credential, endpoint, feature-file, Docker, Compose, or port validation.
+
 ## Start the platform
 
 Standard secure startup:
@@ -106,28 +116,30 @@ Standard secure startup:
 ./scripts/azureml_startup.sh
 ```
 
-Mounted-filesystem override when mode `600` cannot be preserved:
+Mounted-filesystem startup:
 
 ```bash
 ./scripts/azureml_startup.sh --allow-insecure-env-permissions
 ```
 
-The startup process:
+The startup process automatically:
 
-1. validates `.env` syntax, permissions or the explicit permission override, one-credit controls, and credentials;
-2. validates every private feature JSON file;
-3. creates a generic `example_features.json` only when no private file exists;
-4. validates Docker and Compose;
-5. checks the agent host port;
-6. creates the internal browser API token;
-7. builds and starts both containers;
-8. waits for agent and browser health;
-9. prints container logs automatically when startup fails.
+1. creates `data/artifacts/`, `data/runtime/`, `inputs/private/`, and `secrets/` when absent;
+2. creates the browser API token when absent;
+3. validates `.env`, credentials, one-credit controls, feature files, Docker, Compose, and the agent port;
+4. uses the current non-root Azure ML notebook user as the container UID/GID;
+5. confirms repository-local runtime folders are writable;
+6. builds and starts both containers;
+7. waits for agent and browser health;
+8. prints logs automatically when startup fails.
 
-Expected completion message:
+No manual `PRODUCT_EVIDENCE_RUNTIME_UID/GID` export, symlink, `/app/output` creation, or artifact copy is part of the supported workflow.
+
+Expected completion messages:
 
 ```text
 Product evidence platform is ready at http://127.0.0.1:8788
+Artifacts will be written under <repo>/data/artifacts/<row_id>/
 ```
 
 Verify manually:
@@ -138,63 +150,19 @@ docker compose logs --tail=100 agent browser
 python scripts/wait_for_stack.py
 ```
 
-Both containers must be healthy.
-
-## Run products
-
-Open this notebook in Azure ML Studio:
+## Artifact path contract
 
 ```text
-notebooks/01_run_product_evidence.ipynb
+Host repository: ./data/artifacts
+Agent container: /data/artifacts
+Browser container: /data/artifacts
+One-credit writer: PRODUCT_HARNESS_OUTPUT_DIR=/data/artifacts
 ```
 
-Set `FEATURE_SET` to the private file name without `.json`, for example:
-
-```python
-FEATURE_SET = "toy_features"
-```
-
-The notebook supports:
-
-- one product;
-- an optional CSV batch;
-- progress polling;
-- result retrieval;
-- feature-evidence inspection;
-- browser-evidence inspection;
-- a batch summary written under `artifacts/`.
-
-Required product fields:
-
-| Field | Required |
-|---|:---:|
-| `row_id` | Recommended |
-| `main_text` | Yes |
-| `country_code` | Yes |
-| `retailer_name` | No |
-| `ean` | No |
-| `language_code` | No |
-
-## Runtime flow
+Both the one-credit search artifacts and the final orchestrated dossier are written into the same product folder:
 
 ```text
-Notebook
-  -> POST /v1/jobs
-  -> agent runs one identity-only SerpAPI request
-  -> agent performs static extraction and identity validation
-  -> agent requests browser evidence only when needed
-  -> browser renders, expands, downloads images, or captures screenshots
-  -> agent performs text and vision reasoning
-  -> agent selects primary and supplementary evidence URLs
-  -> result and artifacts are written
-```
-
-The browser service does not perform search and does not receive the private feature schema.
-
-## Artifacts
-
-```text
-artifacts/<row_id>/
+data/artifacts/<row_id>/
 ├── orchestrated_result.json
 ├── result.json
 ├── candidates.csv
@@ -209,6 +177,55 @@ artifacts/<row_id>/
     ├── images/
     └── screenshots/
 ```
+
+Generated `data/artifacts/` and `data/runtime/` content is ignored by Git. If either directory is removed while the stack is stopped, the next startup recreates it.
+
+## Run products
+
+Open this notebook in Azure ML Studio:
+
+```text
+notebooks/01_run_product_evidence.ipynb
+```
+
+Set `FEATURE_SET` to the private file name without `.json`:
+
+```python
+FEATURE_SET = "toy_features"
+```
+
+Required product fields:
+
+| Field | Required |
+|---|:---:|
+| `row_id` | Recommended |
+| `main_text` | Yes |
+| `country_code` | Yes |
+| `retailer_name` | No |
+| `ean` | No |
+| `language_code` | No |
+
+After a run:
+
+```bash
+find data/artifacts -maxdepth 4 -type f | sort
+```
+
+## Runtime flow
+
+```text
+Notebook
+  -> POST /v1/jobs
+  -> agent runs one identity-only SerpAPI request
+  -> agent performs static extraction and identity validation
+  -> agent requests browser evidence only when needed
+  -> browser renders, expands, downloads images, or captures screenshots
+  -> agent performs text and vision reasoning
+  -> agent selects primary and supplementary evidence URLs
+  -> result and artifacts are written to data/artifacts/<row_id>/
+```
+
+The browser service does not perform search and does not receive the private feature schema.
 
 ## Operations
 
@@ -239,7 +256,7 @@ docker compose down
 ./scripts/azureml_startup.sh
 ```
 
-If the repository remains on a permissive Azure ML mount, include `--allow-insecure-env-permissions` again because the override is intentionally invocation-scoped.
+On a permissive Azure ML mount, include `--allow-insecure-env-permissions` again.
 
 ## Failure guide
 
@@ -247,9 +264,10 @@ If the repository remains on a permissive Azure ML mount, include `--allow-insec
 |---|---|
 | Docker socket permission denied | Request Docker permission from the Azure ML administrator |
 | Docker reports `compose` is not a command | Install the Docker Compose v2 CLI plugin for the Compute Instance user |
-| `.env` remains broadly readable after `chmod 600` | Prefer local Compute Instance storage, or explicitly use `--allow-insecure-env-permissions` and accept the warning |
+| `.env` remains broadly readable after `chmod 600` | Use the explicit mounted-filesystem override and accept the warning |
 | Preflight reports placeholder value | Replace the named `.env` value and rerun |
 | No feature set found | Copy a valid JSON file into `inputs/private/` |
+| Runtime directory is not writable | Verify the current notebook user can write inside the cloned repository |
 | Agent port already in use | Stop the conflicting process or change `AGENT_HOST_PORT` |
 | Browser unhealthy | Check `docker compose logs browser`; confirm shared memory and outbound access |
 | Agent unhealthy | Check `docker compose logs agent`; verify SerpAPI and LLM settings |
@@ -258,17 +276,14 @@ If the repository remains on a permissive Azure ML mount, include `--allow-insec
 
 ## Validation commands
 
-Secure local filesystem:
-
 ```bash
 python -m compileall -q src scripts
 python -m json.tool notebooks/01_run_product_evidence.ipynb >/dev/null
 python -m pytest -q
-
 docker compose config --quiet
 ```
 
-Mounted-filesystem preflight override:
+Mounted-filesystem preflight:
 
 ```bash
 python scripts/preflight_azureml.py \
