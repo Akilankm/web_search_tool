@@ -6,15 +6,17 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException
 
 from src.product_evidence_harness.agent_service.jobs import InMemoryJobStore, JobStatus
-from src.product_evidence_harness.agent_service.orchestrator import ProductEvidenceOrchestrator
+from src.product_evidence_harness.agent_service.strict_orchestrator import (
+    StrictProductEvidenceOrchestrator,
+)
 from src.product_evidence_harness.environment import validate_runtime_environment
 from src.product_evidence_harness.llm.service import LLMConfig
 
 
-app = FastAPI(title="Product Evidence Agent", version="0.6.0")
+app = FastAPI(title="Product Evidence Agent", version="0.7.0")
 store = InMemoryJobStore()
 executor = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("AGENT_WORKERS", "2"))))
-orchestrator = ProductEvidenceOrchestrator()
+orchestrator = StrictProductEvidenceOrchestrator()
 
 
 def _validate_runtime() -> tuple[dict | None, str | None]:
