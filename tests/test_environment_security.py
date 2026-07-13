@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from product_evidence_harness import EnvironmentValidationError, validate_runtime_environment
+from product_evidence_harness.environment import EnvironmentValidationError
+from product_evidence_harness.three_stage_environment import validate_runtime_environment
 
 
 def _write_env(path: Path, text: str) -> Path:
@@ -19,14 +20,21 @@ def _base_env() -> str:
     return "\n".join(
         [
             "SERPAPI_API_KEY=serp_live_abcdefghijklmnopqrstuvwxyz0123456789",
-            "PRODUCT_HARNESS_WORKFLOW=one_credit_feature_aware",
+            "PRODUCT_HARNESS_WORKFLOW=three_stage_feature_aware",
             "PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE=false",
-            "PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=1",
+            "PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=3",
             "PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES=0",
             "PRODUCT_HARNESS_SERP_RESULTS=100",
             "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_PLANNING=false",
             "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_FEEDBACK=false",
             "PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING=false",
+            "PRODUCT_HARNESS_COUNTRY_FIRST=true",
+            "PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK=true",
+            "PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE=true",
+            "PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY=true",
+            "PRODUCT_HARNESS_REJECT_EXPIRING_URLS=true",
+            "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE=6",
+            "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT=9",
             "",
         ]
     )
@@ -39,27 +47,61 @@ def test_valid_environment_returns_secret_free_report(tmp_path: Path) -> None:
 
     rendered = str(report.to_dict())
     assert report.serpapi_configured is True
-    assert report.one_credit_contract_enforced is True
+    assert report.one_credit_contract_enforced is False
+    assert report.three_stage_contract_enforced is True
+    assert report.serpapi_request_limit == 3
     assert "serp_live_" not in rendered
 
 
 def test_placeholder_serpapi_key_is_rejected(tmp_path: Path) -> None:
     env_file = _write_env(
         tmp_path / ".env",
-        _base_env().replace("serp_live_abcdefghijklmnopqrstuvwxyz0123456789", "replace_with_real_serpapi_key"),
+        _base_env().replace(
+            "serp_live_abcdefghijklmnopqrstuvwxyz0123456789",
+            "replace_with_real_serpapi_key",
+        ),
     )
 
     with pytest.raises(EnvironmentValidationError, match="placeholder"):
         validate_runtime_environment(env_file, environ={})
 
 
-def test_unsafe_search_expansion_is_rejected(tmp_path: Path) -> None:
+def test_expansive_legacy_search_mode_is_rejected(tmp_path: Path) -> None:
     env_file = _write_env(
         tmp_path / ".env",
-        _base_env().replace("PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE=false", "PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE=true"),
+        _base_env().replace(
+            "PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE=false",
+            "PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE=true",
+        ),
     )
 
     with pytest.raises(EnvironmentValidationError, match="forbids"):
+        validate_runtime_environment(env_file, environ={})
+
+
+def test_search_budget_must_be_exactly_three(tmp_path: Path) -> None:
+    env_file = _write_env(
+        tmp_path / ".env",
+        _base_env().replace(
+            "PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=3",
+            "PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=2",
+        ),
+    )
+
+    with pytest.raises(EnvironmentValidationError, match="between 3 and 3"):
+        validate_runtime_environment(env_file, environ={})
+
+
+def test_strict_acceptance_flags_cannot_be_disabled(tmp_path: Path) -> None:
+    env_file = _write_env(
+        tmp_path / ".env",
+        _base_env().replace(
+            "PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY=true",
+            "PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY=false",
+        ),
+    )
+
+    with pytest.raises(EnvironmentValidationError, match="must be true"):
         validate_runtime_environment(env_file, environ={})
 
 
@@ -77,7 +119,10 @@ def test_llm_enabled_requires_secure_complete_configuration(tmp_path: Path) -> N
 
 
 def test_duplicate_keys_are_rejected(tmp_path: Path) -> None:
-    env_file = _write_env(tmp_path / ".env", _base_env() + "SERPAPI_API_KEY=second_value_that_must_not_win\n")
+    env_file = _write_env(
+        tmp_path / ".env",
+        _base_env() + "SERPAPI_API_KEY=second_value_that_must_not_win\n",
+    )
 
     with pytest.raises(EnvironmentValidationError, match="Duplicate"):
         validate_runtime_environment(env_file, environ={})
