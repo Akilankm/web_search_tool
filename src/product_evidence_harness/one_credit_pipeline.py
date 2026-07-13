@@ -33,7 +33,9 @@ class OneCreditConfig:
     render_or_browser_top_k: int = 3
     max_supplementary_urls: int = 3
     write_outputs: bool = True
-    output_dir: str = "output"
+    # Empty means inherit HarnessConfig.output_dir, including the container's
+    # PRODUCT_HARNESS_OUTPUT_DIR=/data/artifacts setting.
+    output_dir: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "max_candidates", max(1, int(self.max_candidates)))
