@@ -9,7 +9,7 @@ from src.product_evidence_harness.agent_service.jobs import InMemoryJobStore, Jo
 from src.product_evidence_harness.agent_service.strict_orchestrator import (
     StrictProductEvidenceOrchestrator,
 )
-from src.product_evidence_harness.environment import validate_runtime_environment
+from src.product_evidence_harness.three_stage_environment import validate_runtime_environment
 from src.product_evidence_harness.llm.service import LLMConfig
 
 
