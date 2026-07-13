@@ -1,39 +1,55 @@
 # Product Evidence Platform
 
-A production-oriented, two-container product evidence workflow designed for Azure ML Compute Instances.
+A production-oriented product URL and feature-evidence workflow for Azure ML Compute Instances.
+
+## Production contract
+
+For every product, the platform uses exactly three bounded SerpAPI organic-search credits:
+
+1. **Requested retailer + requested country** — when `retailer_name` is supplied. When it is absent, this is the primary requested-country search.
+2. **Requested-country alternatives** — removes the retailer constraint and searches other retailers in the mandatory country.
+3. **Global fallback** — removes retailer and country restrictions and searches globally for the exact product.
+
+Search is identity-driven and does not receive the private feature list. Requested features are evaluated only after candidate pages are scraped and browser-opened.
+
+## Final URL acceptance
+
+A top-level `primary_url` is returned only when one URL passes every gate:
+
+| Gate | Requirement |
+|---|---|
+| Product identity | Same exact product and variant; EAN is supporting evidence only |
+| Browser access | Dedicated browser service opens the final page |
+| Page type | Rendered page is verified as the intended product detail page |
+| Scrapability | Product text is extractable and usable |
+| Feature completeness | The same primary URL contains every requested feature |
+| URL durability | No signed, tokenized, session-bound, expiry, or TTL query parameters |
+
+The system never returns a weak or rejected reference as `primary_url`. When no URL passes all gates, the workflow completes as `REVIEW_REQUIRED`, sets `primary_url` to `null`, and writes the candidate and rejection evidence to the artifact folder.
+
+## Input contract
+
+| Field | Required | Meaning |
+|---|:---:|---|
+| `main_text` | Yes | Exact product identity text |
+| `country_code` | Yes | Requested market; ISO-like country code |
+| `row_id` | Recommended | Stable input identifier |
+| `retailer_name` | No | Preferred retailer for stage 1 |
+| `ean` | No | Optional EAN/GTIN identity evidence; supply as text |
+| `language_code` | No | Optional language override |
+
+`retailer_name` is a preference, not a hard constraint. `ean` is optional and does not override contradictory product or variant evidence.
+
+## Supported workflow
 
 ```text
-Azure ML notebook
-  -> Agent container
-       -> one identity-only SerpAPI request
-       -> static extraction and exact-product validation
-       -> Browser container only when rendered or visual evidence is needed
-            -> Playwright interaction
-            -> direct image acquisition
-            -> screenshot fallback
-       -> text and vision reasoning
-       -> primary URL + supplementary evidence URLs
-       -> coding-ready or review-required dossier
+Clone repository
+  -> configure .env
+  -> add private feature JSON
+  -> run startup script
+  -> open the supported notebook
+  -> submit products
 ```
-
-## One supported workflow
-
-This repository intentionally exposes:
-
-- one startup command: `./scripts/azureml_startup.sh`;
-- one notebook: `notebooks/01_run_product_evidence.ipynb`;
-- one agent API on `http://127.0.0.1:8788`;
-- one internal browser API available only inside Docker Compose.
-
-The supported operator flow is:
-
-1. clone the repository;
-2. create and populate `.env`;
-3. add the private feature JSON;
-4. run the startup script;
-5. open the notebook and execute products.
-
-## Fresh Azure ML setup
 
 ```bash
 git clone https://github.com/Akilankm/web_search_tool.git
@@ -41,56 +57,23 @@ cd web_search_tool
 
 cp .env.example .env
 chmod 600 .env
-```
+# Replace every placeholder in .env.
 
-Replace every placeholder in `.env`, including the SerpAPI and LLM settings.
-
-Add the private feature set:
-
-```bash
 mkdir -p inputs/private
 cp /secure/location/toy_features.json inputs/private/toy_features.json
-```
 
-Feature-file contract:
-
-```json
-{
-  "features_to_code": [
-    "private feature name",
-    {
-      "name": "another private feature",
-      "description": "Optional extraction guidance"
-    }
-  ]
-}
-```
-
-Start the complete platform:
-
-```bash
 ./scripts/azureml_startup.sh
 ```
 
-On an Azure ML `cloudfiles` mount that cannot preserve mode `600`:
+For an Azure ML `cloudfiles` mount that cannot preserve mode `600`:
 
 ```bash
 ./scripts/azureml_startup.sh --allow-insecure-env-permissions
 ```
 
-The startup command automatically:
+The startup command creates all missing repository-local runtime folders, validates the immutable three-stage and strict-acceptance configuration, builds both containers, and waits for health.
 
-- creates `data/artifacts/`, `data/runtime/`, `inputs/private/`, and `secrets/` when absent;
-- generates the browser API token when absent;
-- resolves the current non-root Azure ML notebook user as the container UID/GID;
-- validates configuration and Docker access;
-- builds and starts both containers;
-- waits for service health;
-- routes every product artifact to `data/artifacts/<row_id>/`.
-
-No manual UID/GID export, symlink, `/app/output` repair, or artifact copy is required.
-
-Then open:
+Open:
 
 ```text
 notebooks/01_run_product_evidence.ipynb
@@ -98,39 +81,24 @@ notebooks/01_run_product_evidence.ipynb
 
 Set `FEATURE_SET` to the private feature filename without `.json`.
 
-## Notebook result contract
+## Required `.env` controls
 
-The notebook uses the current orchestrated API schema.
+The checked-in example enforces:
 
-Important fields:
-
-| Path | Meaning |
-|---|---|
-| `product.row_id` | Original row identifier |
-| `job_status` | `COMPLETED` or `REVIEW_REQUIRED` |
-| `coding_ready` | Whether evidence is sufficient for coding |
-| `primary_url` | Primary validated URL, or `null` |
-| `supplementary_urls` | Additional evidence URLs |
-| `product_match` | Product URL decision and best review URL |
-| `evidence_set` | Coverage, missing features, and conflicts |
-| `feature_assessments` | Per-URL feature evidence |
-| `browser_evidence` | Rendered and visual evidence |
-| `artifact_dir` | Container artifact path |
-
-`REVIEW_REQUIRED` is a successful terminal state, not an execution failure. It means the workflow completed but the available identity or feature evidence was not sufficient for automatic coding.
-
-Use the notebook helper:
-
-```python
-result = run_product(product, FEATURE_SET)
-pprint(summarize_result(result))
+```env
+PRODUCT_HARNESS_WORKFLOW=three_stage_feature_aware
+PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=3
+PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES=0
+PRODUCT_HARNESS_COUNTRY_FIRST=true
+PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK=true
+PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE=true
+PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY=true
+PRODUCT_HARNESS_REJECT_EXPIRING_URLS=true
 ```
 
-Do not read stale top-level fields such as `result["row_id"]`, `result["status"]`, or `result["feature_evidence"]`.
+Startup fails when these controls are weakened.
 
-See [Notebook usage and result contract](docs/NOTEBOOK_USAGE.md) for the exact schema, artifact inspection workflow, and `REVIEW_REQUIRED` diagnostics.
-
-## Runtime artifact contract
+## Artifact contract
 
 ```text
 Host repository: ./data/artifacts
@@ -139,90 +107,54 @@ Browser container: /data/artifacts
 Product output:  ./data/artifacts/<row_id>/
 ```
 
-Typical product output:
+Typical output:
 
 ```text
 data/artifacts/TEST-001/
 ├── candidates.csv
 ├── feature_evidence.csv
-├── orchestrated_result.json
 ├── result.json
 ├── review.md
+├── primary_url_acceptance.json
+├── orchestrated_result.json
 └── CAND-*/browser/
 ```
 
-The API reports the container path `/data/artifacts/<row_id>`. The notebook resolves the corresponding host path as `<repo>/data/artifacts/<row_id>/`.
+`result.json` records the complete search campaign. `orchestrated_result.json` is the final API result. `primary_url_acceptance.json` records every final acceptance gate and rejection reason.
 
-Generated `data/artifacts/` and `data/runtime/` content is ignored by Git. Deleting either directory while the stack is stopped is safe; the next startup recreates it.
+Generated `data/artifacts/` and `data/runtime/` content is ignored by Git. Missing runtime directories are recreated on startup.
 
-Batch summaries are written to:
+## Result contract
 
-```text
-data/artifacts/notebook_batch_summary.csv
-```
+Important fields returned by `GET /v1/jobs/{job_id}/result`:
 
-## Azure ML prerequisites
+| Path | Meaning |
+|---|---|
+| `product.row_id` | Original row identifier |
+| `job_status` | `COMPLETED` or `REVIEW_REQUIRED` |
+| `coding_ready` | True only when strict primary URL acceptance passed |
+| `primary_url` | Strictly accepted URL, otherwise `null` |
+| `supplementary_urls` | Review references only when strict acceptance fails |
+| `search.stages` | Three-stage search trace |
+| `search.serpapi_requests_used` | Must be `3` |
+| `product_match` | Product identity and scope decision |
+| `primary_url_acceptance` | Browser, identity, feature, scrapability, and durability gates |
+| `evidence_set` | Feature coverage and conflicts |
+| `feature_assessments` | Per-URL requested-feature evidence |
+| `browser_evidence` | Rendered and visual evidence |
+| `artifact_dir` | Container artifact path |
 
-These commands must succeed:
-
-```bash
-docker info
-docker compose version
-docker ps
-```
-
-Recommended starting capacity:
-
-- 4 vCPU;
-- 16 GB RAM;
-- outbound access to SerpAPI, the approved LLM endpoint, public product pages, image CDNs, and container registries.
+`REVIEW_REQUIRED` is a completed workflow, not an execution failure. It means no URL passed every final gate.
 
 ## Service responsibilities
 
 | Service | Responsibility |
 |---|---|
-| Agent | Private feature files, SerpAPI, static extraction, identity validation, LLM/vision reasoning, source selection, outputs |
-| Browser | Rendering, safe overlay handling, section expansion, gallery interaction, image downloads, screenshots, action traces |
-| Notebook | Input preparation, job submission, progress monitoring, result inspection, optional CSV batching |
+| Agent | Three searches, static extraction, identity validation, feature assessment, strict URL selection, outputs |
+| Browser | Open rendered pages, expand sections, verify product page, collect text/images/screenshots |
+| Notebook | Submit inputs, poll progress, inspect results, optional CSV batching |
 
-The browser never receives the private feature schema or SerpAPI/LLM credentials.
-
-## Browser fallback ladder
-
-1. Static HTML and structured data.
-2. Browser rendering.
-3. Ordinary overlay dismissal.
-4. Product-detail/specification expansion.
-5. Direct image download using browser context.
-6. Gallery interaction.
-7. Product-element screenshot.
-8. Viewport screenshot fallback.
-9. Vision reasoning over validated assets.
-
-CAPTCHA, login walls, paywalls, purchases, credential entry, and anti-bot bypass are outside the browser contract.
-
-## Repository layout
-
-```text
-.
-├── docker-compose.yml
-├── docker/
-├── requirements/
-├── scripts/
-├── notebooks/
-│   └── 01_run_product_evidence.ipynb
-├── examples/
-├── docs/
-│   ├── AZUREML_OPERATIONS.md
-│   ├── NOTEBOOK_USAGE.md
-│   └── SECURITY.md
-├── src/product_evidence_harness/
-├── tests/
-├── inputs/private/       # created automatically; ignored by Git
-└── data/
-    ├── artifacts/        # created automatically; ignored by Git
-    └── runtime/          # created automatically; ignored by Git
-```
+The browser never receives SerpAPI or LLM credentials.
 
 ## Operations
 
@@ -236,21 +168,23 @@ docker compose logs -f --tail=200 agent browser
 # Stop without deleting artifacts
 docker compose down
 
-# Rebuild after a pull
-git pull
+# Update and rebuild
+git checkout master
+git pull origin master
 docker compose down
 ./scripts/azureml_startup.sh
 ```
 
-After a successful notebook run:
+Inspect outputs:
 
 ```bash
-find data/artifacts -maxdepth 4 -type f | sort
+find data/artifacts -maxdepth 5 -type f | sort
 ```
 
 ## Validation
 
 ```bash
+python scripts/validate_environment.py --env-file .env
 python -m compileall -q src scripts
 python -m json.tool notebooks/01_run_product_evidence.ipynb >/dev/null
 python -m pytest -q
