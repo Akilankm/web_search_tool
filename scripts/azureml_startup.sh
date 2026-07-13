@@ -2,6 +2,46 @@
 set -euo pipefail
 
 PROJECT_DIR="${PRODUCT_EVIDENCE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+ALLOW_INSECURE_ENV_PERMISSIONS=false
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/azureml_startup.sh [--allow-insecure-env-permissions]
+
+Options:
+  --allow-insecure-env-permissions
+      Permit broad .env modes such as 777 when an Azure ML mounted filesystem
+      cannot preserve mode 600. This weakens credential protection and emits a
+      security warning.
+  -h, --help
+      Show this help message.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --allow-insecure-env-permissions)
+      ALLOW_INSECURE_ENV_PERMISSIONS=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+case "${PRODUCT_EVIDENCE_ALLOW_INSECURE_ENV_PERMISSIONS:-false}" in
+  1|true|TRUE|yes|YES|on|ON)
+    ALLOW_INSECURE_ENV_PERMISSIONS=true
+    ;;
+esac
+
 cd "$PROJECT_DIR"
 
 mkdir -p artifacts inputs/private secrets
@@ -15,7 +55,12 @@ path.chmod(0o600)
 PY
 fi
 
-python scripts/preflight_azureml.py --project-dir "$PROJECT_DIR"
+preflight_args=(--project-dir "$PROJECT_DIR")
+if [[ "$ALLOW_INSECURE_ENV_PERMISSIONS" == "true" ]]; then
+  echo "SECURITY WARNING: allowing broad .env permissions for this startup." >&2
+  preflight_args+=(--allow-insecure-env-permissions)
+fi
+python scripts/preflight_azureml.py "${preflight_args[@]}"
 
 # Bind-mounted folders must be writable by the same Azure ML user that owns the
 # checkout. When this script is launched by a root startup hook, use the checkout

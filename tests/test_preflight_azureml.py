@@ -41,6 +41,37 @@ def test_preflight_parses_valid_environment(tmp_path: Path) -> None:
     preflight.validate_env(values)
 
 
+def test_preflight_rejects_broad_permissions_by_default(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(valid_env(), encoding="utf-8")
+    env_path.chmod(0o777)
+
+    with pytest.raises(preflight.PreflightError, match="permissions are too broad"):
+        preflight.parse_env(env_path)
+
+
+def test_preflight_allows_broad_permissions_only_with_explicit_override(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(valid_env(), encoding="utf-8")
+    env_path.chmod(0o777)
+
+    values = preflight.parse_env(env_path, allow_insecure_permissions=True)
+
+    assert values["SERPAPI_API_KEY"] == "serpapi_key_with_more_than_twenty_chars"
+    assert "SECURITY WARNING" in capsys.readouterr().err
+
+
+def test_process_permission_override_is_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(preflight.INSECURE_PERMISSION_OVERRIDE_ENV, raising=False)
+    assert preflight.process_flag_enabled(preflight.INSECURE_PERMISSION_OVERRIDE_ENV) is False
+
+    monkeypatch.setenv(preflight.INSECURE_PERMISSION_OVERRIDE_ENV, "true")
+    assert preflight.process_flag_enabled(preflight.INSECURE_PERMISSION_OVERRIDE_ENV) is True
+
+
 def test_preflight_rejects_placeholder_credentials(tmp_path: Path) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text(valid_env().replace("serpapi_key_with_more_than_twenty_chars", "replace_with_real_serpapi_key"), encoding="utf-8")

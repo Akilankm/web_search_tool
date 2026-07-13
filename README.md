@@ -39,6 +39,14 @@ chmod 600 .env
 
 Replace every placeholder in `.env`, including the SerpAPI and LLM settings.
 
+If the Azure ML `cloudfiles` mount cannot preserve mode `600`, keep the default fail-closed behavior unless you deliberately accept the mounted-filesystem risk. The explicit invocation-scoped override is:
+
+```bash
+./scripts/azureml_startup.sh --allow-insecure-env-permissions
+```
+
+This permits broad modes such as `777` for that startup only and emits a security warning. Prefer copying the runtime to local Compute Instance storage and using mode `600` whenever possible.
+
 Add your private feature set:
 
 ```bash
@@ -172,6 +180,14 @@ python -m compileall -q src scripts
 python -m json.tool notebooks/01_run_product_evidence.ipynb >/dev/null
 python -m pytest -q
 docker compose config --quiet
+```
+
+For a mounted filesystem that cannot preserve mode `600`:
+
+```bash
+python scripts/preflight_azureml.py \
+  --project-dir "$(pwd)" \
+  --allow-insecure-env-permissions
 ```
 
 ## Documentation
