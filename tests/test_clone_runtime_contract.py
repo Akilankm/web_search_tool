@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from src.product_evidence_harness.one_credit_pipeline import OneCreditConfig
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -10,9 +12,13 @@ def test_compose_uses_repository_local_artifact_directory() -> None:
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
     assert compose.count("./data/artifacts:/data/artifacts") == 2
-    assert "./data/artifacts:/app/output" in compose
     assert "PRODUCT_HARNESS_OUTPUT_DIR: /data/artifacts" in compose
     assert "./artifacts:/data/artifacts" not in compose
+    assert "/app/output" not in compose
+
+
+def test_one_credit_writer_inherits_configured_output_directory() -> None:
+    assert OneCreditConfig().output_dir == ""
 
 
 def test_startup_creates_fresh_clone_runtime_layout_and_uses_invoking_user() -> None:
