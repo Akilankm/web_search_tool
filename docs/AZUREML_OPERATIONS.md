@@ -23,14 +23,11 @@ The notebook is only an API client. Search, scraping, identity validation, brows
 ```bash
 git clone https://github.com/Akilankm/web_search_tool.git
 cd web_search_tool
-
 cp .env.example .env
 chmod 600 .env
 # Replace all placeholders.
-
 mkdir -p inputs/private
 cp /secure/location/toy_features.json inputs/private/toy_features.json
-
 ./scripts/azureml_startup.sh
 ```
 
@@ -40,7 +37,7 @@ For Azure ML mounted filesystems that cannot preserve mode `600`:
 ./scripts/azureml_startup.sh --allow-insecure-env-permissions
 ```
 
-Startup automatically creates `data/artifacts/`, `data/runtime/`, `inputs/private/`, and `secrets/` when absent. It validates the strict production controls before Docker starts.
+Startup creates missing repository-local runtime folders, validates the strict production controls, builds both containers, and waits for health.
 
 ## Immutable search campaign
 
@@ -52,9 +49,7 @@ Every product consumes exactly three SerpAPI organic-search credits:
 | 2 | Requested country | Removes retailer constraint and searches other country retailers |
 | 3 | Global | Removes retailer and country restrictions |
 
-When `retailer_name` is absent, credit 1 is the primary country search. When EAN is absent, product identity is derived from `main_text` and page evidence. `country_code` and `main_text` remain mandatory.
-
-The private feature list is never placed in SerpAPI queries.
+When `retailer_name` is absent, credit 1 is the primary country search. EAN is optional throughout. `country_code` and `main_text` are mandatory. Private feature names are never placed in SerpAPI queries.
 
 Required configuration:
 
@@ -70,16 +65,16 @@ The runtime and preflight validators reject weaker or different values.
 
 ## Strict primary URL acceptance
 
-After all search stages, candidates are statically scraped and then opened by the browser service. `primary_url` is populated only when one URL satisfies all conditions:
+After all search stages, candidates are statically scraped and opened by the browser service. `primary_url` is populated only when one URL satisfies all conditions:
 
 1. Browser opens the final URL successfully.
 2. Rendered content is the exact requested product and variant.
-3. The rendered page is a product detail page, not search/category/home/interstitial content.
+3. The rendered page is a product detail page.
 4. Product text is scrapable.
-5. The same URL contains all requested features with no feature conflict.
-6. The URL is durable: no token, signature, expiry, TTL, session, or temporary credential parameter.
+5. The same URL contains all requested features with no conflicts.
+6. The URL has no token, signature, expiry, TTL, session, or temporary credential parameter.
 
-Required configuration:
+Required controls:
 
 ```env
 PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE=true
@@ -88,19 +83,7 @@ PRODUCT_HARNESS_REJECT_EXPIRING_URLS=true
 PRODUCT_HARNESS_RETURN_REJECTED_REFERENCE_AS_PRODUCT_URL=false
 ```
 
-These controls are mandatory. They are not downgrade switches.
-
-When no URL passes, the workflow returns:
-
-```python
-{
-    "job_status": "REVIEW_REQUIRED",
-    "coding_ready": False,
-    "primary_url": None,
-}
-```
-
-Review references may remain in `supplementary_urls`, `product_match.best_available_url`, and candidate artifacts, but they are never promoted to `primary_url`.
+When no URL passes, the workflow returns `REVIEW_REQUIRED`, `coding_ready=false`, and `primary_url=null`. Review references may remain in diagnostic fields, but they are never promoted to `primary_url`.
 
 ## Input contract
 
@@ -117,21 +100,9 @@ EAN/GTIN must be supplied as text to preserve leading zeroes.
 
 ## Running products
 
-Open:
+Open `notebooks/01_run_product_evidence.ipynb`, set `FEATURE_SET`, and call `run_product(product, FEATURE_SET)`.
 
-```text
-notebooks/01_run_product_evidence.ipynb
-```
-
-Set:
-
-```python
-FEATURE_SET = "toy_features"
-```
-
-Then submit the product with `run_product(product, FEATURE_SET)`.
-
-Progress stages include:
+Progress stages:
 
 ```text
 VALIDATING_INPUT
@@ -146,12 +117,15 @@ COMPLETED or REVIEW_REQUIRED
 
 | Path | Meaning |
 |---|---|
-| `search.queries` | Executed queries in stage order |
-| `search.stages` | Stage name, scope, results, and scrapes |
+| `product.row_id` | Original input row identifier |
+| `job_status` | `COMPLETED` or `REVIEW_REQUIRED` |
+| `coding_ready` | True only after strict acceptance |
+| `search.queries` | Executed queries in order |
+| `search.stages` | Stage name, scope, result count, and scrape count |
 | `search.serpapi_requests_used` | Exactly `3` |
 | `product_match.selection_scope` | Requested retailer, country alternative, or global |
-| `primary_url_acceptance` | Final browser/identity/feature/durability decision |
-| `primary_url` | Strict accepted product URL or `null` |
+| `primary_url_acceptance` | Browser, identity, feature, scrapability, and durability gates |
+| `primary_url` | Strict accepted URL or `null` |
 | `evidence_set` | Feature coverage and conflicts |
 | `feature_assessments` | Per-URL requested-feature evidence |
 | `browser_evidence` | Rendered evidence and blockers |
@@ -201,20 +175,18 @@ git pull origin master
 ./scripts/azureml_startup.sh
 ```
 
-On permissive mounted storage, add `--allow-insecure-env-permissions` again.
-
 ## Failure guide
 
 | Symptom | Action |
 |---|---|
 | Docker socket permission denied | Request Docker permission from the Azure ML administrator |
-| `.env` permissions remain broad | Use the explicit mounted-filesystem override and accept the warning |
-| Preflight says organic searches must be 3 | Update `.env` from the current `.env.example` |
-| Preflight says a strict flag must be true | Restore the required production control |
+| `.env` permissions remain broad | Use the explicit mounted-filesystem override |
+| Organic searches must be 3 | Update `.env` from the current `.env.example` |
+| A strict flag must be true | Restore the required production control |
 | No feature set found | Copy a valid JSON file into `inputs/private/` |
-| `REVIEW_REQUIRED` with no primary URL | Inspect search stages, `primary_url_acceptance.json`, browser evidence, and candidates |
-| URL rejected for TTL/signature | Use the canonical retailer product page, not a signed redirect or temporary link |
-| CAPTCHA/login/access wall | Candidate remains rejected; the platform does not bypass access controls |
+| `REVIEW_REQUIRED` | Inspect `primary_url_acceptance.json`, search stages, browser evidence, and candidates |
+| URL rejected for TTL/signature | Use a canonical product page instead of a temporary/signed link |
+| CAPTCHA/login/access wall | Candidate remains rejected; access controls are not bypassed |
 
 ## Validation
 
