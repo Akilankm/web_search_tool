@@ -52,9 +52,6 @@ services:
       PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT: "${PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT:-3}"
     volumes:
       - ./data/artifacts:/data/artifacts
-      # Compatibility mount for the one-credit writer's historical relative
-      # output path. Both locations resolve to the same repository directory.
-      - ./data/artifacts:/app/output
       - ./inputs/private:/data/private:ro
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=512m
