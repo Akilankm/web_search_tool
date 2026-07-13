@@ -1,156 +1,195 @@
 # Notebook Usage and Result Contract
 
-This guide documents the supported notebook workflow and the exact result schema returned by the agent API.
-
-## Supported notebook
-
 Use only:
 
 ```text
 notebooks/01_run_product_evidence.ipynb
 ```
 
-The notebook is a thin API client. Product discovery, scraping, browser rendering, identity validation, evidence extraction, multimodal reasoning, and artifact generation run inside Docker Compose.
+## Before opening the notebook
 
-## Run sequence
+```bash
+cp .env.example .env
+# Replace placeholders.
 
-1. Start the platform from the repository root.
-2. Open the supported notebook.
-3. Run the health-check cell.
-4. Set `FEATURE_SET` to the private feature filename without `.json`.
-5. Submit one product or a CSV batch.
+mkdir -p inputs/private
+cp /secure/location/toy_features.json inputs/private/toy_features.json
 
-Example:
+./scripts/azureml_startup.sh
+```
+
+For Azure ML mounted storage that cannot preserve mode `600`:
+
+```bash
+./scripts/azureml_startup.sh --allow-insecure-env-permissions
+```
+
+## Product input
+
+```python
+product = {
+    "row_id": "TEST-001",
+    "main_text": "Exact product identity text",
+    "country_code": "CO",
+    "retailer_name": "Mercado Libre",  # optional
+    "ean": None,                       # optional; keep as text when supplied
+    "language_code": None,
+}
+```
+
+Required fields:
+
+- `main_text`
+- `country_code`
+
+Optional fields:
+
+- `row_id`
+- `retailer_name`
+- `ean`
+- `language_code`
+
+## Search behavior
+
+Each product executes exactly three searches:
+
+1. Requested retailer in the requested country, when a retailer is supplied.
+2. Other retailers in the requested country, with the retailer constraint removed.
+3. Global fallback, with country and retailer constraints removed.
+
+When no retailer is supplied, stage 1 is the primary country search. EAN is optional throughout.
+
+The result exposes:
+
+```python
+result["search"]["queries"]
+result["search"]["stages"]
+result["search"]["serpapi_requests_used"]  # exactly 3
+```
+
+## Final URL behavior
+
+The notebook receives a non-null `primary_url` only after the same page passes all final gates:
+
+- browser-openable;
+- accessible without bypassing login/CAPTCHA/access controls;
+- rendered exact-product match;
+- product detail page;
+- text-scrapable;
+- all requested features present on that same URL;
+- no feature conflicts;
+- durable URL with no TTL, expiry, signature, token, temporary credential, or session parameter.
+
+Inspect:
+
+```python
+result["primary_url_acceptance"]
+```
+
+A rejected candidate may still appear as a review reference, but it is not returned as `primary_url`.
+
+## Running one product
 
 ```python
 FEATURE_SET = "toy_features"
-
-product = {
-    "row_id": "TEST-001",
-    "main_text": "BMW M3 WAGON HOT WHEELS ESCALA 1:64 MAINLINES 7CM LARGO - AZUL",
-    "country_code": "CO",
-    "retailer_name": "Mercado Libre",
-    "ean": None,
-    "language_code": "es",
-}
-
 result = run_product(product, FEATURE_SET)
 pprint(summarize_result(result))
 ```
 
-`main_text` and `country_code` are required. `retailer_name`, `ean`, and `language_code` are optional.
+Expected completed result:
 
-EAN/GTIN values must be supplied as strings so leading zeroes are not lost. Do not infer or add missing digits unless the identifier is independently confirmed from packaging or a trusted source.
+```python
+{
+    "row_id": "TEST-001",
+    "job_status": "COMPLETED",
+    "coding_ready": True,
+    "primary_url": "https://...",
+    "serpapi_requests_used": 3,
+    "selection_scope": "REQUESTED_RETAILER_COUNTRY",
+    "strict_primary_url_accepted": True,
+}
+```
 
-## Terminal statuses
+Expected strict rejection:
 
-| Status | Meaning |
-|---|---|
-| `COMPLETED` | The workflow completed and the evidence set is coding-ready. |
-| `REVIEW_REQUIRED` | The workflow completed, but identity or feature evidence is insufficient for automatic coding. |
-| `FAILED` | The workflow encountered an execution error. |
+```python
+{
+    "row_id": "TEST-001",
+    "job_status": "REVIEW_REQUIRED",
+    "coding_ready": False,
+    "primary_url": None,
+    "serpapi_requests_used": 3,
+    "strict_primary_url_accepted": False,
+}
+```
 
-`REVIEW_REQUIRED` is not a crash. It is a successful terminal state that requires human review.
+`REVIEW_REQUIRED` is a successful terminal workflow state. It means execution completed but no URL passed every mandatory final gate.
 
 ## Result schema
 
-The result endpoint returns an orchestrated payload with the following important fields:
-
 | Path | Meaning |
 |---|---|
-| `product.row_id` | Original product row identifier. |
-| `job_status` | `COMPLETED` or `REVIEW_REQUIRED`. |
-| `coding_ready` | Whether the selected evidence set is sufficient for coding. |
-| `primary_url` | Primary validated identity/evidence URL, or `null`. |
-| `supplementary_urls` | Additional URLs selected to cover missing features. |
-| `product_match` | Product URL decision, confidence, validation state, and best review URL. |
-| `evidence_set` | Coverage, missing features, conflicts, and coding status. |
-| `feature_assessments` | Per-URL, per-feature evidence assessments. |
-| `browser_evidence` | Rendered-page, visual-asset, and screenshot evidence bundles. |
-| `artifact_dir` | Container path such as `/data/artifacts/TEST-001`. |
+| `product.row_id` | Original row identifier |
+| `job_status` | `COMPLETED` or `REVIEW_REQUIRED` |
+| `coding_ready` | Strict primary URL acceptance result |
+| `primary_url` | Accepted durable product URL or `null` |
+| `supplementary_urls` | Review references when acceptance fails |
+| `search.queries` | Executed search queries |
+| `search.stages` | Stage name, scope, result count, and scrape count |
+| `search.serpapi_requests_used` | Exactly three |
+| `product_match.selection_scope` | Requested retailer/country, country alternative, or global |
+| `primary_url_acceptance` | Browser, exact-product, feature, scrapability, and durability gates |
+| `evidence_set` | Requested-feature coverage and conflicts |
+| `feature_assessments` | Per-URL feature evidence |
+| `browser_evidence` | Browser page and visual evidence |
+| `artifact_dir` | Container artifact path |
 
-The row identifier and workflow status are not top-level `row_id` and `status` fields. Correct access is:
+Do not read stale top-level fields such as `result["row_id"]`, `result["status"]`, or `result["feature_evidence"]`.
 
-```python
-row_id = result.get("product", {}).get("row_id")
-status = result.get("job_status")
-feature_assessments = result.get("feature_assessments", [])
-```
-
-The notebook provides `summarize_result(result)` so callers do not need to manually navigate the nested payload.
-
-## Artifact paths
-
-The API returns the container path:
-
-```text
-/data/artifacts/<row_id>
-```
-
-The corresponding path inside the cloned repository is:
-
-```text
-data/artifacts/<row_id>/
-```
-
-The notebook provides `host_artifact_dir(result)` to resolve the repository-local path regardless of whether Jupyter starts from the repository root or the `notebooks/` directory.
-
-Typical files:
-
-```text
-data/artifacts/<row_id>/
-├── orchestrated_result.json
-├── result.json
-├── candidates.csv
-├── feature_evidence.csv
-├── review.md
-└── CAND-*/browser/
-```
-
-## Investigating `REVIEW_REQUIRED`
-
-Inspect these payloads first:
+## Investigation workflow
 
 ```python
+pprint(result.get("search") or {})
 pprint(result.get("product_match") or {})
+pprint(result.get("primary_url_acceptance") or {})
 pprint(result.get("evidence_set") or {})
 pprint(result.get("feature_assessments") or [])
 pprint(result.get("browser_evidence") or [])
 ```
 
-Then inspect:
+The host artifact folder is:
 
 ```text
-data/artifacts/<row_id>/review.md
-data/artifacts/<row_id>/candidates.csv
+data/artifacts/<row_id>/
 ```
 
-Important candidate fields include:
+Important files:
 
-| Field | Meaning |
-|---|---|
-| `validation_status` | Overall candidate validation decision. |
-| `identity_status` | Exact-product identity determination. |
-| `ean_check` | Identifier agreement or conflict. |
-| `title_check` | Product-title agreement. |
-| `page_type` | Product page versus category, search, or unsupported page. |
-| `scrapable` | Whether usable evidence was extracted. |
-| `decision_reasons` | Rejection reasons, warnings, and ranking evidence. |
+```text
+result.json
+review.md
+candidates.csv
+feature_evidence.csv
+primary_url_acceptance.json
+orchestrated_result.json
+```
 
-A missing `primary_url` means no candidate passed the configured identity and production gates. The best available review URL may still be present under `product_match.best_available_url`.
+`primary_url_acceptance.json` is the authoritative explanation for why the final URL was accepted or rejected.
 
 ## CSV batch
 
-Input columns:
+Expected columns:
 
 ```text
 row_id,main_text,country_code,retailer_name,ean,language_code
 ```
 
-The notebook writes the batch summary to:
+Blank optional values become `None`. Keep EAN/GTIN columns formatted as text.
+
+Batch summaries are written to:
 
 ```text
 data/artifacts/notebook_batch_summary.csv
 ```
 
-The summary includes `job_status`, `coding_ready`, the selected URLs, decision status, missing features, and the repository-local artifact directory.
+The summary includes the final status, URL, scope, three-credit usage, strict acceptance outcome, missing features, and artifact path.
