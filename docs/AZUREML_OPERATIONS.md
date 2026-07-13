@@ -18,13 +18,13 @@ Azure ML Compute Instance
 
 The notebook is only a client. SerpAPI discovery, static extraction, product identity validation, browser control, image acquisition, screenshots, multimodal reasoning, and output writing happen inside the containers.
 
-## Azure ML prerequisites
+## Prerequisites
 
 The Compute Instance must provide:
 
 - Docker Engine and Docker Compose v2;
 - permission to run `docker info` without an interactive password prompt;
-- outbound access to the container registry, SerpAPI, the approved LLM endpoint, retailer pages, manufacturer pages, and image CDNs;
+- outbound access to SerpAPI, the approved LLM endpoint, retailer pages, manufacturer pages, image CDNs, and container registries;
 - at least 4 vCPU and 16 GB RAM as the recommended starting point;
 - sufficient disk space for container images and evidence artifacts.
 
@@ -36,17 +36,7 @@ docker compose version
 docker ps
 ```
 
-If `docker info` reports permission denied for `/var/run/docker.sock`, the platform cannot start. The Azure ML administrator must grant Docker access.
-
-## Supported fresh-clone procedure
-
-The intended workflow is exactly:
-
-1. clone the repository;
-2. configure `.env`;
-3. add the private feature file;
-4. run Docker through the startup script;
-5. open the notebook and submit products.
+## Fresh-clone procedure
 
 ```bash
 git clone https://github.com/Akilankm/web_search_tool.git
@@ -56,17 +46,7 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Edit `.env` and replace every placeholder. At minimum, configure:
-
-```env
-SERPAPI_API_KEY=...
-LLM_API_KEY=...
-LLM_API_VERSION=...
-LLM_ENDPOINT=https://...
-LLM_DEPLOYMENT=...
-```
-
-The LLM settings are mandatory while `PRODUCT_HARNESS_ENABLE_VISION_REASONING=true`.
+Edit `.env` and replace every placeholder.
 
 Add the private feature file:
 
@@ -91,7 +71,7 @@ Required JSON contract:
 
 Feature names are never sent to SerpAPI. They are introduced only after URL discovery.
 
-## Azure ML mounted filesystems that cannot preserve mode 600
+## Azure ML mounted filesystems
 
 The platform remains fail-closed by default. If `chmod 600 .env` does not change the reported mode, start with:
 
@@ -110,7 +90,7 @@ The override is invocation-scoped and does not disable credential, endpoint, fea
 
 ## Start the platform
 
-Standard secure startup:
+Standard startup:
 
 ```bash
 ./scripts/azureml_startup.sh
@@ -132,8 +112,6 @@ The startup process automatically:
 6. builds and starts both containers;
 7. waits for agent and browser health;
 8. prints logs automatically when startup fails.
-
-No manual `PRODUCT_EVIDENCE_RUNTIME_UID/GID` export, symlink, `/app/output` creation, or artifact copy is part of the supported workflow.
 
 Expected completion messages:
 
@@ -159,7 +137,7 @@ Browser container: /data/artifacts
 One-credit writer: PRODUCT_HARNESS_OUTPUT_DIR=/data/artifacts
 ```
 
-Both the one-credit search artifacts and the final orchestrated dossier are written into the same product folder:
+Both the one-credit search artifacts and final orchestrated dossier are written into:
 
 ```text
 data/artifacts/<row_id>/
@@ -169,26 +147,19 @@ data/artifacts/<row_id>/
 ├── feature_evidence.csv
 ├── review.md
 └── CAND-*/browser/
-    ├── browser_result.json
-    ├── rendered_text.md
-    ├── final_page.html
-    ├── browser_actions.json
-    ├── visual_manifest.json
-    ├── images/
-    └── screenshots/
 ```
 
 Generated `data/artifacts/` and `data/runtime/` content is ignored by Git. If either directory is removed while the stack is stopped, the next startup recreates it.
 
 ## Run products
 
-Open this notebook in Azure ML Studio:
+Open:
 
 ```text
 notebooks/01_run_product_evidence.ipynb
 ```
 
-Set `FEATURE_SET` to the private file name without `.json`:
+Set the private feature filename without `.json`:
 
 ```python
 FEATURE_SET = "toy_features"
@@ -205,11 +176,126 @@ Required product fields:
 | `ean` | No |
 | `language_code` | No |
 
-After a run:
+EAN/GTIN values must be supplied as strings so leading zeroes are preserved.
 
-```bash
-find data/artifacts -maxdepth 4 -type f | sort
+Run one product:
+
+```python
+result = run_product(product, FEATURE_SET)
+pprint(summarize_result(result))
 ```
+
+## Job and result semantics
+
+The polling endpoint and result endpoint expose related but different structures.
+
+### Polling endpoint
+
+`GET /v1/jobs/{job_id}` returns the execution record:
+
+| Field | Meaning |
+|---|---|
+| `status` | `RUNNING`, `COMPLETED`, `REVIEW_REQUIRED`, or `FAILED` |
+| `stage` | Current workflow stage |
+| `message` | Human-readable progress message |
+| `error` | Error text only for failed jobs |
+
+### Result endpoint
+
+`GET /v1/jobs/{job_id}/result` returns the orchestrated product result:
+
+| Path | Meaning |
+|---|---|
+| `product.row_id` | Original product row identifier |
+| `job_status` | `COMPLETED` or `REVIEW_REQUIRED` |
+| `coding_ready` | Whether the evidence set is sufficient for coding |
+| `primary_url` | Primary validated product/evidence URL |
+| `supplementary_urls` | Additional feature-evidence URLs |
+| `product_match` | URL decision, confidence, and best review URL |
+| `evidence_set` | Coverage, missing features, and conflicts |
+| `feature_assessments` | Per-URL feature evidence |
+| `browser_evidence` | Rendered and visual evidence bundles |
+| `artifact_dir` | Container path under `/data/artifacts` |
+
+The result does not expose top-level `row_id`, `status`, or `feature_evidence` fields. Use:
+
+```python
+row_id = result.get("product", {}).get("row_id")
+job_status = result.get("job_status")
+feature_assessments = result.get("feature_assessments", [])
+```
+
+The notebook's `summarize_result(result)` helper provides the supported flattened view.
+
+## Status interpretation
+
+| Status | Interpretation |
+|---|---|
+| `COMPLETED` | Workflow completed and the evidence set is coding-ready |
+| `REVIEW_REQUIRED` | Workflow completed, but evidence is insufficient for automatic coding |
+| `FAILED` | Execution failed |
+
+`REVIEW_REQUIRED` is not an infrastructure or Python failure.
+
+A result such as:
+
+```python
+{
+    "job_status": "REVIEW_REQUIRED",
+    "coding_ready": False,
+    "primary_url": None,
+}
+```
+
+means no candidate passed the configured identity and evidence gates. Inspect `product_match.best_available_url`, `evidence_set`, `review.md`, and `candidates.csv`.
+
+## Artifact inspection
+
+The API reports:
+
+```text
+/data/artifacts/<row_id>
+```
+
+The corresponding repository path is:
+
+```text
+data/artifacts/<row_id>/
+```
+
+The notebook uses `host_artifact_dir(result)` to resolve the host path even when the kernel starts inside `notebooks/`.
+
+For review-required cases inspect:
+
+```python
+pprint(result.get("product_match") or {})
+pprint(result.get("evidence_set") or {})
+pprint(result.get("feature_assessments") or [])
+pprint(result.get("browser_evidence") or [])
+```
+
+Then inspect:
+
+```text
+data/artifacts/<row_id>/review.md
+data/artifacts/<row_id>/candidates.csv
+```
+
+## CSV batch
+
+Expected input columns:
+
+```text
+row_id,main_text,country_code,retailer_name,ean,language_code
+```
+
+The notebook writes:
+
+```text
+data/artifacts/notebook_batch_summary.csv
+```
+
+The summary includes `job_status`, `coding_ready`, selected URLs, decision status, missing features, and the host artifact directory.
 
 ## Runtime flow
 
@@ -224,8 +310,6 @@ Notebook
   -> agent selects primary and supplementary evidence URLs
   -> result and artifacts are written to data/artifacts/<row_id>/
 ```
-
-The browser service does not perform search and does not receive the private feature schema.
 
 ## Operations
 
@@ -263,16 +347,17 @@ On a permissive Azure ML mount, include `--allow-insecure-env-permissions` again
 | Symptom | Action |
 |---|---|
 | Docker socket permission denied | Request Docker permission from the Azure ML administrator |
-| Docker reports `compose` is not a command | Install the Docker Compose v2 CLI plugin for the Compute Instance user |
-| `.env` remains broadly readable after `chmod 600` | Use the explicit mounted-filesystem override and accept the warning |
+| Docker reports `compose` is not a command | Install the Docker Compose v2 CLI plugin |
+| `.env` remains broadly readable | Use the explicit mounted-filesystem override and accept the warning |
 | Preflight reports placeholder value | Replace the named `.env` value and rerun |
 | No feature set found | Copy a valid JSON file into `inputs/private/` |
-| Runtime directory is not writable | Verify the current notebook user can write inside the cloned repository |
+| Runtime directory is not writable | Verify the current notebook user can write inside the repository |
 | Agent port already in use | Stop the conflicting process or change `AGENT_HOST_PORT` |
-| Browser unhealthy | Check `docker compose logs browser`; confirm shared memory and outbound access |
+| Browser unhealthy | Check `docker compose logs browser` |
 | Agent unhealthy | Check `docker compose logs agent`; verify SerpAPI and LLM settings |
-| CAPTCHA/login/access wall | The candidate is marked blocked; the system does not bypass access controls |
-| Notebook cannot connect | Confirm the stack is healthy and `PRODUCT_AGENT_URL` points to `http://127.0.0.1:8788` |
+| Notebook shows `row_id=None` or `status=None` | Pull the latest notebook and use `summarize_result(result)` |
+| `REVIEW_REQUIRED` with no primary URL | Inspect `product_match`, `evidence_set`, `review.md`, and `candidates.csv` |
+| CAPTCHA/login/access wall | The candidate is marked blocked; access controls are not bypassed |
 
 ## Validation commands
 
@@ -283,10 +368,4 @@ python -m pytest -q
 docker compose config --quiet
 ```
 
-Mounted-filesystem preflight:
-
-```bash
-python scripts/preflight_azureml.py \
-  --project-dir "$(pwd)" \
-  --allow-insecure-env-permissions
-```
+See also [Notebook Usage and Result Contract](NOTEBOOK_USAGE.md).
