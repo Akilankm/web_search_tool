@@ -5,8 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from product_evidence_harness.environment import EnvironmentValidationError
-from product_evidence_harness.three_stage_environment import validate_runtime_environment
+from product_evidence_harness import EnvironmentValidationError, validate_runtime_environment
 
 
 def _write_env(path: Path, text: str) -> Path:
