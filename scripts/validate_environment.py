@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate runtime secrets and invariants without making network calls."""
+"""Validate strict three-stage runtime invariants without network calls."""
 
 from __future__ import annotations
 
@@ -13,12 +13,19 @@ SRC_PATH = PROJECT_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-from product_evidence_harness import EnvironmentValidationError, validate_runtime_environment  # noqa: E402
+from product_evidence_harness.environment import EnvironmentValidationError  # noqa: E402
+from product_evidence_harness.three_stage_environment import (  # noqa: E402
+    validate_runtime_environment,
+)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Validate .env security, SerpAPI configuration, LLM configuration, and one-credit invariants without network access."
+        description=(
+            "Validate .env security, SerpAPI configuration, LLM configuration, "
+            "the exact three-credit search campaign, and strict final URL gates "
+            "without network access."
+        )
     )
     parser.add_argument("--env-file", default=".env")
     return parser.parse_args()
@@ -29,7 +36,10 @@ def main() -> int:
     try:
         report = validate_runtime_environment(args.env_file)
     except EnvironmentValidationError as exc:
-        print(json.dumps({"status": "invalid", "error": str(exc)}, indent=2), file=sys.stderr)
+        print(
+            json.dumps({"status": "invalid", "error": str(exc)}, indent=2),
+            file=sys.stderr,
+        )
         return 2
 
     print(json.dumps({"status": "valid", **report.to_dict()}, indent=2))
