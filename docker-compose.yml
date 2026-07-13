@@ -19,7 +19,7 @@ services:
       BROWSER_ACTION_TIMEOUT_MS: "${BROWSER_ACTION_TIMEOUT_MS:-8000}"
       BROWSER_API_TOKEN_FILE: /run/secrets/browser_api_token
     volumes:
-      - ./artifacts:/data/artifacts
+      - ./data/artifacts:/data/artifacts
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=1g
     secrets:
@@ -45,12 +45,13 @@ services:
       PRIVATE_FEATURE_ROOT: /data/private
       BROWSER_BASE_URL: http://browser:9000
       BROWSER_API_TOKEN_FILE: /run/secrets/browser_api_token
+      PRODUCT_HARNESS_OUTPUT_DIR: /data/artifacts
       PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE: "true"
       PRODUCT_HARNESS_BROWSER_FALLBACK_ONLY: "false"
       PRODUCT_HARNESS_ENABLE_VISION_REASONING: "${PRODUCT_HARNESS_ENABLE_VISION_REASONING:-true}"
       PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT: "${PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT:-3}"
     volumes:
-      - ./artifacts:/data/artifacts
+      - ./data/artifacts:/data/artifacts
       - ./inputs/private:/data/private:ro
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=512m

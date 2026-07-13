@@ -146,6 +146,19 @@ def ensure_feature_set(project_dir: Path) -> list[Path]:
     return files
 
 
+def ensure_runtime_directories(project_dir: Path) -> tuple[Path, ...]:
+    """Create the complete generated runtime layout for a fresh clone."""
+
+    paths = (
+        project_dir / "data" / "artifacts",
+        project_dir / "data" / "runtime",
+        project_dir / "secrets",
+    )
+    for path in paths:
+        path.mkdir(parents=True, exist_ok=True)
+    return paths
+
+
 def run_checked(command: list[str], cwd: Path) -> None:
     completed = subprocess.run(command, cwd=cwd, text=True, capture_output=True)
     if completed.returncode:
@@ -204,8 +217,7 @@ def main() -> int:
     )
     validate_env(values)
     feature_files = ensure_feature_set(project_dir)
-    (project_dir / "artifacts").mkdir(parents=True, exist_ok=True)
-    (project_dir / "secrets").mkdir(parents=True, exist_ok=True)
+    ensure_runtime_directories(project_dir)
     if not args.skip_port:
         check_agent_port(values)
     if not args.skip_docker:
@@ -213,6 +225,7 @@ def main() -> int:
 
     print("Preflight passed.")
     print(f"Validated feature sets: {len(feature_files)}")
+    print(f"Artifact root: {project_dir / 'data' / 'artifacts'}")
     return 0
 
 

@@ -39,6 +39,8 @@ ENV/
 output/
 outputs/
 artifacts/
+data/artifacts/
+data/runtime/
 results/
 runs/
 logs/

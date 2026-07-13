@@ -91,6 +91,18 @@ def test_preflight_creates_and_validates_generic_feature_set(tmp_path: Path) -> 
     preflight.validate_feature_file(files[0])
 
 
+def test_preflight_creates_repository_local_runtime_layout(tmp_path: Path) -> None:
+    created = preflight.ensure_runtime_directories(tmp_path)
+
+    assert created == (
+        tmp_path / "data" / "artifacts",
+        tmp_path / "data" / "runtime",
+        tmp_path / "secrets",
+    )
+    assert all(path.is_dir() for path in created)
+    assert not (tmp_path / "artifacts").exists()
+
+
 def test_preflight_rejects_invalid_feature_contract(tmp_path: Path) -> None:
     path = tmp_path / "bad.json"
     path.write_text(json.dumps({"features": ["wrong key"]}), encoding="utf-8")

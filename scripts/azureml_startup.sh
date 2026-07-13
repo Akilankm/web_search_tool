@@ -44,12 +44,17 @@ esac
 
 cd "$PROJECT_DIR"
 
-mkdir -p artifacts inputs/private secrets
+# A fresh clone contains no generated runtime folders. Create the complete
+# repository-local runtime layout before preflight or Docker Compose runs.
+mkdir -p data/artifacts data/runtime inputs/private secrets
+
 if [[ ! -s secrets/browser_api_token.txt ]]; then
   python - <<'PY'
 from pathlib import Path
 import secrets
+
 path = Path("secrets/browser_api_token.txt")
+path.parent.mkdir(parents=True, exist_ok=True)
 path.write_text(secrets.token_urlsafe(48), encoding="utf-8")
 path.chmod(0o600)
 PY
@@ -62,16 +67,40 @@ if [[ "$ALLOW_INSECURE_ENV_PERMISSIONS" == "true" ]]; then
 fi
 python scripts/preflight_azureml.py "${preflight_args[@]}"
 
-# Bind-mounted folders must be writable by the same Azure ML user that owns the
-# checkout. When this script is launched by a root startup hook, use the checkout
-# owner's UID/GID rather than running the application containers as root.
-export RUNTIME_UID="${PRODUCT_EVIDENCE_RUNTIME_UID:-$(stat -c '%u' "$PROJECT_DIR")}" 
-export RUNTIME_GID="${PRODUCT_EVIDENCE_RUNTIME_GID:-$(stat -c '%g' "$PROJECT_DIR")}" 
+# Prefer the identity of the user invoking startup. Azure ML cloudfiles mounts
+# can report the checkout owner as root even when the notebook user is the
+# correct non-root runtime identity.
+if [[ -n "${PRODUCT_EVIDENCE_RUNTIME_UID:-}" ]]; then
+  RUNTIME_UID="$PRODUCT_EVIDENCE_RUNTIME_UID"
+elif [[ "$(id -u)" != "0" ]]; then
+  RUNTIME_UID="$(id -u)"
+else
+  RUNTIME_UID="$(stat -c '%u' "$PROJECT_DIR")"
+fi
+
+if [[ -n "${PRODUCT_EVIDENCE_RUNTIME_GID:-}" ]]; then
+  RUNTIME_GID="$PRODUCT_EVIDENCE_RUNTIME_GID"
+elif [[ "$(id -u)" != "0" ]]; then
+  RUNTIME_GID="$(id -g)"
+else
+  RUNTIME_GID="$(stat -c '%g' "$PROJECT_DIR")"
+fi
+
+export RUNTIME_UID RUNTIME_GID
 
 if [[ "$RUNTIME_UID" == "0" ]]; then
   echo "Refusing to run application containers as root. Set PRODUCT_EVIDENCE_RUNTIME_UID/GID to the Azure ML notebook user." >&2
   exit 1
 fi
+
+for runtime_path in data/artifacts data/runtime; do
+  probe="$runtime_path/.write-test-$$"
+  if ! : > "$probe"; then
+    echo "Runtime directory is not writable by the current user: $PROJECT_DIR/$runtime_path" >&2
+    exit 1
+  fi
+  rm -f "$probe"
+done
 
 docker compose up -d --build --remove-orphans
 
@@ -82,4 +111,5 @@ if ! python scripts/wait_for_stack.py; then
 fi
 
 echo "Product evidence platform is ready at http://127.0.0.1:${AGENT_HOST_PORT:-8788}"
+echo "Artifacts will be written under $PROJECT_DIR/data/artifacts/<row_id>/"
 echo "Open notebooks/01_run_product_evidence.ipynb in Azure ML Studio."

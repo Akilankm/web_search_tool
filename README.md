@@ -29,6 +29,14 @@ Old direct-run notebooks and CLI entry points have been removed.
 
 ## Fresh Azure ML setup
 
+The supported operator flow is:
+
+1. clone the repository;
+2. create and populate `.env`;
+3. add the private feature JSON;
+4. run the startup script;
+5. open the notebook and execute products.
+
 ```bash
 git clone https://github.com/Akilankm/web_search_tool.git
 cd web_search_tool
@@ -45,7 +53,7 @@ If the Azure ML `cloudfiles` mount cannot preserve mode `600`, keep the default 
 ./scripts/azureml_startup.sh --allow-insecure-env-permissions
 ```
 
-This permits broad modes such as `777` for that startup only and emits a security warning. Prefer copying the runtime to local Compute Instance storage and using mode `600` whenever possible.
+This permits broad modes such as `777` for that startup only and emits a security warning.
 
 Add your private feature set:
 
@@ -74,7 +82,23 @@ Start the complete platform:
 ./scripts/azureml_startup.sh
 ```
 
-The command validates configuration and Docker access, builds both images, starts both services, waits for health, and prints logs automatically if startup fails.
+On Azure ML mounted storage where `.env` remains broadly permissioned:
+
+```bash
+./scripts/azureml_startup.sh --allow-insecure-env-permissions
+```
+
+The startup command automatically:
+
+- creates `data/artifacts/`, `data/runtime/`, `inputs/private/`, and `secrets/` when absent;
+- generates the browser API token when absent;
+- resolves the current non-root Azure ML notebook user as the container UID/GID;
+- validates configuration and Docker access;
+- builds and starts both containers;
+- waits for service health;
+- routes every product artifact to `data/artifacts/<row_id>/` inside the current repository.
+
+No manual UID/GID export, symlink, `/app/output` repair, or artifact copy is required.
 
 Then open:
 
@@ -83,6 +107,30 @@ notebooks/01_run_product_evidence.ipynb
 ```
 
 Set the notebook's `FEATURE_SET` to the feature-file name without `.json`.
+
+## Runtime artifact contract
+
+The host and container paths are intentionally fixed:
+
+```text
+Host repository: ./data/artifacts
+Agent container: /data/artifacts
+Browser container: /data/artifacts
+Product output:  ./data/artifacts/<row_id>/
+```
+
+A completed product run writes files such as:
+
+```text
+data/artifacts/TEST-001/
+├── candidates.csv
+├── feature_evidence.csv
+├── orchestrated_result.json
+├── result.json
+└── review.md
+```
+
+Generated `data/artifacts/` and `data/runtime/` content is ignored by Git. Deleting either directory while the stack is stopped is safe; the next startup recreates it.
 
 ## Azure ML prerequisites
 
@@ -151,8 +199,10 @@ CAPTCHA, login walls, paywalls, purchases, credential entry, and anti-bot bypass
 │   └── SECURITY.md
 ├── src/product_evidence_harness/
 ├── tests/
-├── inputs/private/     # ignored by Git
-└── artifacts/          # ignored by Git
+├── inputs/private/       # created automatically; ignored by Git
+└── data/
+    ├── artifacts/        # created automatically; ignored by Git
+    └── runtime/          # created automatically; ignored by Git
 ```
 
 ## Operations
@@ -171,6 +221,12 @@ docker compose down
 git pull
 docker compose down
 ./scripts/azureml_startup.sh
+```
+
+After a successful notebook run:
+
+```bash
+find data/artifacts -maxdepth 3 -type f | sort
 ```
 
 ## Validation
