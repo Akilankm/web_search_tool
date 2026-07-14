@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException
 
 from src.product_evidence_harness.agent_service.jobs import InMemoryJobStore, JobStatus
-from src.product_evidence_harness.agent_service.progress_context import browser_progress_callback
+from src.product_evidence_harness.progress_context import browser_progress_callback
 from src.product_evidence_harness.agent_service.strict_orchestrator import (
     StrictProductEvidenceOrchestrator,
 )
