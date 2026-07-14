@@ -9,8 +9,12 @@ from urllib.parse import urlparse
 
 import httpx
 
-from src.product_evidence_harness.progress_context import emit_browser_progress
+from src.product_evidence_harness.agentic_browser_contracts import (
+    AgenticBrowserAction,
+    AgenticBrowserObservation,
+)
 from src.product_evidence_harness.browser_contracts import BrowserEvidenceBundle, BrowserEvidenceRequest
+from src.product_evidence_harness.progress_context import emit_browser_progress
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +49,7 @@ class BrowserServiceError(RuntimeError):
 class BrowserEvidenceClient:
     def __init__(self, config: BrowserServiceConfig | None = None) -> None:
         self.config = config or BrowserServiceConfig.from_env()
-        headers = {"User-Agent": "product-evidence-agent/0.5"}
+        headers = {"User-Agent": "product-evidence-agent/0.8"}
         if self.config.api_token:
             headers["Authorization"] = f"Bearer {self.config.api_token}"
         self._client = httpx.Client(
@@ -106,6 +110,51 @@ class BrowserEvidenceClient:
         raise BrowserServiceError(
             f"Browser evidence request failed: {type(last_error).__name__}: {last_error}"
         ) from last_error
+
+    def start_agentic_session(self, request: BrowserEvidenceRequest) -> AgenticBrowserObservation:
+        response = self._post("/v1/agentic/sessions/start", request.to_dict())
+        return AgenticBrowserObservation.from_mapping(response)
+
+    def observe_agentic_session(self, session_id: str) -> AgenticBrowserObservation:
+        try:
+            response = self._client.get(f"/v1/agentic/sessions/{session_id}/observe")
+            response.raise_for_status()
+            return AgenticBrowserObservation.from_mapping(response.json())
+        except (httpx.HTTPError, ValueError) as exc:
+            raise BrowserServiceError(
+                f"Agentic browser observation failed: {type(exc).__name__}: {exc}"
+            ) from exc
+
+    def act_agentic_session(self, action: AgenticBrowserAction) -> AgenticBrowserObservation:
+        response = self._post(
+            f"/v1/agentic/sessions/{action.session_id}/act",
+            action.to_dict(),
+        )
+        return AgenticBrowserObservation.from_mapping(response)
+
+    def finish_agentic_session(self, session_id: str) -> BrowserEvidenceBundle:
+        response = self._post(f"/v1/agentic/sessions/{session_id}/finish", {})
+        return BrowserEvidenceBundle.from_mapping(response)
+
+    def abort_agentic_session(self, session_id: str) -> None:
+        try:
+            response = self._client.delete(f"/v1/agentic/sessions/{session_id}")
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return
+
+    def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            response = self._client.post(path, json=payload)
+            response.raise_for_status()
+            value = response.json()
+            if not isinstance(value, dict):
+                raise ValueError("Browser service returned a non-object JSON response")
+            return dict(value)
+        except (httpx.HTTPError, ValueError) as exc:
+            raise BrowserServiceError(
+                f"Browser service request failed for {path}: {type(exc).__name__}: {exc}"
+            ) from exc
 
     def __enter__(self) -> "BrowserEvidenceClient":
         return self
