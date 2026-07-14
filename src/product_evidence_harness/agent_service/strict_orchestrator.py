@@ -15,7 +15,12 @@ from src.product_evidence_harness.config import HarnessConfig, SerpAPIConfig
 from src.product_evidence_harness.contracts import ProductQuery
 from src.product_evidence_harness.feature_evidence import EvidenceSetSelector
 from src.product_evidence_harness.feature_schema import URLFeatureAssessment
+from src.product_evidence_harness.llm.agentic_browser import (
+    AgenticBrowserConfig,
+    AgenticBrowserInvestigator,
+)
 from src.product_evidence_harness.llm.feature_reasoner import LLMFeatureReasoner
+from src.product_evidence_harness.llm.service import LLMService
 from src.product_evidence_harness.one_credit_pipeline import FeatureAwareHarnessResult, OneCreditConfig
 from src.product_evidence_harness.schema_io import load_feature_schema
 from src.product_evidence_harness.strict_acceptance import StrictPrimaryURLSelector
@@ -30,7 +35,7 @@ def _enabled(name: str, default: bool) -> bool:
 
 
 class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
-    """Three-stage discovery plus strict browser and feature acceptance."""
+    """Three-stage discovery plus LLM-controlled browser investigation and strict acceptance."""
 
     def run(
         self,
@@ -84,7 +89,7 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
                 scrape_top_k=stage_scrape_top_k,
                 render_or_browser_top_k=max(
                     3,
-                    int(os.getenv("PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT", "9")),
+                    int(os.getenv("PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", "18")),
                 ),
                 max_supplementary_urls=3,
             ),
@@ -95,17 +100,39 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
         if not isinstance(base, FeatureAwareHarnessResult):
             raise RuntimeError("Expected feature-aware trace result")
 
+        output_dir = self.config.artifact_root / product.row_id
+        output_dir.mkdir(parents=True, exist_ok=True)
         browser_bundles = []
         browser_assessments: list[URLFeatureAssessment] = []
+        candidate_investigations: list[dict[str, Any]] = []
+        agentic_enabled = _enabled("PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER", True)
+        agentic_required = _enabled("PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER", True)
+        browser_urls = self._browser_urls(base)
+
+        if agentic_required and (not agentic_enabled or self.browser_client is None):
+            raise RuntimeError(
+                "The production workflow requires the LLM-controlled agentic browser service"
+            )
+
+        investigator = None
+        agentic_config = AgenticBrowserConfig.from_env()
+        if agentic_enabled and self.browser_client is not None:
+            investigator = AgenticBrowserInvestigator(
+                browser=self.browser_client,
+                service=LLMService(),
+                config=agentic_config,
+            )
+
         if self.browser_client is not None:
             emit(
-                "REQUESTING_BROWSER_EVIDENCE",
-                "Browser-verifying candidates from every fallback stage",
+                "AGENTIC_BROWSER_INVESTIGATION",
+                f"LLM-investigating {len(browser_urls)} candidate URLs with observe-plan-act browser sessions",
             )
-            for index, url in enumerate(self._browser_urls(base), start=1):
+            for index, url in enumerate(browser_urls, start=1):
+                candidate_id = f"CAND-{index:03d}"
                 request = BrowserEvidenceRequest(
                     job_id=product.row_id,
-                    candidate_id=f"CAND-{index:03d}",
+                    candidate_id=candidate_id,
                     url=url,
                     product_identity=ProductIdentityPayload(
                         row_id=product.row_id,
@@ -123,7 +150,7 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
                         capture_screenshot_fallbacks=True,
                         maximum_images=10,
                         maximum_screenshots=8,
-                        maximum_actions=30,
+                        maximum_actions=agentic_config.max_actions_per_candidate,
                         requested_evidence_categories=(
                             "product_gallery",
                             "package_front_back",
@@ -133,9 +160,24 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
                         ),
                     ),
                 )
-                try:
-                    bundle = self.browser_client.acquire(request)
-                except BrowserServiceError:
+                bundle = None
+                if investigator is not None:
+                    bundle, dossier = investigator.investigate(
+                        request=request,
+                        schema=schema,
+                        progress=emit,
+                    )
+                    dossier_payload = dossier.to_dict()
+                    candidate_investigations.append(dossier_payload)
+                    dossier_dir = output_dir / candidate_id / "agentic"
+                    dossier_dir.mkdir(parents=True, exist_ok=True)
+                    self._atomic_json(dossier_dir / "investigation.json", dossier_payload)
+                else:
+                    try:
+                        bundle = self.browser_client.acquire(request)
+                    except BrowserServiceError:
+                        continue
+                if bundle is None:
                     continue
                 browser_bundles.append(bundle)
                 assessment = self._assessment_from_browser(product, schema, bundle, llm_reasoner)
@@ -180,6 +222,7 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
                 missing_features=(),
                 conflicting_features=(),
                 reasons=(
+                    "The primary URL was investigated through an LLM-controlled browser session.",
                     "The primary URL is browser-openable and text-scrapable.",
                     "The rendered page is the exact requested product.",
                     "The same primary URL contains every requested feature.",
@@ -192,13 +235,13 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
                 validation_status="VERIFIED",
                 identity_status="VERIFIED",
                 is_exact_product_match=True,
-                match_reason="STRICT_PRIMARY_URL_ACCEPTED",
+                match_reason="STRICT_AGENTIC_PRIMARY_URL_ACCEPTED",
                 justification=(
-                    "Accepted after browser verification, exact-product identity validation, "
-                    "full requested-feature coverage, scrapability, and URL durability checks."
+                    "Accepted after LLM-controlled browser investigation, deterministic exact-product "
+                    "identity validation, full requested-feature coverage, scrapability, and URL durability checks."
                 ),
                 resolution_status="RESOLVED",
-                url_decision_status="STRICT_PRIMARY_URL_ACCEPTED",
+                url_decision_status="STRICT_AGENTIC_PRIMARY_URL_ACCEPTED",
                 is_global_fallback=(strict_acceptance.scope == "global_fallback"),
                 is_country_specific=(strict_acceptance.scope != "global_fallback"),
                 needs_review=False,
@@ -223,14 +266,14 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
                 base.product_match,
                 product_url=None,
                 is_exact_product_match=False,
-                match_reason="STRICT_PRIMARY_URL_REJECTED",
+                match_reason="STRICT_AGENTIC_PRIMARY_URL_REJECTED",
                 justification=(
-                    "No URL passed every required final gate: browser-openable, accessible, "
-                    "exact product, text-scrapable, complete requested feature coverage, and "
-                    "non-expiring URL."
+                    "No LLM-investigated URL passed every deterministic final gate: browser-openable, "
+                    "accessible, exact product, text-scrapable, complete requested feature coverage, "
+                    "and non-expiring URL."
                 ),
                 resolution_status="REVIEW_REQUIRED",
-                url_decision_status="STRICT_PRIMARY_URL_REJECTED",
+                url_decision_status="STRICT_AGENTIC_PRIMARY_URL_REJECTED",
                 needs_review=True,
                 primary_reject_reason="|".join(strict_acceptance.reasons[:20]),
             )
@@ -239,7 +282,7 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
         status = "COMPLETED" if coding_ready else "REVIEW_REQUIRED"
         stage_trace = list(getattr(base.state, "search_stage_trace", []))
 
-        emit("WRITING_OUTPUTS", "Writing the final strict evidence dossier")
+        emit("WRITING_OUTPUTS", "Writing the final agentic evidence dossier")
         result = {
             "job_status": status,
             "product": product.to_dict(),
@@ -253,6 +296,26 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
                 "policy": "REQUESTED_RETAILER_COUNTRY_GLOBAL",
                 "feature_schema_used_by_search": False,
             },
+            "agentic_browser": {
+                "enabled": agentic_enabled,
+                "required": agentic_required,
+                "policy": "LLM_OBSERVE_PLAN_ACT_PER_ELIGIBLE_CANDIDATE",
+                "candidate_urls_admitted": len(browser_urls),
+                "candidate_investigations_completed": sum(
+                    1 for item in candidate_investigations if item.get("status") == "COMPLETED"
+                ),
+                "candidate_investigations_failed": sum(
+                    1 for item in candidate_investigations if item.get("status") == "FAILED"
+                ),
+                "max_candidates": int(
+                    os.getenv("PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", "18")
+                ),
+                "max_turns_per_candidate": agentic_config.max_turns_per_candidate,
+                "max_actions_per_candidate": agentic_config.max_actions_per_candidate,
+                "llm_controls_browser_actions": True,
+                "deterministic_final_selector": True,
+            },
+            "candidate_investigations": candidate_investigations,
             "product_match": product_match.to_dict(),
             "primary_url": strict_acceptance.primary_url,
             "supplementary_urls": list(evidence_set.supplementary_urls),
@@ -262,10 +325,8 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
             "browser_evidence": [bundle.to_dict() for bundle in browser_bundles],
             "multimodal_ready": any(bundle.multimodal_scrapable for bundle in browser_bundles),
             "coding_ready": coding_ready,
-            "artifact_dir": str(self.config.artifact_root / product.row_id),
+            "artifact_dir": str(output_dir),
         }
-        output_dir = self.config.artifact_root / product.row_id
-        output_dir.mkdir(parents=True, exist_ok=True)
         self._atomic_json(
             output_dir / "primary_url_acceptance.json",
             strict_acceptance.to_dict(),
@@ -274,7 +335,13 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
         return result
 
     def _browser_urls(self, base: FeatureAwareHarnessResult) -> tuple[str, ...]:
-        limit = max(3, int(self.config.browser_candidate_limit))
+        limit = max(
+            3,
+            min(
+                90,
+                int(os.getenv("PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", "18")),
+            ),
+        )
         cards = list(base.state.scorecards)
         selected: list[str] = []
         stage_order = (
@@ -286,16 +353,11 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
 
         for stage in stage_order:
             marker = f"scope_{stage}"
-            card = next(
-                (
-                    item
-                    for item in cards
-                    if marker in item.candidate.source_types and not item.hard_failures
-                ),
-                None,
+            selected.extend(
+                item.candidate.url
+                for item in cards
+                if marker in item.candidate.source_types and not item.hard_failures
             )
-            if card is not None:
-                selected.append(card.candidate.url)
 
         selected.extend(
             [

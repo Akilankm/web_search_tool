@@ -1,7 +1,5 @@
 # Azure ML Operations Runbook
 
-This is the definitive operating procedure for the Product Evidence Platform.
-
 ## Runtime topology
 
 ```text
@@ -9,151 +7,146 @@ Azure ML Compute Instance
 ├── Docker Compose
 │   ├── agent:8000   -> host 127.0.0.1:8788
 │   └── browser:9000 -> internal Compose network only
-├── inputs/private/  -> read-only private feature schemas
-├── data/
-│   ├── artifacts/   -> shared agent/browser evidence
-│   └── runtime/     -> repository-local transient state
+├── inputs/private/  -> read-only feature schemas
+├── data/artifacts/  -> shared evidence and traces
 └── notebooks/01_run_product_evidence.ipynb
 ```
 
-The notebook is only an API client. Search, scraping, identity validation, browser verification, feature extraction, URL acceptance, and artifact writing happen inside the containers.
+The notebook is an API client. The agent owns search, LLM planning, deterministic validation, final selection, and outputs. The browser owns isolated Chromium sessions and safe action execution.
 
-## Fresh-clone procedure
+## Fresh setup
 
 ```bash
 git clone https://github.com/Akilankm/web_search_tool.git
 cd web_search_tool
 cp .env.example .env
 chmod 600 .env
-# Replace all placeholders.
+# Replace SerpAPI and LLM placeholders.
 mkdir -p inputs/private
 cp /secure/location/toy_features.json inputs/private/toy_features.json
 ./scripts/azureml_startup.sh
 ```
 
-For Azure ML mounted filesystems that cannot preserve mode `600`:
+For mounted storage that cannot preserve mode `600`:
 
 ```bash
 ./scripts/azureml_startup.sh --allow-insecure-env-permissions
 ```
 
-Startup creates missing repository-local runtime folders, validates the strict production controls, builds both containers, and waits for health.
+## Search campaign
 
-## Immutable search campaign
+Every product uses exactly three SerpAPI organic searches:
 
-Every product consumes exactly three SerpAPI organic-search credits:
+1. requested retailer in requested country, or primary country search;
+2. other retailers in requested country;
+3. global fallback.
 
-| Credit | Scope | Retailer behavior |
-|---:|---|---|
-| 1 | Requested country | Includes `retailer_name` when provided |
-| 2 | Requested country | Removes retailer constraint and searches other country retailers |
-| 3 | Global | Removes retailer and country restrictions |
+Private feature names are not included in search queries.
 
-When `retailer_name` is absent, credit 1 is the primary country search. EAN is optional throughout. `country_code` and `main_text` are mandatory. Private feature names are never placed in SerpAPI queries.
+## Agentic browser campaign
 
-Required configuration:
+The production candidate pool retains at most 90 merged and deduplicated URLs. The agentic limit is also 90, so every retained URL receives a separate browser session.
 
-```env
-PRODUCT_HARNESS_WORKFLOW=three_stage_feature_aware
-PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=3
-PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES=0
-PRODUCT_HARNESS_COUNTRY_FIRST=true
-PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK=true
+```text
+Start isolated session
+  -> browser returns screenshot, text, elements and images
+  -> LLM selects one safe action
+  -> browser validates and executes it
+  -> browser returns updated state
+  -> repeat
+  -> finish evidence bundle
 ```
 
-The runtime and preflight validators reject weaker or different values.
-
-## Strict primary URL acceptance
-
-After all search stages, candidates are statically scraped and opened by the browser service. `primary_url` is populated only when one URL satisfies all conditions:
-
-1. Browser opens the final URL successfully.
-2. Rendered content is the exact requested product and variant.
-3. The rendered page is a product detail page.
-4. Product text is scrapable.
-5. The same URL contains all requested features with no conflicts.
-6. The URL has no token, signature, expiry, TTL, session, or temporary credential parameter.
-
-Required controls:
+Default controls:
 
 ```env
-PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE=true
-PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY=true
-PRODUCT_HARNESS_REJECT_EXPIRING_URLS=true
-PRODUCT_HARNESS_RETURN_REJECTED_REFERENCE_AS_PRODUCT_URL=false
+PRODUCT_HARNESS_MAX_CANDIDATE_POOL=90
+PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER=true
+PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER=true
+PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES=90
+PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE=10
+PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE=20
 ```
 
-When no URL passes, the workflow returns `REVIEW_REQUIRED`, `coding_ready=false`, and `primary_url=null`. Review references may remain in diagnostic fields, but they are never promoted to `primary_url`.
+Lowering the agentic limit deliberately changes the production behavior to top-N investigation. Candidate and turn limits directly affect browser runtime and LLM cost.
 
-## Input contract
-
-| Field | Required |
-|---|:---:|
-| `main_text` | Yes |
-| `country_code` | Yes |
-| `row_id` | Recommended |
-| `retailer_name` | No |
-| `ean` | No |
-| `language_code` | No |
-
-EAN/GTIN must be supplied as text to preserve leading zeroes.
-
-## Running products
-
-Open `notebooks/01_run_product_evidence.ipynb`, set `FEATURE_SET`, and call `run_product(product, FEATURE_SET)`.
-
-Progress stages:
+## Progress stages
 
 ```text
 VALIDATING_INPUT
 SEARCHING
-REQUESTING_BROWSER_EVIDENCE
+AGENTIC_BROWSER_INVESTIGATION
 VALIDATING_PRIMARY_URL
 WRITING_OUTPUTS
 COMPLETED or REVIEW_REQUIRED
 ```
 
-## Result fields
-
-| Path | Meaning |
-|---|---|
-| `product.row_id` | Original input row identifier |
-| `job_status` | `COMPLETED` or `REVIEW_REQUIRED` |
-| `coding_ready` | True only after strict acceptance |
-| `search.queries` | Executed queries in order |
-| `search.stages` | Stage name, scope, result count, and scrape count |
-| `search.serpapi_requests_used` | Exactly `3` |
-| `product_match.selection_scope` | Requested retailer, country alternative, or global |
-| `primary_url_acceptance` | Browser, identity, feature, scrapability, and durability gates |
-| `primary_url` | Strict accepted URL or `null` |
-| `evidence_set` | Feature coverage and conflicts |
-| `feature_assessments` | Per-URL requested-feature evidence |
-| `browser_evidence` | Rendered evidence and blockers |
-
-## Artifact contract
+Candidate progress includes turn number and selected action:
 
 ```text
-Host repository: ./data/artifacts
-Agent container: /data/artifacts
-Browser container: /data/artifacts
-Product output:  ./data/artifacts/<row_id>/
+CAND-003 | turn 2/10 | CLICK | retailer.example
+CAND-003 | turn 3/10 | INSPECT_IMAGE | retailer.example
+CAND-003 | COMPLETED | turns=4 | actions=3 | openable=True | scrapable=True
 ```
+
+## Browser safety enforcement
+
+The LLM may act only on observed `E###` and `I###` identifiers. The browser execution layer independently blocks:
+
+- stale or invented IDs;
+- cross-site navigation;
+- login/account actions;
+- upload and form-entry actions;
+- cart, checkout, order, subscription, and payment actions;
+- arbitrary URL, JavaScript, code, or access-control bypass.
+
+## Final acceptance
+
+`primary_url` is populated only when one investigated URL is:
+
+- browser-openable and not access-blocked;
+- a rendered product-detail page;
+- the exact requested product and variant;
+- text-scrapable;
+- complete for every requested feature on the same URL;
+- free of feature conflicts;
+- durable and non-expiring.
+
+The LLM investigation dossier is explanatory. `primary_url_acceptance.json` is authoritative.
+
+## Result inspection
+
+```python
+result["search"]
+result["agentic_browser"]
+result["candidate_investigations"]
+result["browser_evidence"]
+result["feature_assessments"]
+result["primary_url_acceptance"]
+```
+
+## Artifacts
 
 ```text
 data/artifacts/<row_id>/
-├── result.json
-├── candidates.csv
-├── feature_evidence.csv
-├── review.md
-├── primary_url_acceptance.json
 ├── orchestrated_result.json
-└── CAND-*/browser/
+├── primary_url_acceptance.json
+└── CAND-###/agentic/
+    ├── investigation.json
+    ├── latest_observation.json
+    ├── browser_actions.json
+    ├── browser_result.json
+    ├── rendered_text.md
+    ├── final_page.html
+    ├── observations/
+    ├── images/
+    └── screenshots/
 ```
 
-Use:
+Inspect:
 
 ```bash
-find data/artifacts -maxdepth 5 -type f | sort
+find data/artifacts -maxdepth 8 -type f | sort
 ```
 
 ## Health and logs
@@ -164,34 +157,42 @@ python scripts/wait_for_stack.py
 docker compose logs -f --tail=200 agent browser
 ```
 
-The health response reports `three_stage_contract_enforced=true` and `serpapi_request_limit=3`.
+The health response must report:
 
-## Restart and update
+```text
+three_stage_contract_enforced=true
+serpapi_request_limit=3
+agentic_browser_contract_enforced=true
+llm_configured=true
+```
+
+## Restart after an update
 
 ```bash
 docker compose down
 git checkout master
 git pull origin master
-./scripts/azureml_startup.sh
+./scripts/azureml_startup.sh --allow-insecure-env-permissions
 ```
+
+Restart the notebook kernel after rebuilding.
 
 ## Failure guide
 
-| Symptom | Action |
+| Symptom | Meaning / action |
 |---|---|
-| Docker socket permission denied | Request Docker permission from the Azure ML administrator |
-| `.env` permissions remain broad | Use the explicit mounted-filesystem override |
-| Organic searches must be 3 | Update `.env` from the current `.env.example` |
-| A strict flag must be true | Restore the required production control |
-| No feature set found | Copy a valid JSON file into `inputs/private/` |
-| `REVIEW_REQUIRED` | Inspect `primary_url_acceptance.json`, search stages, browser evidence, and candidates |
-| URL rejected for TTL/signature | Use a canonical product page instead of a temporary/signed link |
-| CAPTCHA/login/access wall | Candidate remains rejected; access controls are not bypassed |
+| Agentic browser flag must be true | Refresh `.env` from `.env.example` |
+| LLM configuration missing | Provide approved endpoint, deployment, version and key |
+| Candidate investigation failed | Inspect `CAND-###/agentic/investigation.json` and service logs |
+| CAPTCHA/login/access wall | Candidate is rejected; no bypass is attempted |
+| `REVIEW_REQUIRED` | No investigated candidate passed all deterministic gates |
+| URL rejected for signature/TTL | Use a canonical product page |
 
 ## Validation
 
 ```bash
 python scripts/validate_environment.py --env-file .env
+python scripts/preflight_azureml.py --skip-docker --skip-port
 python -m compileall -q src scripts
 python -m json.tool notebooks/01_run_product_evidence.ipynb >/dev/null
 python -m pytest -q

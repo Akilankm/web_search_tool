@@ -27,10 +27,18 @@ def valid_env() -> str:
             "PRODUCT_HARNESS_COUNTRY_FIRST=true",
             "PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK=true",
             "PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE=true",
+            "PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER=true",
+            "PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER=true",
             "PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY=true",
             "PRODUCT_HARNESS_REJECT_EXPIRING_URLS=true",
             "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE=6",
-            "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT=9",
+            "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT=18",
+            "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES=18",
+            "PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE=10",
+            "PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE=20",
+            "PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS=12000",
+            "PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS=60",
+            "PRODUCT_HARNESS_AGENTIC_MAX_IMAGES=30",
             "PRODUCT_HARNESS_ENABLE_VISION_REASONING=true",
             "PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING=false",
             "LLM_API_KEY=llm_key_with_more_than_sixteen_chars",
@@ -72,6 +80,21 @@ def test_preflight_rejects_disabled_strict_acceptance(tmp_path: Path) -> None:
         valid_env().replace(
             "PRODUCT_HARNESS_REJECT_EXPIRING_URLS=true",
             "PRODUCT_HARNESS_REJECT_EXPIRING_URLS=false",
+        ),
+        encoding="utf-8",
+    )
+    env_path.chmod(0o600)
+
+    with pytest.raises(preflight.PreflightError, match="must be true"):
+        preflight.validate_env(preflight.parse_env(env_path))
+
+
+def test_preflight_rejects_disabled_agentic_browser(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        valid_env().replace(
+            "PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER=true",
+            "PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER=false",
         ),
         encoding="utf-8",
     )
