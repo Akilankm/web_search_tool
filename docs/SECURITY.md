@@ -9,9 +9,17 @@ This document defines the security boundary for the two-container Product Eviden
 | SerpAPI key | Agent only |
 | LLM key, endpoint, deployment, API version | Agent only |
 | Browser internal API token | Agent and browser through a Compose secret |
-| Private feature files | Agent only, read-only mount |
+| Additional organization-specific feature files | Agent only, read-only mount |
 
-The browser receives no SerpAPI credential, no LLM credential, and no private feature file.
+The browser receives no SerpAPI credential, no LLM credential, and no feature file.
+
+The repository intentionally commits one approved, non-secret starter schema:
+
+```text
+inputs/private/toy_features.json
+```
+
+It contains only the generic requested feature names and descriptions for brand, manufacturer, and minimum recommended age. Other files under `inputs/private/` remain ignored by Git and must not be committed unless explicitly reviewed and approved.
 
 ## Automated `.env` handling
 
@@ -92,7 +100,7 @@ Startup fails before notebook use when:
 - credentials are missing or still placeholders;
 - the LLM endpoint is not HTTPS;
 - strict production controls are disabled;
-- a feature schema is malformed;
+- the committed default feature schema or an additional schema is malformed;
 - Docker or Compose is unavailable;
 - an unrelated process owns the configured agent port;
 - the live agent reports an invalid runtime configuration.
@@ -123,6 +131,7 @@ Artifacts may contain retailer text, product imagery, screenshots, URLs, identif
 ```bash
 ./scripts/azureml_startup.sh
 cat data/runtime/stack_health.json
+python -m json.tool inputs/private/toy_features.json >/dev/null
 python scripts/validate_environment.py --env-file .env
 python -m pytest -q
 docker compose config --quiet
