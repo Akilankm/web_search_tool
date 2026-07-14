@@ -24,9 +24,27 @@ PLACEHOLDER_MARKERS = (
     ">",
 )
 TRUE_VALUES = {"1", "true", "yes", "on"}
+FALSE_VALUES = {"0", "false", "no", "off"}
 ENV_ASSIGNMENT = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 INSECURE_PERMISSION_OVERRIDE_ENV = "PRODUCT_EVIDENCE_ALLOW_INSECURE_ENV_PERMISSIONS"
 ENV_PERMISSION_MODE_ENV = "PRODUCT_EVIDENCE_ENV_PERMISSION_MODE"
+SUPPORTED_SEARCH_ENGINES = {
+    "google",
+    "google_shopping",
+    "google_ai_mode",
+    "google_immersive_product",
+    "google_lens",
+    "amazon",
+    "ebay",
+    "walmart",
+    "home_depot",
+}
+REQUIRED_SEARCH_ENGINES = {
+    "google",
+    "google_shopping",
+    "google_ai_mode",
+    "google_immersive_product",
+}
 
 
 class PreflightError(RuntimeError):
@@ -46,14 +64,9 @@ def is_azureml_cloudfiles_path(path: Path) -> bool:
             normalized_paths.add(candidate.resolve(strict=False).as_posix().lower())
         except OSError:
             pass
-
-    markers = (
-        "/cloudfiles/",
-        "/mnt/batch/tasks/shared/ls_root/mounts/",
-    )
+    markers = ("/cloudfiles/", "/mnt/batch/tasks/shared/ls_root/mounts/")
     if any(marker in value for marker in markers for value in normalized_paths):
         return True
-
     return any(
         os.getenv(name, "").strip()
         for name in (
@@ -66,13 +79,6 @@ def is_azureml_cloudfiles_path(path: Path) -> bool:
 
 
 def prepare_env_permissions(path: Path, *, mode: str = "auto") -> tuple[bool, str]:
-    """Prepare .env permissions and return (allow_broad_permissions, policy_name).
-
-    auto: try 0600; permit broad permissions only on Azure ML managed mounts.
-    strict: require 0600-compatible permissions.
-    allow: explicitly permit broad permissions after a warning.
-    """
-
     normalized = str(mode or "auto").strip().lower()
     if normalized not in {"auto", "strict", "allow"}:
         raise PreflightError("Environment permission mode must be auto, strict, or allow")
@@ -82,23 +88,19 @@ def prepare_env_permissions(path: Path, *, mode: str = "auto") -> tuple[bool, st
         raise PreflightError(".env must be a regular file, not a symlink")
     if os.name != "posix":
         return False, "platform-default"
-
     try:
         path.chmod(0o600)
     except OSError:
         pass
-
     current_mode = stat.S_IMODE(path.stat().st_mode)
     if not current_mode & 0o077:
         return False, "strict-0600"
-
     if normalized == "allow" or process_flag_enabled(INSECURE_PERMISSION_OVERRIDE_ENV):
         print(
             f"SECURITY WARNING: accepting .env mode {current_mode:o} by explicit override.",
             file=sys.stderr,
         )
         return True, "explicit-broad-permission-override"
-
     if normalized == "auto" and is_azureml_cloudfiles_path(path):
         print(
             f"AZURE ML FILESYSTEM NOTICE: .env remains mode {current_mode:o} because the managed "
@@ -107,7 +109,6 @@ def prepare_env_permissions(path: Path, *, mode: str = "auto") -> tuple[bool, st
             file=sys.stderr,
         )
         return True, "azureml-managed-mount-auto-fallback"
-
     raise PreflightError(
         ".env permissions are too broad and chmod 600 did not take effect. "
         "Use a private filesystem, or explicitly set PRODUCT_EVIDENCE_ENV_PERMISSION_MODE=allow."
@@ -119,7 +120,6 @@ def parse_env(path: Path, *, allow_insecure_permissions: bool = False) -> dict[s
         raise PreflightError(".env is missing. Run: cp .env.example .env")
     if path.is_symlink():
         raise PreflightError(".env must be a regular file, not a symlink")
-
     if os.name == "posix":
         mode = stat.S_IMODE(path.stat().st_mode)
         if mode & 0o077:
@@ -133,7 +133,6 @@ def parse_env(path: Path, *, allow_insecure_permissions: bool = False) -> dict[s
                 "mode 600; credential values will not be printed.",
                 file=sys.stderr,
             )
-
     values: dict[str, str] = {}
     for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         line = raw.strip()
@@ -156,9 +155,14 @@ def is_placeholder(value: str) -> bool:
 
 def is_enabled(values: dict[str, str], key: str, default: bool = False) -> bool:
     raw = values.get(key)
-    if raw is None:
+    if raw is None or not raw.strip():
         return default
-    return raw.strip().lower() in TRUE_VALUES
+    normalized = raw.strip().lower()
+    if normalized in TRUE_VALUES:
+        return True
+    if normalized in FALSE_VALUES:
+        return False
+    raise PreflightError(f"{key} must be an explicit boolean (true/false)")
 
 
 def first_value(values: dict[str, str], *keys: str) -> str:
@@ -179,16 +183,29 @@ def _require_int(values: dict[str, str], key: str, default: int, minimum: int, m
     return value
 
 
+def _require_float(values: dict[str, str], key: str, default: float, minimum: float, maximum: float) -> float:
+    try:
+        value = float(values.get(key, str(default)))
+    except ValueError as exc:
+        raise PreflightError(f"{key} must be numeric") from exc
+    if not minimum <= value <= maximum:
+        raise PreflightError(f"{key} must be between {minimum} and {maximum}")
+    return value
+
+
 def validate_env(values: dict[str, str]) -> None:
     workflow = values.get("PRODUCT_HARNESS_WORKFLOW", "three_stage_feature_aware")
     if workflow != "three_stage_feature_aware":
         raise PreflightError("PRODUCT_HARNESS_WORKFLOW must be three_stage_feature_aware")
-    if values.get("PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES", "3") != "3":
-        raise PreflightError("PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES must be 3")
-    if values.get("PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES", "0") != "0":
-        raise PreflightError("PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES must be 0")
 
+    credits = _require_int(values, "PRODUCT_HARNESS_MAX_SERPAPI_CREDITS", 3, 3, 3)
+    if credits != 3:
+        raise PreflightError("PRODUCT_HARNESS_MAX_SERPAPI_CREDITS must be 3")
     for key in (
+        "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_PLANNING",
+        "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_FEEDBACK",
+        "PRODUCT_HARNESS_REQUIRE_LLM_SEARCH_PLANNING",
+        "PRODUCT_HARNESS_EARLY_STOP_ON_WORKING_URL",
         "PRODUCT_HARNESS_COUNTRY_FIRST",
         "PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK",
         "PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE",
@@ -200,23 +217,52 @@ def validate_env(values: dict[str, str]) -> None:
         if not is_enabled(values, key, True):
             raise PreflightError(f"{key} must be true")
 
-    _require_int(values, "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE", 6, 1, 10)
-    _require_int(values, "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT", 90, 3, 90)
-    _require_int(values, "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", 90, 3, 90)
-    _require_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE", 10, 1, 30)
-    _require_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE", 20, 1, 60)
-    _require_int(values, "PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS", 12000, 2000, 30000)
-    _require_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS", 60, 10, 100)
-    _require_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_IMAGES", 30, 4, 50)
+    engines = tuple(
+        dict.fromkeys(
+            item.strip().lower()
+            for item in values.get(
+                "PRODUCT_HARNESS_ALLOWED_SEARCH_ENGINES",
+                ",".join(sorted(SUPPORTED_SEARCH_ENGINES)),
+            ).split(",")
+            if item.strip()
+        )
+    )
+    unknown = sorted(set(engines) - SUPPORTED_SEARCH_ENGINES)
+    if unknown:
+        raise PreflightError("Unsupported search engines: " + ", ".join(unknown))
+    missing = sorted(REQUIRED_SEARCH_ENGINES - set(engines))
+    if missing:
+        raise PreflightError("Missing required adaptive search engines: " + ", ".join(missing))
+
+    # Legacy counters are accepted only for backward-compatible .env files.
+    _require_int(values, "PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES", 3, 0, 3)
+    _require_int(values, "PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES", 0, 0, 3)
+    _require_int(values, "PRODUCT_HARNESS_SEARCH_PLANNER_MAX_CANDIDATES", 8, 3, 20)
+    _require_int(values, "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE", 2, 1, 10)
+    _require_int(values, "PRODUCT_HARNESS_MAX_FULL_SCRAPES", 6, 1, 12)
+    _require_int(values, "PRODUCT_HARNESS_MAX_SCRAPES_PER_DOMAIN", 2, 1, 4)
+    _require_float(values, "PRODUCT_HARNESS_MIN_PREFLIGHT_SCORE", 0.28, 0.05, 0.95)
+    _require_int(values, "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT", 3, 1, 90)
+    _require_int(values, "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", 3, 1, 90)
+    _require_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE", 4, 1, 30)
+    _require_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE", 6, 1, 60)
+    _require_int(values, "PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS", 4000, 1200, 30000)
+    _require_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS", 15, 5, 100)
+    _require_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_IMAGES", 8, 2, 50)
 
     serp_key = values.get("SERPAPI_API_KEY", "")
     if len(serp_key) < 20 or is_placeholder(serp_key):
         raise PreflightError("SERPAPI_API_KEY is missing or still contains the example value")
 
-    agentic_enabled = is_enabled(values, "PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER", True)
-    vision_enabled = is_enabled(values, "PRODUCT_HARNESS_ENABLE_VISION_REASONING", True)
-    text_llm_enabled = is_enabled(values, "PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING", False)
-    if agentic_enabled or vision_enabled or text_llm_enabled:
+    llm_required = any(
+        (
+            is_enabled(values, "PRODUCT_HARNESS_REQUIRE_LLM_SEARCH_PLANNING", True),
+            is_enabled(values, "PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER", True),
+            is_enabled(values, "PRODUCT_HARNESS_ENABLE_VISION_REASONING", True),
+            is_enabled(values, "PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING", False),
+        )
+    )
+    if llm_required:
         llm_values = {
             "API key": first_value(values, "LLM_API_KEY", "AZURE_OPENAI_API_KEY"),
             "API version": first_value(values, "LLM_API_VERSION", "AZURE_OPENAI_API_VERSION"),
@@ -327,17 +373,10 @@ def main() -> int:
         help="Deprecated compatibility alias for --env-permission-mode allow",
     )
     args = parser.parse_args()
-
     project_dir = Path(args.project_dir).resolve()
     permission_mode = "allow" if args.allow_insecure_env_permissions else args.env_permission_mode
-    allow_insecure_permissions, permission_policy = prepare_env_permissions(
-        project_dir / ".env",
-        mode=permission_mode,
-    )
-    values = parse_env(
-        project_dir / ".env",
-        allow_insecure_permissions=allow_insecure_permissions,
-    )
+    allow_insecure_permissions, permission_policy = prepare_env_permissions(project_dir / ".env", mode=permission_mode)
+    values = parse_env(project_dir / ".env", allow_insecure_permissions=allow_insecure_permissions)
     validate_env(values)
     feature_files = ensure_feature_set(project_dir)
     ensure_runtime_directories(project_dir)
@@ -349,9 +388,10 @@ def main() -> int:
     print("Preflight passed.")
     print(f"Environment permission policy: {permission_policy}")
     print("LLM configuration policy: required fields only; enterprise values are treated as opaque")
-    print("Search contract: requested retailer/country -> country alternative -> global")
+    print("Search contract: three adaptive SerpAPI decisions selected by the LLM from prior evidence")
     print("SerpAPI request limit per product: 3")
-    print("Browser contract: LLM observe -> plan -> safe action -> observe for every admitted candidate")
+    print("Core engines: Google Search, Shopping, AI Mode, and Immersive Product")
+    print("Browser contract: LLM observe -> plan -> safe action -> observe for admitted unresolved candidates")
     print(f"Validated feature sets: {len(feature_files)}")
     print(f"Artifact root: {project_dir / 'data' / 'artifacts'}")
     return 0
