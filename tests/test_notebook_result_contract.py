@@ -33,6 +33,26 @@ def test_notebook_uses_current_orchestrated_result_schema() -> None:
     assert 'result.get("feature_evidence")' not in source
 
 
+def test_notebook_defaults_to_committed_toy_feature_schema() -> None:
+    source = notebook_source()
+
+    assert 'DEFAULT_FEATURE_SET = "toy_features"' in source
+    assert 'FEATURE_SET = "toy_features"' in source
+    assert "inputs/private/toy_features.json" in source
+    assert 'DEFAULT_FEATURE_SET not in feature_sets' in source
+    assert 'feature_set: str = DEFAULT_FEATURE_SET' in source
+
+
+def test_notebook_exposes_candidate_feature_coverage() -> None:
+    source = notebook_source()
+
+    assert "Per-candidate feature coverage" in source
+    assert 'assessment.get("coverage")' in source
+    assert 'assessment.get("missing_features")' in source
+    assert 'assessment.get("conflicting_features")' in source
+    assert 'evidence_set.get("covered_features")' in source
+
+
 def test_notebook_exposes_agentic_and_strict_acceptance_fields() -> None:
     source = notebook_source()
 
@@ -93,6 +113,7 @@ def test_notebook_docs_match_agentic_result_contract() -> None:
         assert "deterministic" in text.lower()
 
     assert "candidate_investigations" in notebook_doc
+    assert "inputs/private/toy_features.json" in notebook_doc
     assert "data/artifacts/notebook_batch_summary.csv" in notebook_doc
     assert "docs/NOTEBOOK_USAGE.md" in readme
     assert "docs/AGENTIC_BROWSER.md" in readme

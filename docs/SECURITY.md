@@ -9,15 +9,45 @@ This document defines the security boundary for the two-container Product Eviden
 | SerpAPI key | Agent only |
 | LLM key, endpoint, deployment, API version | Agent only |
 | Browser internal API token | Agent and browser through a Compose secret |
-| Private feature files | Agent only, read-only mount |
+| Additional organization-specific feature files | Agent only, read-only mount |
 
-The browser receives no SerpAPI credential, no LLM credential, and no private feature file.
+The browser receives no SerpAPI credential, no LLM credential, and no feature file.
+
+The repository intentionally commits one approved, non-secret starter schema:
+
+```text
+inputs/private/toy_features.json
+```
+
+It contains only the generic requested feature names and descriptions for brand, manufacturer, and minimum recommended age. Other files under `inputs/private/` remain ignored by Git and must not be committed unless explicitly reviewed and approved.
+
+## Automated `.env` handling
+
+The supported command is:
+
+```bash
+./scripts/azureml_startup.sh
+```
+
+The script attempts `chmod 600 .env` before reading credentials.
+
+- On a normal Linux filesystem, broad permissions remain a startup failure.
+- On an Azure ML path under `/cloudfiles/`, the mount may report broad permissions even after `chmod 600`.
+- In that specific case, the bootstrap automatically switches to `azureml-cloudfiles-auto-fallback` and emits a warning.
+- The fallback changes only the POSIX mode check. It does not weaken credential validation, search limits, LLM endpoint validation, browser safety, feature completeness, or URL durability.
+- `.env` contents and API keys are never printed.
+
+For a strict permission-only verification:
+
+```bash
+./scripts/azureml_startup.sh --strict-env-permissions
+```
+
+Prefer approved enterprise secret injection where available. Never commit `.env`.
 
 ## Required agentic trust boundary
 
-The LLM does not receive Playwright, shell, JavaScript, filesystem, network, or arbitrary HTTP tools. It receives a bounded observation and may choose one allow-listed browser action.
-
-Allowed actions:
+The LLM does not receive Playwright, shell, JavaScript, filesystem, arbitrary network, or unrestricted HTTP tools. It receives a bounded observation and may choose one allow-listed browser action:
 
 - click one currently observed `E###` element;
 - scroll up, down, top, or bottom;
@@ -25,89 +55,57 @@ Allowed actions:
 - capture the current viewport;
 - finish the investigation.
 
-Prohibited actions:
-
-- invent or directly navigate to a URL;
-- invent an element or image ID;
-- type into forms;
-- upload files;
-- log in or provide credentials;
-- submit cart, checkout, payment, account, or order actions;
-- execute JavaScript, Python, shell, or arbitrary code;
-- solve CAPTCHA or bypass bot detection, paywalls, authentication, or access controls.
-
-The browser validates every requested action before execution. Invalid or stale IDs fail closed.
+The browser independently rejects invented or stale IDs, cross-site navigation, typing, uploads, login, cart, checkout, payment, order, code execution, CAPTCHA solving, and access-control bypass.
 
 ## Prompt-injection handling
 
-Retailer page content is untrusted evidence. Every planning call instructs the LLM to ignore webpage instructions, policy claims, tool-use requests, credential requests, and attempts to change the investigation objective.
-
-The LLM cannot expand its tool set. Page text cannot grant new capabilities because the browser API itself accepts only the fixed action schema.
+Retailer page content is untrusted evidence. Every planning call instructs the LLM to ignore webpage instructions, policy claims, tool-use requests, credential requests, and attempts to change the investigation objective. Page text cannot expand the fixed browser API.
 
 ## Final-decision boundary
 
-The LLM controls investigation strategy but does not approve `primary_url`.
-
-Deterministic code independently enforces:
+The LLM controls investigation strategy but does not approve `primary_url`. Deterministic code independently enforces:
 
 - browser accessibility;
-- access-blocker rejection;
+- blocker rejection;
 - rendered product-page verification;
 - exact product and variant identity;
 - text scrapability;
 - complete requested-feature evidence on one URL;
 - no feature conflicts;
 - non-expiring durable URL structure;
-- requested-retailer, same-country, then global scope priority.
+- requested-retailer, same-country, then global priority.
 
 LLM plans and candidate assessments are audit evidence. `primary_url_acceptance.json` is authoritative.
 
-## Secret handling
-
-- Copy `.env.example` to `.env` and use mode `0600` where supported.
-- Prefer approved Azure ML or enterprise secret injection.
-- Never commit `.env`, browser tokens, private feature files, or generated artifacts.
-- Never print environment values or credentials in logs, notebooks, reports, screenshots, or exceptions.
-
-The preflight rejects placeholder secrets, non-HTTPS LLM endpoints, invalid search budgets, disabled agentic controls, invalid action budgets, and malformed private feature files.
-
-## Mounted-filesystem exception
-
-When Azure ML mounted storage cannot preserve `chmod 600`:
-
-```bash
-./scripts/azureml_startup.sh --allow-insecure-env-permissions
-```
-
-This explicit exception weakens local file-permission protection only. It does not disable credential validation, browser safety, search-budget controls, feature completeness, or URL durability.
-
-## Network boundary
+## Network and container boundary
 
 ```text
 Notebook -> host 127.0.0.1:8788 -> Agent
 Agent -> internal http://browser:9000 -> Browser
 ```
 
-Only the agent port is published. The browser port is internal and protected by a bearer token stored as a Compose secret.
+Only the agent port is published. The browser port is internal and bearer-token protected.
 
-Expected outbound access:
-
-- SerpAPI;
-- approved LLM endpoint;
-- candidate retailer/manufacturer pages;
-- related content and image CDNs;
-- container registries during image builds.
-
-## Container boundary
-
-- Agent and browser use separate images.
-- Both run as non-root users.
+- Both containers run as the invoking non-root Azure ML UID/GID.
 - `no-new-privileges` is enabled.
 - No Docker socket is mounted.
 - Browser sessions use isolated contexts.
-- Context count, navigation time, action count, LLM turns, candidate count, screenshots, images, and asset sizes are bounded.
+- Browser contexts, actions, candidates, LLM turns, images, screenshots, and asset sizes are bounded.
 - Temporary browser state is stored in tmpfs.
-- Shared storage is limited to declared artifact mounts.
+
+## Bootstrap failure behavior
+
+Startup fails before notebook use when:
+
+- credentials are missing or still placeholders;
+- the LLM endpoint is not HTTPS;
+- strict production controls are disabled;
+- the committed default feature schema or an additional schema is malformed;
+- Docker or Compose is unavailable;
+- an unrelated process owns the configured agent port;
+- the live agent reports an invalid runtime configuration.
+
+When the agent returns a configuration 503, `wait_for_stack.py` extracts and prints the exact `configuration_error` immediately. It does not print secrets.
 
 ## Artifact handling
 
@@ -121,23 +119,21 @@ Artifacts may contain retailer text, product imagery, screenshots, URLs, identif
 
 ## Incident response
 
-When a credential or sensitive artifact may have been exposed:
-
-1. stop the containers;
+1. stop containers with `docker compose down`;
 2. rotate the affected credential;
 3. remove local `.env`, logs, notebook outputs, and affected artifacts;
 4. inspect Git history and CI artifacts;
 5. notify the platform/security owner;
-6. restart only after preflight passes.
+6. restart only after `./scripts/azureml_startup.sh` passes.
 
 ## Verification
 
 ```bash
-chmod 600 .env
+./scripts/azureml_startup.sh
+cat data/runtime/stack_health.json
+python -m json.tool inputs/private/toy_features.json >/dev/null
 python scripts/validate_environment.py --env-file .env
-python scripts/preflight_azureml.py
 python -m pytest -q
 docker compose config --quiet
 docker compose ps
-docker compose logs --tail=100 agent browser
 ```

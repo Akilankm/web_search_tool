@@ -21,13 +21,29 @@ def test_one_credit_writer_inherits_configured_output_directory() -> None:
     assert OneCreditConfig().output_dir == ""
 
 
-def test_startup_creates_fresh_clone_runtime_layout_and_uses_invoking_user() -> None:
+def test_startup_is_single_command_azureml_bootstrap() -> None:
     startup = (ROOT / "scripts" / "azureml_startup.sh").read_text(encoding="utf-8")
 
     assert "mkdir -p data/artifacts data/runtime inputs/private secrets" in startup
     assert 'RUNTIME_UID="$(id -u)"' in startup
     assert 'RUNTIME_GID="$(id -g)"' in startup
-    assert "Artifacts will be written under $PROJECT_DIR/data/artifacts/<row_id>/" in startup
+    assert "--env-permission-mode" in startup
+    assert "docker compose down --remove-orphans" in startup
+    assert "--force-recreate" in startup
+    assert "--build" in startup
+    assert "data/runtime/stack_health.json" in startup
+    assert "Product evidence platform is ready." in startup
+    assert "Available FEATURE_SET values:" in startup
+    assert "Notebook: $PROJECT_DIR/notebooks/01_run_product_evidence.ipynb" in startup
+
+
+def test_waiter_surfaces_configuration_errors_and_writes_health_snapshot() -> None:
+    waiter = (ROOT / "scripts" / "wait_for_stack.py").read_text(encoding="utf-8")
+
+    assert "extract_configuration_error" in waiter
+    assert "Agent configuration validation failed" in waiter
+    assert "stack_health.json" in waiter
+    assert "Stack is healthy and notebook-ready." in waiter
 
 
 def test_generated_runtime_data_is_ignored() -> None:

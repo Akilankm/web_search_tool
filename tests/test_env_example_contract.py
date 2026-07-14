@@ -47,4 +47,5 @@ def test_gitignore_blocks_runtime_secrets_and_private_inputs() -> None:
     assert ".env.*" in lines
     assert "!.env.example" in lines
     assert "secrets/" in lines
-    assert "inputs/private/" in lines
+    assert "inputs/private/*" in lines
+    assert "!inputs/private/toy_features.json" in lines
