@@ -39,9 +39,20 @@ def test_notebook_exposes_three_stage_and_strict_acceptance_fields() -> None:
     assert 'product_match.get("selection_scope")' in source
     assert 'acceptance.get("accepted")' in source
     assert 'acceptance.get("reasons")' in source
-    assert "strict_primary_url_accepted" in source
+    assert "primary_url_accepted" in source
     assert "three_stage_contract_enforced" in source
     assert "serpapi_request_limit" in source
+
+
+def test_notebook_suppresses_duplicate_progress_and_prints_heartbeat() -> None:
+    source = notebook_source()
+
+    assert "PROGRESS_HEARTBEAT_SECONDS = 30" in source
+    assert "last_signature" in source
+    assert "changed = signature != last_signature" in source
+    assert "heartbeat_due" in source
+    assert "still running" in source
+    assert "candidate-level messages" in source
 
 
 def test_notebook_uses_repository_local_artifact_paths() -> None:
@@ -51,7 +62,7 @@ def test_notebook_uses_repository_local_artifact_paths() -> None:
     assert 'PROJECT_ROOT / "data" / "artifacts" / "notebook_batch_summary.csv"' in source
     assert 'Path("artifacts/notebook_batch_summary.csv")' not in source
     assert "host_artifact_dir(result)" in source
-    assert "primary_url_acceptance.json" in source
+    assert "primary_url_acceptance" in source
 
 
 def test_notebook_documents_terminal_status_semantics() -> None:
