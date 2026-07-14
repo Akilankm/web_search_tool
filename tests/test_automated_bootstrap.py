@@ -109,4 +109,5 @@ def test_notebook_contains_bootstrap_and_feature_discovery_contract() -> None:
     assert 'PROJECT_ROOT / "data" / "runtime" / "stack_health.json"' in source
     assert "available_feature_sets" in source
     assert "RUN_SINGLE_PRODUCT = False" in source
-    assert "Available FEATURE_SET values" in source
+    assert "Available feature sets" in source
+    assert "Default feature set" in source

@@ -10,21 +10,17 @@ Every product uses exactly three bounded SerpAPI organic searches:
 2. alternative retailers in the requested country;
 3. unrestricted global fallback.
 
-Every deduplicated URL retained by the bounded candidate pool receives an isolated LLM-controlled browser investigation. The LLM observes the rendered page and screenshot, plans one safe action, receives the changed page state, and repeats. Deterministic code still enforces product identity, accessibility, scrapability, feature evidence, conflicts, scope priority, and durable `primary_url` acceptance.
+Every deduplicated URL retained by the bounded candidate pool may receive an isolated LLM-controlled browser investigation. The LLM observes the rendered page and screenshot, plans one safe action, receives the changed page state, and repeats. Deterministic code still enforces product identity, accessibility, scrapability, feature evidence, conflicts, scope priority, and durable `primary_url` acceptance.
 
 See [docs/AGENTIC_BROWSER.md](docs/AGENTIC_BROWSER.md).
 
 ## One-command Azure ML bootstrap
 
-The supported fresh-clone workflow is intentionally short:
-
 ```bash
 git clone https://github.com/Akilankm/web_search_tool.git
 cd web_search_tool
-
 cp .env.example .env
-# Edit only the SerpAPI and LLM credential values in .env.
-
+# Edit only the SerpAPI and LLM values in .env.
 ./scripts/azureml_startup.sh
 ```
 
@@ -34,40 +30,34 @@ Then open:
 notebooks/01_run_product_evidence.ipynb
 ```
 
-The repository already contains the runnable default feature schema at `inputs/private/toy_features.json`; no feature-file copy or creation step is required.
+The repository already contains `inputs/private/toy_features.json`. No feature-file copy, manual Docker command, permission override, or separate notebook dependency setup is required.
 
-The startup script performs the complete machine setup:
+The startup script:
 
-- creates repository-local runtime, artifact, private-input, and secret directories;
+- creates runtime, artifact, private-input, and secret directories;
 - creates the internal browser API token when absent;
-- detects the invoking Azure ML user UID/GID and runs containers as that user;
-- attempts `chmod 600 .env` automatically;
-- detects Azure ML `cloudfiles` mounts that cannot preserve mode `0600` and switches automatically to a documented trusted-workspace permission fallback;
-- validates all credentials, strict three-search controls, agentic-browser controls, the committed toy feature schema, Docker, Compose, and the configured port;
-- removes stale containers from this Compose project;
+- runs containers as the Azure ML notebook user;
+- adapts automatically to Azure ML managed-mount permission behavior;
+- validates required fields, feature schema, Docker, Compose, and production controls;
+- removes stale Compose resources;
 - builds and recreates the browser and agent containers;
-- waits for browser, LLM, SerpAPI, and strict agent health;
+- waits for strict health;
 - writes `data/runtime/stack_health.json`;
-- prints the API URL, notebook path, artifact path, and available `FEATURE_SET` names.
-
-No manual `--allow-insecure-env-permissions` flag is required on Azure ML. The legacy flag remains available only as an explicit compatibility override.
-
-If `.env` is missing, the script creates it from `.env.example`, stops before Docker startup, and tells you to fill the real values and rerun the same command.
+- prints the notebook and artifact locations.
 
 ## Required `.env` values
 
 ```env
-SERPAPI_API_KEY=<real-key>
-
-LLM_API_KEY=<real-key>
-LLM_API_VERSION=<supported-version>
-LLM_ENDPOINT=<approved-https-endpoint>
-LLM_DEPLOYMENT=<vision-capable-deployment>
+SERPAPI_API_KEY=<organization-provided-value>
+LLM_API_KEY=<organization-provided-value>
+LLM_API_VERSION=<organization-provided-value>
+LLM_ENDPOINT=<organization-provided-value>
+LLM_DEPLOYMENT=<organization-provided-value>
 ```
 
-Equivalent `AZURE_OPENAI_*` names are also accepted. Placeholder values are rejected before Docker build.
+Equivalent `AZURE_OPENAI_*` names are accepted. LLM values are treated as organization-provided opaque configuration; startup requires them to be present but does not impose key-length or endpoint-format assumptions.
 
-The production controls already exist in `.env.example` and should remain unchanged:
+The production controls in `.env.example` should remain unchanged:
 
 ```env
 PRODUCT_HARNESS_WORKFLOW=three_stage_feature_aware
@@ -94,19 +84,58 @@ A fresh clone includes:
 inputs/private/toy_features.json
 ```
 
-It defines the default requested toy features:
+It defines:
 
 - brand;
 - manufacturer;
 - minimum recommended age.
 
-The notebook and API use the filename without `.json`:
+The notebook uses:
 
 ```python
 FEATURE_SET = "toy_features"
 ```
 
-The notebook discovers this schema automatically, and because it is the only committed default schema, no manual feature-set selection is required. Additional organization-specific schemas may be added locally under `inputs/private/`; they remain ignored by Git except for the approved default `toy_features.json`.
+## Single-product EDA and RCA notebook
+
+The notebook is not only a runner. After one product completes, it builds a complete diagnostic model with compact pandas tables, a Rich executive summary, Matplotlib charts, Seaborn charts, and an Excel export.
+
+The principal table is `results_df`, containing one row per deduplicated retained candidate. It joins search scope, SERP position, scrape outcome, agentic-browser activity, deterministic identity acceptance, feature coverage, rejection reasons, and final `primary_url` selection.
+
+Other diagnostic DataFrames include:
+
+- `search_stages_df`;
+- `serp_results_df`;
+- `funnel_df`;
+- `domain_summary_df`;
+- `stage_quality_df`;
+- `agentic_df`;
+- `feature_evidence_df`;
+- `feature_matrix_df`;
+- `rejection_reasons_df`;
+- `selection_rca_df`.
+
+The funnel is reported explicitly:
+
+```text
+SERP rows returned
+→ unique candidate URLs
+→ scrape attempted
+→ scrape successful
+→ agentic investigated
+→ browser openable
+→ identity accepted
+→ feature complete
+→ selected
+```
+
+The final diagnostic workbook is written to:
+
+```text
+data/artifacts/<row_id>/single_product_diagnostics.xlsx
+```
+
+See [docs/SINGLE_PRODUCT_DIAGNOSTICS.md](docs/SINGLE_PRODUCT_DIAGNOSTICS.md).
 
 ## Final URL acceptance
 
@@ -123,7 +152,7 @@ Otherwise the workflow completes as `REVIEW_REQUIRED`, keeps `primary_url=null`,
 
 ## Result contract
 
-Important fields returned by `GET /v1/jobs/{job_id}/result`:
+Important API fields:
 
 | Path | Meaning |
 |---|---|
@@ -143,22 +172,15 @@ Important fields returned by `GET /v1/jobs/{job_id}/result`:
 ## Operations
 
 ```bash
-# Idempotent rebuild/restart after editing .env or pulling code
 ./scripts/azureml_startup.sh
 
-# Status and logs
 docker compose ps
 docker compose logs -f --tail=200 agent browser
 
-# Stop without deleting evidence
 docker compose down
 ```
 
-Generated evidence is written under:
-
-```text
-data/artifacts/<row_id>/
-```
+Generated evidence is written under `data/artifacts/<row_id>/`.
 
 ## Validation
 
@@ -174,6 +196,8 @@ docker compose config --quiet
 ## Documentation
 
 - [Automated Azure ML operations](docs/AZUREML_OPERATIONS.md)
-- [Notebook usage and result contract](docs/NOTEBOOK_USAGE.md)
+- [Notebook usage and diagnostic contract](docs/NOTEBOOK_USAGE.md)
+- [Single-product diagnostic interpretation](docs/SINGLE_PRODUCT_DIAGNOSTICS.md)
+- [Enterprise LLM configuration](docs/ENTERPRISE_LLM_CONFIGURATION.md)
 - [LLM-controlled agentic browser](docs/AGENTIC_BROWSER.md)
 - [Security contract](docs/SECURITY.md)
