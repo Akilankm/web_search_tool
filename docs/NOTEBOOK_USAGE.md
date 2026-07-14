@@ -1,180 +1,128 @@
-# Notebook Usage and Result Contract
+# Notebook Usage and Diagnostic Contract
 
-Use only:
+Use only `notebooks/01_run_product_evidence.ipynb`.
 
-```text
-notebooks/01_run_product_evidence.ipynb
-```
+The notebook is both the supported single-product runner and the complete EDA/RCA report.
 
-## Before opening the notebook
-
-From a fresh clone:
+## Fresh setup
 
 ```bash
+git clone https://github.com/Akilankm/web_search_tool.git
+cd web_search_tool
 cp .env.example .env
-# Edit only the real SerpAPI and LLM credential values.
+# Edit only the real SerpAPI and LLM values.
 ./scripts/azureml_startup.sh
 ```
 
-The repository already includes:
+The repository already includes `inputs/private/toy_features.json`. No feature-file copy, permission flag, manual Docker command, or separate notebook package setup is required. The first notebook cell installs only missing analytical packages into the active kernel.
 
-```text
-inputs/private/toy_features.json
-```
-
-The startup script handles directories, internal secrets, Azure ML `cloudfiles` permission fallback, feature-schema validation, Docker build, container recreation, health checks, and readiness reporting. No feature-file copy, permission flag, or manual `docker compose up` is required.
-
-When it finishes, it prints `toy_features` as an available `FEATURE_SET` and writes:
-
-```text
-data/runtime/stack_health.json
-```
-
-## First notebook cell
-
-The setup cell:
-
-- locates the repository root;
-- reads the bootstrap health snapshot when available;
-- calls the live agent `/health` endpoint;
-- verifies the strict three-stage, LLM-agentic browser, and browser-tool contracts;
-- discovers the included `inputs/private/toy_features.json` schema;
-- lists any additional local feature schemas;
-- does not print credentials.
-
-If the cell cannot reach the platform, rerun:
-
-```bash
-./scripts/azureml_startup.sh
-```
-
-## Included feature set
-
-The default notebook feature set is:
-
-```python
-FEATURE_SET = "toy_features"
-```
-
-It requests these three features:
-
-- brand;
-- manufacturer;
-- minimum recommended age.
-
-No manual feature-set selection is required for the included workflow.
-
-## Product input
-
-```python
-product = {
-    "row_id": "TEST-001",
-    "main_text": "Exact product identity text",
-    "country_code": "CO",
-    "retailer_name": "Mercado Libre",  # optional
-    "ean": None,                        # optional; keep as text
-    "language_code": None,
-}
-```
-
-Required: `main_text`, `country_code`.
-
-Optional: `row_id`, `retailer_name`, `ean`, `language_code`.
-
-To execute the product:
+## Run one product
 
 ```python
 FEATURE_SET = "toy_features"
 RUN_SINGLE_PRODUCT = True
+
+product = {
+    "row_id": "TEST-001",
+    "main_text": "Exact product identity text",
+    "country_code": "CO",
+    "retailer_name": "Mercado Libre",
+    "ean": None,
+    "language_code": None,
+}
 ```
 
-The notebook defaults `RUN_SINGLE_PRODUCT` to `False` to prevent accidental SerpAPI and LLM spend when someone presses Run All before replacing the example product.
+`main_text` and `country_code` are required. The other fields are optional. `RUN_SINGLE_PRODUCT` defaults to `False` to avoid accidental API usage before the sample input is replaced.
 
-## Search and investigation flow
+## Three-stage deterministic flow
 
-Each product executes three searches in order:
+Each product executes exactly three searches:
 
-1. requested retailer in the requested country;
+1. requested retailer in the requested country, or the primary country search;
 2. alternative retailers in the requested country;
 3. unrestricted global fallback.
 
-Every retained candidate is then investigated through an independent LLM-controlled browser session. The LLM sees the requested toy features, rendered page text, screenshot, observed elements, and observed images. Deterministic code still validates product identity, feature evidence, conflicts, accessibility, scrapability, and `primary_url` durability.
+Every retained candidate may then receive an isolated LLM-controlled agentic browser investigation. Deterministic code remains authoritative for identity, access, scrapability, requested-feature evidence, conflicts, and durable `primary_url` acceptance.
 
-## Runtime progress
+## Main diagnostic tables
 
-```text
-VALIDATING_INPUT
-SEARCHING
-AGENTIC_BROWSER_INVESTIGATION
-  CAND-001 | turn 1/10 | CLICK | domain
-  CAND-001 | turn 2/10 | INSPECT_IMAGE | domain
-  CAND-001 | COMPLETED | turns=3 | actions=2
-VALIDATING_PRIMARY_URL
-WRITING_OUTPUTS
-COMPLETED or REVIEW_REQUIRED
-```
+After the run, execute the **Build the complete diagnostic model** cell.
 
-`COMPLETED` and `REVIEW_REQUIRED` are successful terminal workflow states. `REVIEW_REQUIRED` means execution completed but no investigated URL passed every mandatory gate. Only `FAILED` represents an execution failure.
-
-The notebook suppresses duplicate polling messages and emits a heartbeat every 30 seconds while the same browser or LLM stage remains active.
-
-## Main result fields
-
-```python
-pprint(result.get("search") or {})
-pprint(result.get("agentic_browser") or {})
-pprint(result.get("candidate_investigations") or [])
-pprint(result.get("feature_assessments") or [])
-pprint(result.get("evidence_set") or {})
-pprint(result.get("primary_url_acceptance") or {})
-pprint(result.get("browser_evidence") or [])
-```
-
-| Path | Meaning |
+| DataFrame | Purpose |
 |---|---|
-| `product.row_id` | Original row identifier |
-| `job_status` | `COMPLETED` or `REVIEW_REQUIRED` |
-| `coding_ready` | Strict deterministic acceptance result |
-| `primary_url` | Accepted durable URL or `null` |
-| `search.stages` | Three executed search stages |
-| `search.serpapi_requests_used` | Exactly three |
-| `agentic_browser` | Candidate, action, and turn budgets |
-| `candidate_investigations` | Per-candidate LLM plans and actions |
-| `feature_assessments` | Per-URL feature evidence and coverage |
-| `evidence_set` | Diagnostic multi-source coverage |
-| `primary_url_acceptance` | Authoritative final gate decision |
-| `browser_evidence` | Rendered and visual evidence |
+| `overview_df` | Executive metrics and final state |
+| `search_stages_df` | Per-credit search-stage yield |
+| `serp_results_df` | SERP URL inventory |
+| `results_df` | Principal candidate-level audit table |
+| `agentic_df` | Browser turns, actions, termination, and errors |
+| `feature_evidence_df` | URL-feature evidence records |
+| `feature_matrix_df` | URL by requested-feature support matrix |
+| `funnel_df` | SERP-to-selection conversion |
+| `domain_summary_df` | Domain-level quality and conversion |
+| `stage_quality_df` | Search-stage yield ratios |
+| `rejection_reasons_df` | Normalized rejection and blocker counts |
+| `selection_rca_df` | Final `primary_url` root-cause analysis |
 
-## Artifacts
+## `results_df` contract
 
-```text
-data/artifacts/<row_id>/
-├── orchestrated_result.json
-├── primary_url_acceptance.json
-└── CAND-###/agentic/
-    ├── investigation.json
-    ├── latest_observation.json
-    ├── browser_actions.json
-    ├── browser_result.json
-    ├── rendered_text.md
-    ├── final_page.html
-    ├── observations/
-    ├── images/
-    └── screenshots/
-```
+`results_df` contains one row per deduplicated retained candidate. It includes:
 
-The notebook can open every `CAND-*/agentic/investigation.json` file directly from the repository-local artifact directory.
+- search stage and best SERP position;
+- deterministic confidence and content richness;
+- scrape attempted and scrape success flags;
+- agentic-browser status, turns, and actions;
+- browser openability and text scrapability;
+- deterministic identity acceptance;
+- requested-feature coverage and conflicts;
+- deterministic `quality_verified` status;
+- strict or review-set selection;
+- a compact `final_candidate_status` explaining the pass/fail stage.
 
-## CSV batch
+`quality_verified` means the runtime validation status is exactly `VERIFIED`. It is not a subjective notebook score.
 
-Expected columns:
+## Funnel semantics
 
 ```text
-row_id,main_text,country_code,retailer_name,ean,language_code
+SERP rows returned
+→ unique candidate URLs
+→ scrape attempted
+→ scrape successful
+→ agentic investigated
+→ browser openable
+→ identity accepted
+→ feature complete
+→ selected
 ```
 
-Batch summaries are written to:
+This separates search quality, technical access, exact-product identity, feature completeness, and final decision quality.
+
+## Graphical EDA
+
+Matplotlib and Seaborn create separate figures for:
+
+- conversion funnel;
+- search-stage yield;
+- candidate outcome distribution;
+- confidence distribution;
+- confidence versus feature coverage;
+- domain contribution;
+- rejection reason frequency;
+- URL-feature support heatmap.
+
+## Final RCA
+
+`selection_rca_df` reports the final status, coding readiness, strict acceptance, selected `primary_url`, supplementary URLs, selection scope, identity status, confidence, feature coverage, missing/conflicting features, and exact rejection reasons.
+
+`COMPLETED` and `REVIEW_REQUIRED` are successful terminal workflow states. `REVIEW_REQUIRED` means no candidate passed every mandatory deterministic gate. Only `FAILED` is an execution failure.
+
+## Export
+
+The export cell writes:
 
 ```text
-data/artifacts/notebook_batch_summary.csv
+data/artifacts/<row_id>/single_product_diagnostics.xlsx
 ```
+
+Every diagnostic DataFrame is written as a separate worksheet. JSON and CSV artifacts remain the source-of-truth audit records.
+
+See `docs/SINGLE_PRODUCT_DIAGNOSTICS.md` for metric definitions and interpretation guidance.
