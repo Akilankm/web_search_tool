@@ -8,18 +8,37 @@ notebooks/01_run_product_evidence.ipynb
 
 ## Before opening the notebook
 
+From a fresh clone:
+
 ```bash
 cp .env.example .env
-# Replace SerpAPI and LLM placeholders.
-mkdir -p inputs/private
-cp /secure/location/toy_features.json inputs/private/toy_features.json
+# Edit the real SerpAPI and LLM values.
 ./scripts/azureml_startup.sh
 ```
 
-For mounted storage that cannot preserve mode `600`:
+The startup script handles directories, internal secrets, Azure ML `cloudfiles` permission fallback, Docker build, container recreation, health checks, and readiness reporting. No additional permission flag or manual `docker compose up` is required.
+
+When it finishes, it prints available `FEATURE_SET` values and writes:
+
+```text
+data/runtime/stack_health.json
+```
+
+## First notebook cell
+
+The setup cell:
+
+- locates the repository root;
+- reads the bootstrap health snapshot when available;
+- calls the live agent `/health` endpoint;
+- verifies the strict three-stage, LLM-agentic browser, and browser-tool contracts;
+- lists `inputs/private/*.json` as notebook-ready feature sets;
+- does not print credentials.
+
+If the cell cannot reach the platform, rerun:
 
 ```bash
-./scripts/azureml_startup.sh --allow-insecure-env-permissions
+./scripts/azureml_startup.sh
 ```
 
 ## Product input
@@ -30,7 +49,7 @@ product = {
     "main_text": "Exact product identity text",
     "country_code": "CO",
     "retailer_name": "Mercado Libre",  # optional
-    "ean": None,                       # optional; keep as text
+    "ean": None,                        # optional; keep as text
     "language_code": None,
 }
 ```
@@ -39,17 +58,26 @@ Required: `main_text`, `country_code`.
 
 Optional: `row_id`, `retailer_name`, `ean`, `language_code`.
 
+Select a discovered feature file without `.json`:
+
+```python
+FEATURE_SET = "toy_features"
+RUN_SINGLE_PRODUCT = True
+```
+
+The notebook defaults `RUN_SINGLE_PRODUCT` to `False` to prevent accidental SerpAPI and LLM spend when someone presses Run All before replacing the example product.
+
 ## Search and investigation flow
 
 Each product executes three searches in order:
 
-1. requested retailer in the requested country, or the primary country search when no retailer is provided;
-2. other retailers in the requested country;
+1. requested retailer in the requested country;
+2. alternative retailers in the requested country;
 3. unrestricted global fallback.
 
-Eligible deduplicated candidates admitted from those stages are then investigated through independent LLM-controlled browser sessions.
+Every retained candidate is then investigated through an independent LLM-controlled browser session. The LLM sees the requested features, rendered page text, screenshot, observed elements, and observed images. Deterministic code still validates product identity, feature evidence, conflicts, accessibility, scrapability, and `primary_url` durability.
 
-## Runtime flow visible in the notebook
+## Runtime progress
 
 ```text
 VALIDATING_INPUT
@@ -58,102 +86,43 @@ AGENTIC_BROWSER_INVESTIGATION
   CAND-001 | turn 1/10 | CLICK | domain
   CAND-001 | turn 2/10 | INSPECT_IMAGE | domain
   CAND-001 | COMPLETED | turns=3 | actions=2
-  CAND-002 | ...
 VALIDATING_PRIMARY_URL
 WRITING_OUTPUTS
 COMPLETED or REVIEW_REQUIRED
 ```
 
-The notebook suppresses duplicate polling messages and emits a periodic elapsed-time heartbeat when a browser or LLM call is still running.
+`COMPLETED` and `REVIEW_REQUIRED` are successful terminal workflow states. `REVIEW_REQUIRED` means execution completed but no investigated URL passed every mandatory gate. Only `FAILED` represents an execution failure.
 
-## Running one product
+The notebook suppresses duplicate polling messages and emits a heartbeat every 30 seconds while the same browser or LLM stage remains active.
 
-```python
-FEATURE_SET = "toy_features"
-result = run_product(product, FEATURE_SET)
-pprint(summarize_result(result))
-```
-
-## Agentic investigation inspection
+## Main result fields
 
 ```python
-pprint(result["agentic_browser"])
-
-for candidate in result["candidate_investigations"]:
-    print(candidate["candidate_id"], candidate["status"], candidate["termination_reason"])
-    pprint(candidate["plans"])
+pprint(result.get("search") or {})
+pprint(result.get("agentic_browser") or {})
+pprint(result.get("candidate_investigations") or [])
+pprint(result.get("feature_assessments") or [])
+pprint(result.get("evidence_set") or {})
+pprint(result.get("primary_url_acceptance") or {})
+pprint(result.get("browser_evidence") or [])
 ```
-
-Each plan describes what the LLM observed, which safe browser action it selected, and why. The executed browser trace remains authoritative:
-
-```text
-data/artifacts/<row_id>/CAND-###/agentic/browser_actions.json
-```
-
-## Final URL behavior
-
-The LLM investigates candidates but does not directly approve the final URL. `primary_url` is non-null only when deterministic code confirms:
-
-- browser-openable;
-- no access blocker;
-- exact product and variant;
-- rendered product page;
-- text-scrapable;
-- every requested feature supported on that same URL;
-- no conflicting feature evidence;
-- durable URL without session, token, signature, credential, expiry, or TTL parameters.
-
-Among fully accepted candidates, scope priority remains requested retailer and country, then another retailer in the requested country, then global fallback.
-
-Inspect:
-
-```python
-pprint(result["primary_url_acceptance"])
-pprint(result["product_match"])
-pprint(result["evidence_set"])
-```
-
-## Result schema
 
 | Path | Meaning |
 |---|---|
 | `product.row_id` | Original row identifier |
 | `job_status` | `COMPLETED` or `REVIEW_REQUIRED` |
-| `coding_ready` | Strict final acceptance result |
-| `primary_url` | Accepted durable product URL or `null` |
-| `search.queries` | Three executed search queries |
-| `search.stages` | Search stage trace |
+| `coding_ready` | Strict deterministic acceptance result |
+| `primary_url` | Accepted durable URL or `null` |
+| `search.stages` | Three executed search stages |
 | `search.serpapi_requests_used` | Exactly three |
-| `agentic_browser` | Policy, budgets and investigation counts |
-| `candidate_investigations` | Per-candidate LLM plans, turns, actions, conclusions and errors |
-| `browser_evidence` | Browser-rendered text, screenshots, blockers and final page status |
-| `feature_assessments` | Per-candidate requested-feature evidence |
+| `agentic_browser` | Candidate, action, and turn budgets |
+| `candidate_investigations` | Per-candidate LLM plans and actions |
+| `feature_assessments` | Per-URL feature evidence and coverage |
+| `evidence_set` | Diagnostic multi-source coverage |
 | `primary_url_acceptance` | Authoritative final gate decision |
-| `artifact_dir` | Container artifact path |
+| `browser_evidence` | Rendered and visual evidence |
 
-## Terminal status semantics
-
-```python
-{
-    "job_status": "COMPLETED",
-    "coding_ready": True,
-    "primary_url": "https://..."
-}
-```
-
-means one investigated candidate passed every strict gate.
-
-```python
-{
-    "job_status": "REVIEW_REQUIRED",
-    "coding_ready": False,
-    "primary_url": None
-}
-```
-
-means execution completed but no investigated candidate passed every gate. Only `FAILED` means the workflow itself failed.
-
-## Artifact investigation
+## Artifacts
 
 ```text
 data/artifacts/<row_id>/
@@ -170,6 +139,8 @@ data/artifacts/<row_id>/
     ├── images/
     └── screenshots/
 ```
+
+The notebook can open every `CAND-*/agentic/investigation.json` file directly from the repository-local artifact directory.
 
 ## CSV batch
 
