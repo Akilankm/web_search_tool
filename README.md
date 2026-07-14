@@ -23,7 +23,7 @@ git clone https://github.com/Akilankm/web_search_tool.git
 cd web_search_tool
 
 cp .env.example .env
-# Edit .env and replace the SerpAPI and LLM placeholders.
+# Edit only the SerpAPI and LLM credential values in .env.
 
 ./scripts/azureml_startup.sh
 ```
@@ -34,6 +34,8 @@ Then open:
 notebooks/01_run_product_evidence.ipynb
 ```
 
+The repository already contains the runnable default feature schema at `inputs/private/toy_features.json`; no feature-file copy or creation step is required.
+
 The startup script performs the complete machine setup:
 
 - creates repository-local runtime, artifact, private-input, and secret directories;
@@ -41,7 +43,7 @@ The startup script performs the complete machine setup:
 - detects the invoking Azure ML user UID/GID and runs containers as that user;
 - attempts `chmod 600 .env` automatically;
 - detects Azure ML `cloudfiles` mounts that cannot preserve mode `0600` and switches automatically to a documented trusted-workspace permission fallback;
-- validates all credentials, strict three-search controls, agentic-browser controls, feature schemas, Docker, Compose, and the configured port;
+- validates all credentials, strict three-search controls, agentic-browser controls, the committed toy feature schema, Docker, Compose, and the configured port;
 - removes stale containers from this Compose project;
 - builds and recreates the browser and agent containers;
 - waits for browser, LLM, SerpAPI, and strict agent health;
@@ -65,7 +67,7 @@ LLM_DEPLOYMENT=<vision-capable-deployment>
 
 Equivalent `AZURE_OPENAI_*` names are also accepted. Placeholder values are rejected before Docker build.
 
-The production controls must remain enabled:
+The production controls already exist in `.env.example` and should remain unchanged:
 
 ```env
 PRODUCT_HARNESS_WORKFLOW=three_stage_feature_aware
@@ -84,19 +86,27 @@ PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY=true
 PRODUCT_HARNESS_REJECT_EXPIRING_URLS=true
 ```
 
-## Feature schema
+## Included feature schema
 
-Place private feature schemas in:
+A fresh clone includes:
 
 ```text
-inputs/private/<feature_set>.json
+inputs/private/toy_features.json
 ```
 
-When none exists, preflight creates `inputs/private/example_features.json` from the generic repository example so the notebook can still open and demonstrate the contract. In the notebook, use the filename without `.json`:
+It defines the default requested toy features:
+
+- brand;
+- manufacturer;
+- minimum recommended age.
+
+The notebook and API use the filename without `.json`:
 
 ```python
 FEATURE_SET = "toy_features"
 ```
+
+The notebook discovers this schema automatically, and because it is the only committed default schema, no manual feature-set selection is required. Additional organization-specific schemas may be added locally under `inputs/private/`; they remain ignored by Git except for the approved default `toy_features.json`.
 
 ## Final URL acceptance
 
@@ -155,6 +165,7 @@ data/artifacts/<row_id>/
 ```bash
 python scripts/validate_environment.py --env-file .env
 python -m compileall -q src scripts
+python -m json.tool inputs/private/toy_features.json >/dev/null
 python -m json.tool notebooks/01_run_product_evidence.ipynb >/dev/null
 python -m pytest -q
 docker compose config --quiet
