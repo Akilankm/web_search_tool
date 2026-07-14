@@ -65,6 +65,15 @@ def test_preflight_accepts_azure_openai_aliases() -> None:
     values = {
         "SERPAPI_API_KEY": "serpapi_key_with_more_than_twenty_chars",
         "PRODUCT_HARNESS_WORKFLOW": "three_stage_feature_aware",
+        "PRODUCT_HARNESS_MAX_SERPAPI_CREDITS": "3",
+        "PRODUCT_HARNESS_ALLOWED_SEARCH_ENGINES": (
+            "google,google_shopping,google_ai_mode,"
+            "google_immersive_product,google_lens"
+        ),
+        "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_PLANNING": "true",
+        "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_FEEDBACK": "true",
+        "PRODUCT_HARNESS_REQUIRE_LLM_SEARCH_PLANNING": "true",
+        "PRODUCT_HARNESS_EARLY_STOP_ON_WORKING_URL": "true",
         "PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES": "3",
         "PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES": "0",
         "PRODUCT_HARNESS_COUNTRY_FIRST": "true",
@@ -101,13 +110,23 @@ def test_waiter_parses_env_without_exposing_values(tmp_path: Path) -> None:
     assert values["SECRET"] == "hidden"
 
 
-def test_notebook_contains_bootstrap_and_feature_discovery_contract() -> None:
-    notebook = json.loads((ROOT / "notebooks" / "01_run_product_evidence.ipynb").read_text(encoding="utf-8"))
-    source = "\n".join("".join(cell.get("source", [])) for cell in notebook["cells"])
+def test_notebook_and_runtime_contain_bootstrap_and_feature_discovery_contract() -> None:
+    notebook = json.loads(
+        (ROOT / "notebooks" / "01_run_product_evidence.ipynb").read_text(
+            encoding="utf-8"
+        )
+    )
+    source = "\n".join(
+        "".join(cell.get("source", [])) for cell in notebook["cells"]
+    )
+    runtime = (
+        ROOT / "src" / "product_evidence_harness" / "notebook_runtime.py"
+    ).read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "./scripts/azureml_startup.sh" in source
-    assert 'PROJECT_ROOT / "data" / "runtime" / "stack_health.json"' in source
-    assert "available_feature_sets" in source
+    assert "./scripts/azureml_startup.sh" in readme
+    assert 'project_root / "data" / "artifacts"' in runtime
     assert "RUN_SINGLE_PRODUCT = False" in source
-    assert "Available feature sets" in source
+    assert "Available FEATURE_SET values" in source
     assert "Default feature set" in source
+    assert "adaptive_search_contract_enforced" in runtime
