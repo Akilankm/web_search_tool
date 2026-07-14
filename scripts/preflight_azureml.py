@@ -26,6 +26,7 @@ PLACEHOLDER_MARKERS = (
 TRUE_VALUES = {"1", "true", "yes", "on"}
 ENV_ASSIGNMENT = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 INSECURE_PERMISSION_OVERRIDE_ENV = "PRODUCT_EVIDENCE_ALLOW_INSECURE_ENV_PERMISSIONS"
+ENV_PERMISSION_MODE_ENV = "PRODUCT_EVIDENCE_ENV_PERMISSION_MODE"
 
 
 class PreflightError(RuntimeError):
@@ -34,6 +35,60 @@ class PreflightError(RuntimeError):
 
 def process_flag_enabled(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in TRUE_VALUES
+
+
+def is_azureml_cloudfiles_path(path: Path) -> bool:
+    normalized = path.expanduser().absolute().as_posix().lower()
+    return "/cloudfiles/" in normalized or normalized.endswith("/cloudfiles")
+
+
+def prepare_env_permissions(path: Path, *, mode: str = "auto") -> tuple[bool, str]:
+    """Prepare .env permissions and return (allow_broad_permissions, policy_name).
+
+    auto: try 0600; permit broad permissions only on Azure ML cloudfiles mounts.
+    strict: require 0600-compatible permissions.
+    allow: explicitly permit broad permissions after a warning.
+    """
+
+    normalized = str(mode or "auto").strip().lower()
+    if normalized not in {"auto", "strict", "allow"}:
+        raise PreflightError("Environment permission mode must be auto, strict, or allow")
+    if not path.is_file():
+        raise PreflightError(".env is missing. Run: cp .env.example .env")
+    if path.is_symlink():
+        raise PreflightError(".env must be a regular file, not a symlink")
+    if os.name != "posix":
+        return False, "platform-default"
+
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+    current_mode = stat.S_IMODE(path.stat().st_mode)
+    if not current_mode & 0o077:
+        return False, "strict-0600"
+
+    if normalized == "allow" or process_flag_enabled(INSECURE_PERMISSION_OVERRIDE_ENV):
+        print(
+            f"SECURITY WARNING: accepting .env mode {current_mode:o} by explicit override.",
+            file=sys.stderr,
+        )
+        return True, "explicit-broad-permission-override"
+
+    if normalized == "auto" and is_azureml_cloudfiles_path(path):
+        print(
+            f"AZURE ML FILESYSTEM NOTICE: .env remains mode {current_mode:o} because the cloudfiles "
+            "mount does not preserve chmod 600. Continuing automatically in trusted-workspace mode; "
+            "credential content is still validated and never printed.",
+            file=sys.stderr,
+        )
+        return True, "azureml-cloudfiles-auto-fallback"
+
+    raise PreflightError(
+        ".env permissions are too broad and chmod 600 did not take effect. "
+        "Use a private filesystem, or explicitly set PRODUCT_EVIDENCE_ENV_PERMISSION_MODE=allow."
+    )
 
 
 def parse_env(path: Path, *, allow_insecure_permissions: bool = False) -> dict[str, str]:
@@ -48,13 +103,11 @@ def parse_env(path: Path, *, allow_insecure_permissions: bool = False) -> dict[s
             if not allow_insecure_permissions:
                 raise PreflightError(
                     ".env permissions are too broad. Run: chmod 600 .env. "
-                    "If the Azure ML mounted filesystem cannot preserve POSIX modes, "
-                    "rerun with --allow-insecure-env-permissions."
+                    "Azure ML cloudfiles users should run the startup script, which handles this automatically."
                 )
             print(
-                f"SECURITY WARNING: accepting .env mode {mode:o}. Group or other "
-                "users may read or modify credentials because the mounted filesystem "
-                "cannot preserve mode 600.",
+                f"SECURITY WARNING: accepting .env mode {mode:o}. Group or other users may read or "
+                "modify credentials because the mounted filesystem cannot preserve mode 600.",
                 file=sys.stderr,
             )
 
@@ -83,6 +136,14 @@ def is_enabled(values: dict[str, str], key: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in TRUE_VALUES
+
+
+def first_value(values: dict[str, str], *keys: str) -> str:
+    for key in keys:
+        value = values.get(key, "").strip()
+        if value:
+            return value
+    return ""
 
 
 def _require_int(values: dict[str, str], key: str, default: int, minimum: int, maximum: int) -> int:
@@ -117,8 +178,8 @@ def validate_env(values: dict[str, str]) -> None:
             raise PreflightError(f"{key} must be true")
 
     _require_int(values, "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE", 6, 1, 10)
-    _require_int(values, "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT", 18, 3, 90)
-    _require_int(values, "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", 18, 3, 90)
+    _require_int(values, "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT", 90, 3, 90)
+    _require_int(values, "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", 90, 3, 90)
     _require_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE", 10, 1, 30)
     _require_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE", 20, 1, 60)
     _require_int(values, "PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS", 12000, 2000, 30000)
@@ -133,15 +194,19 @@ def validate_env(values: dict[str, str]) -> None:
     vision_enabled = is_enabled(values, "PRODUCT_HARNESS_ENABLE_VISION_REASONING", True)
     text_llm_enabled = is_enabled(values, "PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING", False)
     if agentic_enabled or vision_enabled or text_llm_enabled:
-        required = ("LLM_API_KEY", "LLM_API_VERSION", "LLM_ENDPOINT", "LLM_DEPLOYMENT")
-        missing = [key for key in required if is_placeholder(values.get(key, ""))]
+        llm_values = {
+            "API key": first_value(values, "LLM_API_KEY", "AZURE_OPENAI_API_KEY"),
+            "API version": first_value(values, "LLM_API_VERSION", "AZURE_OPENAI_API_VERSION"),
+            "endpoint": first_value(values, "LLM_ENDPOINT", "AZURE_OPENAI_ENDPOINT"),
+            "deployment": first_value(values, "LLM_DEPLOYMENT", "AZURE_OPENAI_DEPLOYMENT"),
+        }
+        missing = [label for label, value in llm_values.items() if is_placeholder(value)]
         if missing:
             raise PreflightError(
                 "LLM configuration is missing or still contains examples: " + ", ".join(missing)
             )
-        endpoint = values["LLM_ENDPOINT"]
-        if not endpoint.startswith("https://"):
-            raise PreflightError("LLM_ENDPOINT must use HTTPS")
+        if not llm_values["endpoint"].startswith("https://"):
+            raise PreflightError("LLM endpoint must use HTTPS")
 
 
 def validate_feature_file(path: Path) -> None:
@@ -229,21 +294,26 @@ def check_agent_port(values: dict[str, str]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate a fresh Azure ML checkout before Docker Compose startup")
     parser.add_argument("--project-dir", default=str(Path(__file__).resolve().parents[1]))
-    parser.add_argument("--skip-docker", action="store_true", help="Used only by unit tests")
-    parser.add_argument("--skip-port", action="store_true", help="Used only by unit tests")
+    parser.add_argument("--skip-docker", action="store_true", help="Skip Docker checks")
+    parser.add_argument("--skip-port", action="store_true", help="Skip agent-port checks")
+    parser.add_argument(
+        "--env-permission-mode",
+        choices=("auto", "strict", "allow"),
+        default=os.getenv(ENV_PERMISSION_MODE_ENV, "auto"),
+        help="auto fixes chmod and adapts only for Azure ML cloudfiles; strict requires 0600; allow is explicit override",
+    )
     parser.add_argument(
         "--allow-insecure-env-permissions",
         action="store_true",
-        help=(
-            "Allow .env modes such as 777 on Azure ML mounted filesystems that cannot preserve mode 600. "
-            "This weakens credential protection and must be explicitly requested."
-        ),
+        help="Deprecated compatibility alias for --env-permission-mode allow",
     )
     args = parser.parse_args()
 
     project_dir = Path(args.project_dir).resolve()
-    allow_insecure_permissions = args.allow_insecure_env_permissions or process_flag_enabled(
-        INSECURE_PERMISSION_OVERRIDE_ENV
+    permission_mode = "allow" if args.allow_insecure_env_permissions else args.env_permission_mode
+    allow_insecure_permissions, permission_policy = prepare_env_permissions(
+        project_dir / ".env",
+        mode=permission_mode,
     )
     values = parse_env(
         project_dir / ".env",
@@ -258,6 +328,7 @@ def main() -> int:
         check_docker(project_dir)
 
     print("Preflight passed.")
+    print(f"Environment permission policy: {permission_policy}")
     print("Search contract: requested retailer/country -> country alternative -> global")
     print("SerpAPI request limit per product: 3")
     print("Browser contract: LLM observe -> plan -> safe action -> observe for every admitted candidate")
