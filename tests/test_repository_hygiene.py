@@ -54,8 +54,28 @@ def test_final_docs_and_runtime_files_exist() -> None:
         "docs/AZUREML_OPERATIONS.md",
         "docs/SECURITY.md",
         "examples/features_to_code.example.json",
+        "inputs/private/toy_features.json",
     ]
     assert [path for path in required if not (ROOT / path).is_file()] == []
+
+
+def test_default_toy_feature_schema_is_valid_and_intentional() -> None:
+    path = ROOT / "inputs" / "private" / "toy_features.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert set(payload) == {"features_to_code"}
+    names = [
+        item if isinstance(item, str) else item["name"]
+        for item in payload["features_to_code"]
+    ]
+    assert names == ["brand", "manufacturer", "minimum recommended age"]
+
+
+def test_gitignore_tracks_only_the_approved_default_private_schema() -> None:
+    text = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert "inputs/private/*" in text
+    assert "!inputs/private/toy_features.json" in text
+    assert "inputs/private/\n" not in text
 
 
 def test_dockerfiles_do_not_reference_missing_pdm_lock() -> None:
@@ -78,5 +98,6 @@ def test_readme_points_to_the_only_supported_paths() -> None:
     text = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "notebooks/01_run_product_evidence.ipynb" in text
     assert "scripts/azureml_startup.sh" in text
+    assert "inputs/private/toy_features.json" in text
     assert "docs/AZUREML_OPERATIONS.md" in text
     assert "docs/SECURITY.md" in text
