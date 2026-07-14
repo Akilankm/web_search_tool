@@ -32,6 +32,9 @@ jobs:
       - name: Validate bootstrap shell
         run: bash -n scripts/azureml_startup.sh
 
+      - name: Validate default toy feature schema
+        run: python -m json.tool inputs/private/toy_features.json >/dev/null
+
       - name: Validate notebook JSON
         run: python -m json.tool notebooks/01_run_product_evidence.ipynb >/dev/null
 
