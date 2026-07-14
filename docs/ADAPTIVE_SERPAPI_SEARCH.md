@@ -150,7 +150,7 @@ A working URL is:
 - durable and non-expiring;
 - complete enough for the configured final acceptance policy.
 
-A successful HTTP response alone is insufficient.
+A successful HTTP response alone is insufficient. A URL that passes the complete acceptance contract is returned as top-level `primary_url`; otherwise `primary_url` remains `null` and the best review candidates stay in the audit artifacts.
 
 ## Environment contract
 
@@ -184,6 +184,7 @@ search.actions
 search.observations
 search.handles
 search.serp_results
+primary_url
 ```
 
 Artifacts:
