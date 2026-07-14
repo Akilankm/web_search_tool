@@ -2,17 +2,23 @@
 
 ## Supported fresh-clone flow
 
-The supported setup requires only one manual configuration file and one startup command:
+The supported setup requires only credential entry and one startup command:
 
 ```bash
 git clone https://github.com/Akilankm/web_search_tool.git
 cd web_search_tool
 cp .env.example .env
-# Edit .env with real SerpAPI and LLM values.
+# Edit only the real SerpAPI and LLM credential values.
 ./scripts/azureml_startup.sh
 ```
 
-After the script reports `Product evidence platform is ready`, open:
+The repository already contains:
+
+```text
+inputs/private/toy_features.json
+```
+
+No feature-file copy or creation step is required. After the script reports `Product evidence platform is ready`, open:
 
 ```text
 notebooks/01_run_product_evidence.ipynb
@@ -26,17 +32,18 @@ The notebook is an API client. It does not build containers or install browser d
 
 1. locates the repository root;
 2. creates `data/artifacts`, `data/runtime`, `inputs/private`, and `secrets`;
-3. creates the internal browser API token when missing;
-4. selects the invoking Azure ML user UID/GID for both non-root containers;
-5. attempts to set `.env` to mode `0600`;
-6. automatically detects Azure ML `cloudfiles` mounts that cannot preserve `0600` and continues with the trusted-workspace fallback;
-7. validates credentials, strict search controls, agentic-browser controls, feature files, Docker, Compose, and the host port;
-8. stops stale containers belonging to this Compose project;
-9. builds and recreates both services;
-10. waits for a healthy browser and strict agent configuration;
-11. fails immediately with the actual agent `configuration_error` instead of polling a hidden 503 until timeout;
-12. writes `data/runtime/stack_health.json`;
-13. prints the agent URL, notebook path, artifact root, and available `FEATURE_SET` values.
+3. validates the committed `inputs/private/toy_features.json` schema;
+4. creates the internal browser API token when missing;
+5. selects the invoking Azure ML user UID/GID for both non-root containers;
+6. attempts to set `.env` to mode `0600`;
+7. automatically detects Azure ML `cloudfiles` mounts that cannot preserve `0600` and continues with the trusted-workspace fallback;
+8. validates credentials, strict search controls, agentic-browser controls, feature files, Docker, Compose, and the host port;
+9. stops stale containers belonging to this Compose project;
+10. builds and recreates both services;
+11. waits for a healthy browser and strict agent configuration;
+12. fails immediately with the actual agent `configuration_error` instead of polling a hidden 503 until timeout;
+13. writes `data/runtime/stack_health.json`;
+14. prints the agent URL, notebook path, artifact root, and available `FEATURE_SET` values.
 
 The same command is safe to rerun after changing `.env` or pulling new code:
 
@@ -71,7 +78,7 @@ Azure ML Compute Instance
 ├── Docker Compose
 │   ├── agent:8000   -> host 127.0.0.1:8788
 │   └── browser:9000 -> internal Compose network only
-├── inputs/private/  -> read-only feature schemas
+├── inputs/private/toy_features.json -> committed default schema
 ├── data/runtime/    -> bootstrap health snapshot
 ├── data/artifacts/  -> shared evidence and traces
 └── notebooks/01_run_product_evidence.ipynb
@@ -91,40 +98,29 @@ LLM_ENDPOINT=<approved-https-endpoint>
 LLM_DEPLOYMENT=<vision-capable-deployment>
 ```
 
-The equivalent `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_ENDPOINT`, and `AZURE_OPENAI_DEPLOYMENT` names are accepted.
+The equivalent `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_ENDPOINT`, and `AZURE_OPENAI_DEPLOYMENT` names are accepted. All other production controls are already supplied in `.env.example` and should remain unchanged.
 
-Required production controls include:
+## Included feature schema
 
-```env
-PRODUCT_HARNESS_WORKFLOW=three_stage_feature_aware
-PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=3
-PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES=0
-PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE=true
-PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER=true
-PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER=true
-PRODUCT_HARNESS_MAX_CANDIDATE_POOL=90
-PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES=90
-PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE=10
-PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE=20
-PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY=true
-PRODUCT_HARNESS_REJECT_EXPIRING_URLS=true
-```
-
-## Feature schema readiness
-
-Place real schemas in:
+The committed default schema is:
 
 ```text
-inputs/private/<feature_set>.json
+inputs/private/toy_features.json
 ```
 
-If the directory has no JSON file, startup creates:
+It requests:
 
-```text
-inputs/private/example_features.json
+- brand;
+- manufacturer;
+- minimum recommended age.
+
+The corresponding notebook/API value is:
+
+```python
+FEATURE_SET = "toy_features"
 ```
 
-from the generic repository example. The final startup summary lists every notebook `FEATURE_SET` value.
+Additional organization-specific schemas may be placed under `inputs/private/`. They are ignored by Git unless explicitly approved; the committed `toy_features.json` remains the default runnable schema.
 
 ## Readiness verification
 
@@ -171,8 +167,9 @@ The deterministic selector still controls `primary_url`.
 
 | Failure | Bootstrap behavior |
 |---|---|
-| `.env` missing | Creates it from `.env.example`, stops, and instructs you to edit and rerun |
+| `.env` missing | Creates it from `.env.example`, stops, and instructs you to edit credentials and rerun |
 | Placeholder SerpAPI/LLM value | Fails before Docker build with the exact missing field |
+| Default toy schema missing or malformed | Fails before Docker build with the exact file error |
 | `cloudfiles` cannot preserve `0600` | Automatically continues with a security notice |
 | Invalid production control | Fails preflight before containers start |
 | Stale project containers | Removes and recreates them automatically |
@@ -187,7 +184,7 @@ After successful startup:
 1. open `notebooks/01_run_product_evidence.ipynb`;
 2. restart the kernel if the notebook was already open before rebuild;
 3. run the setup/health cell;
-4. select one of the printed `FEATURE_SET` values;
+4. the included `toy_features` schema is discovered automatically;
 5. replace the product input;
 6. set `RUN_SINGLE_PRODUCT = True`;
 7. run the product cell.
@@ -209,6 +206,7 @@ Stopping containers does not delete `data/artifacts` or `data/runtime`.
 python scripts/validate_environment.py --env-file .env
 python scripts/preflight_azureml.py --skip-docker --skip-port
 python -m compileall -q src scripts
+python -m json.tool inputs/private/toy_features.json >/dev/null
 python -m json.tool notebooks/01_run_product_evidence.ipynb >/dev/null
 python -m pytest -q
 docker compose config --quiet
