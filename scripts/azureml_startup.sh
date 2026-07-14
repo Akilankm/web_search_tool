@@ -2,26 +2,57 @@
 set -euo pipefail
 
 PROJECT_DIR="${PRODUCT_EVIDENCE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-ALLOW_INSECURE_ENV_PERMISSIONS=false
+ENV_PERMISSION_MODE="${PRODUCT_EVIDENCE_ENV_PERMISSION_MODE:-auto}"
+BUILD_IMAGES=true
+STARTUP_SUCCEEDED=false
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/azureml_startup.sh [--allow-insecure-env-permissions]
+Usage: ./scripts/azureml_startup.sh [options]
+
+Fresh Azure ML workflow:
+  1. cp .env.example .env
+  2. edit .env with real SerpAPI and LLM values
+  3. ./scripts/azureml_startup.sh
+  4. open notebooks/01_run_product_evidence.ipynb
 
 Options:
+  --no-build                 Reuse existing local images.
+  --strict-env-permissions   Require .env mode 0600; disable Azure ML fallback.
   --allow-insecure-env-permissions
-      Permit broad .env modes such as 777 when an Azure ML mounted filesystem
-      cannot preserve mode 600. This weakens credential protection and emits a
-      security warning.
-  -h, --help
-      Show this help message.
+                             Deprecated compatibility override. Normally unnecessary.
+  -h, --help                 Show this help message.
 EOF
 }
 
+phase() {
+  printf '\n==> %s\n' "$1"
+}
+
+show_failure_diagnostics() {
+  local exit_code=$?
+  if [[ "$STARTUP_SUCCEEDED" == "true" || "$exit_code" == "0" ]]; then
+    return
+  fi
+  echo >&2
+  echo "Azure ML bootstrap failed. Diagnostic container state follows." >&2
+  docker compose ps >&2 2>/dev/null || true
+  docker compose logs --tail=200 agent browser >&2 2>/dev/null || true
+}
+trap show_failure_diagnostics EXIT
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --no-build)
+      BUILD_IMAGES=false
+      shift
+      ;;
+    --strict-env-permissions)
+      ENV_PERMISSION_MODE="strict"
+      shift
+      ;;
     --allow-insecure-env-permissions)
-      ALLOW_INSECURE_ENV_PERMISSIONS=true
+      ENV_PERMISSION_MODE="allow"
       shift
       ;;
     -h|--help)
@@ -36,16 +67,21 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-case "${PRODUCT_EVIDENCE_ALLOW_INSECURE_ENV_PERMISSIONS:-false}" in
-  1|true|TRUE|yes|YES|on|ON)
-    ALLOW_INSECURE_ENV_PERMISSIONS=true
-    ;;
-esac
-
 cd "$PROJECT_DIR"
 
-# A fresh clone contains no generated runtime folders. Create the complete
-# repository-local runtime layout before preflight or Docker Compose runs.
+phase "Preparing the fresh checkout"
+if [[ ! -f .env ]]; then
+  cp .env.example .env
+  chmod 600 .env 2>/dev/null || true
+  cat >&2 <<'EOF'
+Created .env from .env.example.
+Edit the real SerpAPI and LLM values, then run this same startup command again:
+
+  ./scripts/azureml_startup.sh
+EOF
+  exit 2
+fi
+
 mkdir -p data/artifacts data/runtime inputs/private secrets
 
 if [[ ! -s secrets/browser_api_token.txt ]]; then
@@ -56,20 +92,13 @@ import secrets
 path = Path("secrets/browser_api_token.txt")
 path.parent.mkdir(parents=True, exist_ok=True)
 path.write_text(secrets.token_urlsafe(48), encoding="utf-8")
-path.chmod(0o600)
+try:
+    path.chmod(0o600)
+except OSError:
+    pass
 PY
 fi
 
-preflight_args=(--project-dir "$PROJECT_DIR")
-if [[ "$ALLOW_INSECURE_ENV_PERMISSIONS" == "true" ]]; then
-  echo "SECURITY WARNING: allowing broad .env permissions for this startup." >&2
-  preflight_args+=(--allow-insecure-env-permissions)
-fi
-python scripts/preflight_azureml.py "${preflight_args[@]}"
-
-# Prefer the identity of the user invoking startup. Azure ML cloudfiles mounts
-# can report the checkout owner as root even when the notebook user is the
-# correct non-root runtime identity.
 if [[ -n "${PRODUCT_EVIDENCE_RUNTIME_UID:-}" ]]; then
   RUNTIME_UID="$PRODUCT_EVIDENCE_RUNTIME_UID"
 elif [[ "$(id -u)" != "0" ]]; then
@@ -87,7 +116,6 @@ else
 fi
 
 export RUNTIME_UID RUNTIME_GID
-
 if [[ "$RUNTIME_UID" == "0" ]]; then
   echo "Refusing to run application containers as root. Set PRODUCT_EVIDENCE_RUNTIME_UID/GID to the Azure ML notebook user." >&2
   exit 1
@@ -102,14 +130,51 @@ for runtime_path in data/artifacts data/runtime; do
   rm -f "$probe"
 done
 
-docker compose up -d --build --remove-orphans
+phase "Validating credentials, feature schemas, Docker, and production controls"
+python scripts/preflight_azureml.py \
+  --project-dir "$PROJECT_DIR" \
+  --env-permission-mode "$ENV_PERMISSION_MODE" \
+  --skip-port
 
-if ! python scripts/wait_for_stack.py; then
-  docker compose ps >&2 || true
-  docker compose logs --tail=200 agent browser >&2 || true
-  exit 1
+phase "Removing stale containers from this Compose project"
+docker compose down --remove-orphans
+
+phase "Confirming the configured agent port is available"
+python scripts/preflight_azureml.py \
+  --project-dir "$PROJECT_DIR" \
+  --env-permission-mode "$ENV_PERMISSION_MODE" \
+  --skip-docker
+
+phase "Building and starting the agent and browser services"
+compose_args=(up -d --force-recreate --remove-orphans)
+if [[ "$BUILD_IMAGES" == "true" ]]; then
+  compose_args+=(--build)
 fi
+docker compose "${compose_args[@]}"
 
-echo "Product evidence platform is ready at http://127.0.0.1:${AGENT_HOST_PORT:-8788}"
-echo "Artifacts will be written under $PROJECT_DIR/data/artifacts/<row_id>/"
-echo "Open notebooks/01_run_product_evidence.ipynb in Azure ML Studio."
+phase "Waiting for strict agent, browser, SerpAPI, and LLM readiness"
+python scripts/wait_for_stack.py \
+  --env-file "$PROJECT_DIR/.env" \
+  --write-status "$PROJECT_DIR/data/runtime/stack_health.json"
+
+phase "Final notebook-ready state"
+docker compose ps
+
+HOST_PORT="$(docker compose port agent 8000 2>/dev/null | tail -n 1 | awk -F: '{print $NF}')"
+HOST_PORT="${HOST_PORT:-8788}"
+mapfile -t FEATURE_SETS < <(find inputs/private -maxdepth 1 -type f -name '*.json' -printf '%f\n' | sort)
+
+echo
+echo "Product evidence platform is ready."
+echo "Agent API: http://127.0.0.1:${HOST_PORT}"
+echo "Health snapshot: $PROJECT_DIR/data/runtime/stack_health.json"
+echo "Artifacts: $PROJECT_DIR/data/artifacts/<row_id>/"
+echo "Notebook: $PROJECT_DIR/notebooks/01_run_product_evidence.ipynb"
+echo "Available FEATURE_SET values:"
+for feature_file in "${FEATURE_SETS[@]}"; do
+  echo "  - ${feature_file%.json}"
+done
+
+echo
+echo "Open the notebook, restart its kernel if it was already open, run the health/setup cell, select FEATURE_SET, and run the product cell."
+STARTUP_SUCCEEDED=true
