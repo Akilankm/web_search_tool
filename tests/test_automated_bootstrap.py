@@ -52,6 +52,15 @@ def test_auto_permission_mode_allows_only_cloudfiles_when_chmod_cannot_fix(
     assert policy == "azureml-cloudfiles-auto-fallback"
 
 
+def test_startup_detects_resolved_azureml_mount_path() -> None:
+    source = (ROOT / "scripts" / "azureml_startup.sh").read_text(encoding="utf-8").lower()
+
+    assert "/cloudfiles/" in source
+    assert "/mnt/batch/tasks/shared/ls_root/mounts/" in source
+    assert "is_azureml_managed_workspace" in source
+    assert 'env_permission_mode="allow"' in source
+
+
 def test_preflight_accepts_azure_openai_aliases() -> None:
     values = {
         "SERPAPI_API_KEY": "serpapi_key_with_more_than_twenty_chars",
