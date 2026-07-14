@@ -20,12 +20,17 @@ def test_env_example_exists_and_enforces_three_stage_contract() -> None:
     assert values["PRODUCT_HARNESS_ENABLE_LLM_SEARCH_FEEDBACK"] == "false"
     assert values["PRODUCT_HARNESS_BROWSER_FALLBACK_ONLY"] == "false"
     assert values["PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE"] == "true"
+    assert values["PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER"] == "true"
+    assert values["PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER"] == "true"
     assert values["PRODUCT_HARNESS_ENABLE_VISION_REASONING"] == "true"
     assert values["PRODUCT_HARNESS_COUNTRY_FIRST"] == "true"
     assert values["PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK"] == "true"
     assert values["PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY"] == "true"
     assert values["PRODUCT_HARNESS_REJECT_EXPIRING_URLS"] == "true"
     assert int(values["PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT"]) >= 3
+    assert 3 <= int(values["PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES"]) <= 90
+    assert 1 <= int(values["PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE"]) <= 30
+    assert 1 <= int(values["PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE"]) <= 60
 
 
 def test_env_example_uses_placeholders_not_live_secrets() -> None:
