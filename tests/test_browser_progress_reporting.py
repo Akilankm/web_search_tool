@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from src.product_evidence_harness.agent_service.progress_context import browser_progress_callback
+from src.product_evidence_harness.progress_context import browser_progress_callback
 from src.product_evidence_harness.browser_client import (
     BrowserEvidenceClient,
     BrowserServiceConfig,
