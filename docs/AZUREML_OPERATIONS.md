@@ -45,13 +45,13 @@ Private feature names are not included in search queries.
 
 ## Agentic browser campaign
 
-After static preflight and candidate admission, every eligible deduplicated URL in the bounded investigation pool receives a separate browser session.
+The production candidate pool retains at most 90 merged and deduplicated URLs. The agentic limit is also 90, so every retained URL receives a separate browser session.
 
 ```text
 Start isolated session
   -> browser returns screenshot, text, elements and images
   -> LLM selects one safe action
-  -> browser executes it
+  -> browser validates and executes it
   -> browser returns updated state
   -> repeat
   -> finish evidence bundle
@@ -60,14 +60,15 @@ Start isolated session
 Default controls:
 
 ```env
+PRODUCT_HARNESS_MAX_CANDIDATE_POOL=90
 PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER=true
 PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER=true
-PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES=18
+PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES=90
 PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE=10
 PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE=20
 ```
 
-Increasing these values increases browser runtime and LLM cost.
+Lowering the agentic limit deliberately changes the production behavior to top-N investigation. Candidate and turn limits directly affect browser runtime and LLM cost.
 
 ## Progress stages
 
@@ -80,13 +81,24 @@ WRITING_OUTPUTS
 COMPLETED or REVIEW_REQUIRED
 ```
 
-Candidate progress includes turn number and selected action, for example:
+Candidate progress includes turn number and selected action:
 
 ```text
 CAND-003 | turn 2/10 | CLICK | retailer.example
 CAND-003 | turn 3/10 | INSPECT_IMAGE | retailer.example
 CAND-003 | COMPLETED | turns=4 | actions=3 | openable=True | scrapable=True
 ```
+
+## Browser safety enforcement
+
+The LLM may act only on observed `E###` and `I###` identifiers. The browser execution layer independently blocks:
+
+- stale or invented IDs;
+- cross-site navigation;
+- login/account actions;
+- upload and form-entry actions;
+- cart, checkout, order, subscription, and payment actions;
+- arbitrary URL, JavaScript, code, or access-control bypass.
 
 ## Final acceptance
 
