@@ -8,9 +8,8 @@ from product_evidence_harness.adaptive_search import (
     AdaptiveSearchError,
     BudgetAwareSearchPlanner,
     SearchAction,
-    SearchEngine,
     SearchHandle,
-    SerpAPIClientError if False else SearchObservation,
+    SearchObservation,
     SerpAPIMultiEngineClient,
     SerpAPIResponseParser,
 )
