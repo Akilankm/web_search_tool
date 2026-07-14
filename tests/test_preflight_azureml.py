@@ -22,6 +22,13 @@ def valid_env() -> str:
         [
             "SERPAPI_API_KEY=serpapi_key_with_more_than_twenty_chars",
             "PRODUCT_HARNESS_WORKFLOW=three_stage_feature_aware",
+            "PRODUCT_HARNESS_MAX_SERPAPI_CREDITS=3",
+            "PRODUCT_HARNESS_ALLOWED_SEARCH_ENGINES=google,google_shopping,google_ai_mode,google_immersive_product,google_lens,amazon,ebay,walmart,home_depot",
+            "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_PLANNING=true",
+            "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_FEEDBACK=true",
+            "PRODUCT_HARNESS_REQUIRE_LLM_SEARCH_PLANNING=true",
+            "PRODUCT_HARNESS_EARLY_STOP_ON_WORKING_URL=true",
+            "PRODUCT_HARNESS_SEARCH_PLANNER_MAX_CANDIDATES=8",
             "PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=3",
             "PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES=0",
             "PRODUCT_HARNESS_COUNTRY_FIRST=true",
@@ -31,20 +38,23 @@ def valid_env() -> str:
             "PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER=true",
             "PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY=true",
             "PRODUCT_HARNESS_REJECT_EXPIRING_URLS=true",
-            "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE=6",
-            "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT=18",
-            "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES=18",
-            "PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE=10",
-            "PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE=20",
-            "PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS=12000",
-            "PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS=60",
-            "PRODUCT_HARNESS_AGENTIC_MAX_IMAGES=30",
+            "PRODUCT_HARNESS_MAX_FULL_SCRAPES=6",
+            "PRODUCT_HARNESS_MAX_SCRAPES_PER_DOMAIN=2",
+            "PRODUCT_HARNESS_MIN_PREFLIGHT_SCORE=0.28",
+            "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE=2",
+            "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT=3",
+            "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES=3",
+            "PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE=4",
+            "PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE=6",
+            "PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS=4000",
+            "PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS=15",
+            "PRODUCT_HARNESS_AGENTIC_MAX_IMAGES=8",
             "PRODUCT_HARNESS_ENABLE_VISION_REASONING=true",
             "PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING=false",
-            "LLM_API_KEY=llm_key_with_more_than_sixteen_chars",
-            "LLM_API_VERSION=2025-01-01-preview",
-            "LLM_ENDPOINT=https://approved.company.net/",
-            "LLM_DEPLOYMENT=vision-deployment",
+            "LLM_API_KEY=enterprise-key",
+            "LLM_API_VERSION=enterprise-version",
+            "LLM_ENDPOINT=enterprise-gateway",
+            "LLM_DEPLOYMENT=enterprise-deployment",
             "AGENT_HOST_PORT=8788",
             "",
         ]
@@ -63,14 +73,44 @@ def test_preflight_rejects_non_three_credit_budget(tmp_path: Path) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text(
         valid_env().replace(
-            "PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=3",
-            "PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=1",
+            "PRODUCT_HARNESS_MAX_SERPAPI_CREDITS=3",
+            "PRODUCT_HARNESS_MAX_SERPAPI_CREDITS=2",
         ),
         encoding="utf-8",
     )
     env_path.chmod(0o600)
 
-    with pytest.raises(preflight.PreflightError, match="must be 3"):
+    with pytest.raises(preflight.PreflightError, match="between 3 and 3"):
+        preflight.validate_env(preflight.parse_env(env_path))
+
+
+def test_preflight_rejects_disabled_llm_search_planner(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        valid_env().replace(
+            "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_PLANNING=true",
+            "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_PLANNING=false",
+        ),
+        encoding="utf-8",
+    )
+    env_path.chmod(0o600)
+
+    with pytest.raises(preflight.PreflightError, match="must be true"):
+        preflight.validate_env(preflight.parse_env(env_path))
+
+
+def test_preflight_rejects_missing_core_engine(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        valid_env().replace(
+            "google_ai_mode,",
+            "",
+        ),
+        encoding="utf-8",
+    )
+    env_path.chmod(0o600)
+
+    with pytest.raises(preflight.PreflightError, match="Missing required"):
         preflight.validate_env(preflight.parse_env(env_path))
 
 
