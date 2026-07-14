@@ -14,10 +14,17 @@ from src.product_evidence_harness.three_stage_environment import validate_runtim
 from src.product_evidence_harness.llm.service import LLMConfig
 
 
-app = FastAPI(title="Product Evidence Agent", version="0.7.1")
+app = FastAPI(title="Product Evidence Agent", version="0.8.0")
 store = InMemoryJobStore()
 executor = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("AGENT_WORKERS", "2"))))
 orchestrator = StrictProductEvidenceOrchestrator()
+
+
+def _enabled(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _validate_runtime() -> tuple[dict | None, str | None]:
@@ -26,13 +33,12 @@ def _validate_runtime() -> tuple[dict | None, str | None]:
             None,
             strict_file_permissions=False,
         )
-        vision_enabled = os.getenv("PRODUCT_HARNESS_ENABLE_VISION_REASONING", "true").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-        if vision_enabled:
+        llm_required = (
+            _enabled("PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER", True)
+            or _enabled("PRODUCT_HARNESS_ENABLE_VISION_REASONING", True)
+            or _enabled("PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING", False)
+        )
+        if llm_required:
             LLMConfig.from_env()
         return report.to_dict(), None
     except Exception as exc:
