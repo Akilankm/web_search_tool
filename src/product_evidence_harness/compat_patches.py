@@ -84,6 +84,9 @@ def apply_compatibility_patches() -> None:
     from src.product_evidence_harness.precision_selection_hardening import (
         apply_precision_selection_hardening,
     )
+    from src.product_evidence_harness.precision_terminal_hardening import (
+        apply_precision_terminal_hardening,
+    )
     from src.product_evidence_harness.notebook_candidate_bridge import (
         apply_notebook_candidate_bridge,
     )
@@ -92,6 +95,7 @@ def apply_compatibility_patches() -> None:
     apply_precision_browser_patches()
     apply_precision_hardening()
     apply_precision_selection_hardening()
+    apply_precision_terminal_hardening()
     apply_notebook_candidate_bridge()
 
     # The historical package uses both ``product_evidence_harness`` and
