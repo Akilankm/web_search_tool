@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
+from src.product_evidence_harness.progress_context import emit_browser_progress
 from src.product_evidence_harness.browser_contracts import BrowserEvidenceBundle, BrowserEvidenceRequest
 
 
@@ -66,16 +69,43 @@ class BrowserEvidenceClient:
 
     def acquire(self, request: BrowserEvidenceRequest) -> BrowserEvidenceBundle:
         last_error: Exception | None = None
-        for attempt in range(self.config.max_retries + 1):
+        total_attempts = self.config.max_retries + 1
+        domain = urlparse(request.url).netloc.lower().removeprefix("www.") or "unknown-domain"
+
+        for attempt in range(1, total_attempts + 1):
+            started = time.monotonic()
+            emit_browser_progress(
+                f"{request.candidate_id} | attempt {attempt}/{total_attempts} | STARTED | {domain}"
+            )
             try:
                 response = self._client.post("/v1/evidence/acquire", json=request.to_dict())
                 response.raise_for_status()
-                return BrowserEvidenceBundle.from_mapping(response.json())
+                bundle = BrowserEvidenceBundle.from_mapping(response.json())
+                elapsed = time.monotonic() - started
+                emit_browser_progress(
+                    f"{request.candidate_id} | {bundle.status.value} | "
+                    f"openable={bundle.browser_openable} | scrapable={bundle.text_scrapable} | "
+                    f"rendered_exact={bundle.rendered_product_verified} | {elapsed:.1f}s | {domain}"
+                )
+                return bundle
             except (httpx.HTTPError, ValueError) as exc:
                 last_error = exc
-                if attempt >= self.config.max_retries:
-                    break
-        raise BrowserServiceError(f"Browser evidence request failed: {type(last_error).__name__}: {last_error}") from last_error
+                elapsed = time.monotonic() - started
+                error_name = type(exc).__name__
+                if attempt < total_attempts:
+                    emit_browser_progress(
+                        f"{request.candidate_id} | RETRYING | attempt {attempt}/{total_attempts} "
+                        f"failed with {error_name} after {elapsed:.1f}s | {domain}"
+                    )
+                else:
+                    emit_browser_progress(
+                        f"{request.candidate_id} | FAILED | {total_attempts}/{total_attempts} attempts | "
+                        f"{error_name} | {elapsed:.1f}s | {domain}"
+                    )
+
+        raise BrowserServiceError(
+            f"Browser evidence request failed: {type(last_error).__name__}: {last_error}"
+        ) from last_error
 
     def __enter__(self) -> "BrowserEvidenceClient":
         return self
