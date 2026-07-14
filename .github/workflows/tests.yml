@@ -35,8 +35,17 @@ jobs:
       - name: Validate default toy feature schema
         run: python -m json.tool inputs/private/toy_features.json >/dev/null
 
-      - name: Validate notebook JSON
-        run: python -m json.tool notebooks/01_run_product_evidence.ipynb >/dev/null
+      - name: Validate notebook JSON and code cells
+        run: |
+          python -m json.tool notebooks/01_run_product_evidence.ipynb >/dev/null
+          python - <<'PY'
+          import ast, json
+          from pathlib import Path
+          notebook = json.loads(Path('notebooks/01_run_product_evidence.ipynb').read_text())
+          for index, cell in enumerate(notebook['cells']):
+              if cell.get('cell_type') == 'code':
+                  ast.parse(''.join(cell.get('source', [])), filename=f'notebook-cell-{index}')
+          PY
 
       - name: Validate Compose contract
         run: |
@@ -54,6 +63,9 @@ jobs:
             tests/test_automated_bootstrap.py \
             tests/test_preflight_azureml.py \
             tests/test_serp_harvester.py \
+            tests/test_adaptive_search.py \
+            tests/test_adaptive_notebook_diagnostics.py \
+            tests/test_notebook_result_contract.py \
             tests/test_one_credit_feature_workflow.py \
             tests/test_simple_feature_schema.py \
             tests/test_environment_security.py \
