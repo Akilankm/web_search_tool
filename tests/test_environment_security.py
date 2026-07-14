@@ -65,7 +65,11 @@ def test_valid_environment_returns_secret_free_report(tmp_path: Path) -> None:
     assert report.agentic_browser_required is True
     assert report.agentic_browser_contract_enforced is True
     assert report.llm_configured is True
-    assert report.max_agentic_candidates == 18
+    # Legacy .env values remain accepted, but the runtime reports and enforces
+    # the effective context ceilings rather than the larger configured values.
+    assert report.max_agentic_candidates == 3
+    assert report.max_agentic_turns_per_candidate == 4
+    assert report.max_agentic_actions_per_candidate == 6
     assert "serp_live_" not in rendered
     assert "llm_key_" not in rendered
 

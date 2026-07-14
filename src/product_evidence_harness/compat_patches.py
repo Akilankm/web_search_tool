@@ -72,12 +72,44 @@ def apply_compatibility_patches() -> None:
     LivePageOfflineArtifactBuilder._remove_network_primitives = _remove_network_primitives  # type: ignore[method-assign]
     LivePageOfflineArtifactBuilder._role_directory = _role_directory  # type: ignore[method-assign]
 
+    from src.product_evidence_harness.precision_search_runtime import (
+        apply_precision_search_patches,
+    )
+    from src.product_evidence_harness.precision_browser_runtime import (
+        apply_precision_browser_patches,
+    )
+    from src.product_evidence_harness.precision_hardening import (
+        apply_precision_hardening,
+    )
+    from src.product_evidence_harness.precision_selection_hardening import (
+        apply_precision_selection_hardening,
+    )
+    from src.product_evidence_harness.precision_terminal_hardening import (
+        apply_precision_terminal_hardening,
+    )
+    from src.product_evidence_harness.notebook_candidate_bridge import (
+        apply_notebook_candidate_bridge,
+    )
+
+    apply_precision_search_patches()
+    apply_precision_browser_patches()
+    apply_precision_hardening()
+    apply_precision_selection_hardening()
+    apply_precision_terminal_hardening()
+    apply_notebook_candidate_bridge()
+
     # The historical package uses both ``product_evidence_harness`` and
-    # ``src.product_evidence_harness`` imports. Alias the patched modules so both
+    # ``src.product_evidence_harness`` imports. Alias every patched module so both
     # names resolve to the same class objects instead of creating duplicate trees.
-    query_module = sys.modules.get("src.product_evidence_harness.query_builder")
-    offline_module = sys.modules.get("src.product_evidence_harness.offline_capture")
-    if query_module is not None:
-        sys.modules.setdefault("product_evidence_harness.query_builder", query_module)
-    if offline_module is not None:
-        sys.modules.setdefault("product_evidence_harness.offline_capture", offline_module)
+    aliases = {
+        "query_builder": "src.product_evidence_harness.query_builder",
+        "offline_capture": "src.product_evidence_harness.offline_capture",
+        "candidate_store": "src.product_evidence_harness.candidate_store",
+        "candidate_precision": "src.product_evidence_harness.candidate_precision",
+        "candidate_reporting": "src.product_evidence_harness.candidate_reporting",
+        "three_stage_environment": "src.product_evidence_harness.three_stage_environment",
+    }
+    for short_name, source_name in aliases.items():
+        module = sys.modules.get(source_name)
+        if module is not None:
+            sys.modules[f"product_evidence_harness.{short_name}"] = module

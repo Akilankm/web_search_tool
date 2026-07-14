@@ -34,15 +34,46 @@ product = {
 
 `main_text` and `country_code` are required. The other fields are optional. `RUN_SINGLE_PRODUCT` defaults to `False` to avoid accidental API usage before the sample input is replaced.
 
-## Three-stage deterministic flow
+## Precision-gated three-stage flow
 
 Each product executes exactly three searches:
 
 1. requested retailer in the requested country, or the primary country search;
-2. alternative retailers in the requested country;
+2. alternative sources in the requested country;
 3. unrestricted global fallback.
 
-Every retained candidate may then receive an isolated LLM-controlled agentic browser investigation. Deterministic code remains authoritative for identity, access, scrapability, requested-feature evidence, conflicts, and durable `primary_url` acceptance.
+The three searches preserve recall. Downstream processing is selective:
+
+```text
+raw SERP occurrence
+→ canonical URL identity
+→ deterministic URL-type and identity admission
+→ bounded full scrape
+→ evidence-utility acceptance
+→ bounded browser escalation
+→ strict primary URL decision
+```
+
+Obvious home, search, category, collection, social, document, media, and low-identity URLs remain visible for audit but do not consume full scrape or LLM-browser capacity.
+
+## Two intentional table grains
+
+### `serp_results_df`
+
+This is the raw search-occurrence table. The same canonical URL can appear more than once because it may be returned by several search stages or at several positions.
+
+### `results_df`
+
+This is the authoritative candidate table. It contains exactly one row per canonical URL. Tracking, campaign, referral, session, and fragment noise are removed while product-defining query parameters remain.
+
+The runtime writes the same grain to:
+
+```text
+data/artifacts/<row_id>/candidate_url_records.json
+data/artifacts/<row_id>/candidates.csv
+```
+
+Canonical URL uniqueness is asserted by the runtime.
 
 ## Main diagnostic tables
 
@@ -51,9 +82,9 @@ After the run, execute the **Build the complete diagnostic model** cell.
 | DataFrame | Purpose |
 |---|---|
 | `overview_df` | Executive metrics and final state |
-| `search_stages_df` | Per-credit search-stage yield |
-| `serp_results_df` | SERP URL inventory |
-| `results_df` | Principal candidate-level audit table |
+| `search_stages_df` | Per-credit search-stage and admission yield |
+| `serp_results_df` | Raw SERP occurrence inventory |
+| `results_df` | One-row-per-canonical-URL decision ledger |
 | `agentic_df` | Browser turns, actions, termination, and errors |
 | `feature_evidence_df` | URL-feature evidence records |
 | `feature_matrix_df` | URL by requested-feature support matrix |
@@ -65,36 +96,107 @@ After the run, execute the **Build the complete diagnostic model** cell.
 
 ## `results_df` contract
 
-`results_df` contains one row per deduplicated retained candidate. It includes:
+The persisted candidate ledger supplies these groups to `results_df`:
 
-- search stage and best SERP position;
-- deterministic confidence and content richness;
-- scrape attempted and scrape success flags;
-- agentic-browser status, turns, and actions;
-- browser openability and text scrapability;
-- deterministic identity acceptance;
-- requested-feature coverage and conflicts;
-- deterministic `quality_verified` status;
-- strict or review-set selection;
-- a compact `final_candidate_status` explaining the pass/fail stage.
+| Group | Important fields |
+|---|---|
+| URL identity | `canonical_url`, `requested_url`, `final_url`, `domain` |
+| SERP support | `search_stages`, `appearance_count`, `best_position`, `serp_title` |
+| Pre-scrape admission | `url_type`, `preflight_score`, `identity_overlap`, `admitted_for_scrape`, `admission_reason` |
+| Acquisition | `full_scrape_attempted`, `fetch_success`, `content_extracted`, `technical_scrapable` |
+| Evidence quality | `product_page_likelihood`, `content_utility_score`, `scrape_accepted` |
+| Identity | `identity_status`, `ean_check`, `title_check`, `variant_status`, `page_type` |
+| Feature support | `feature_evidence_count`, `coverage`, `missing_features`, `conflicting_features` |
+| Browser | `browser_admitted`, `browser_admission_reason`, `browser_turns`, `browser_actions`, `browser_outcome` |
+| Final RCA | `final_status`, `rejection_category`, `selected`, `decision_reasons` |
 
-`quality_verified` means the runtime validation status is exactly `VERIFIED`. It is not a subjective notebook score.
+Feature-specific scalar columns are created dynamically:
+
+```text
+feature_<feature_id>_value
+feature_<feature_id>_status
+feature_<feature_id>_confidence
+```
+
+## Scrape semantics
+
+The notebook's stable `scrape_success` view now means **evidence-quality accepted**, not merely HTTP success.
+
+The detailed distinction remains available:
+
+| Field | Meaning |
+|---|---|
+| `fetch_success` | Acquisition operation succeeded |
+| `content_extracted` | A usable amount of readable content was obtained |
+| `technical_scrapable` | Existing technical scrapability signal |
+| `product_page_likelihood` | Evidence for an individual product detail page |
+| `content_utility_score` | Usefulness for identity and feature evidence |
+| `scrape_accepted` | Accepted for downstream evidence reasoning |
+
+A technically reachable page with a price or image is therefore not automatically counted as quality evidence.
 
 ## Funnel semantics
 
+The business funnel is:
+
 ```text
 SERP rows returned
-→ unique candidate URLs
-→ scrape attempted
-→ scrape successful
-→ agentic investigated
+→ canonical candidate URLs
+→ admitted for full scrape
+→ full scrape attempted
+→ scrape accepted for evidence
+→ browser admitted
 → browser openable
 → identity accepted
 → feature complete
 → selected
 ```
 
-This separates search quality, technical access, exact-product identity, feature completeness, and final decision quality.
+The existing notebook display remains backward-compatible. The authoritative stage fields are available directly in `results_df`, `search_stages_df`, and the Excel export.
+
+## Browser and context controls
+
+Only high-potential, already-scraped, unresolved candidates enter the browser. Effective hard ceilings are:
+
+```text
+3 candidates
+4 turns per candidate
+6 actions per candidate
+5,000 observation characters maximum
+18 relevant controls maximum
+10 relevant images maximum
+```
+
+The normal defaults are smaller: 4,000 characters, 15 controls, and 8 images.
+
+The prompt mode is `incremental_delta_relevance_filtered`:
+
+- already resolved feature definitions are removed;
+- unchanged page text is not resent;
+- specification, details, manufacturer, age, warning, gallery, and similar controls are ranked first;
+- transactional and account controls are ranked down;
+- only two compact prior action summaries are retained;
+- no additional LLM call is made when every requested feature is already resolved.
+
+## Final status
+
+Every canonical URL has one terminal RCA label:
+
+```text
+SERP_REJECTED_URL_TYPE
+SERP_REJECTED_LOW_IDENTITY
+QUALIFIED_NOT_SCRAPED_BUDGET
+SCRAPE_FAILED
+SCRAPE_LOW_UTILITY
+IDENTITY_REJECTED
+BROWSER_BLOCKED
+FEATURE_INCOMPLETE
+ELIGIBLE_NOT_SELECTED
+REVIEW_SELECTED
+STRICT_SELECTED
+```
+
+`quality_verified` means the runtime validation status is exactly `VERIFIED`. It is not a subjective notebook score.
 
 ## Graphical EDA
 
@@ -125,4 +227,7 @@ data/artifacts/<row_id>/single_product_diagnostics.xlsx
 
 Every diagnostic DataFrame is written as a separate worksheet. JSON and CSV artifacts remain the source-of-truth audit records.
 
-See `docs/SINGLE_PRODUCT_DIAGNOSTICS.md` for metric definitions and interpretation guidance.
+See:
+
+- `docs/CANDIDATE_PRECISION_AND_CONTEXT.md`
+- `docs/SINGLE_PRODUCT_DIAGNOSTICS.md`

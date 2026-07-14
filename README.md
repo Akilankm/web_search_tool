@@ -1,18 +1,30 @@
 # Product Evidence Platform
 
-A production-oriented, LLM-agentic product URL and feature-evidence workflow for Azure ML Compute Instances.
+A production-oriented product URL and feature-evidence workflow for Azure ML Compute Instances.
 
 ## Production contract
 
 Every product uses exactly three bounded SerpAPI organic searches:
 
 1. requested retailer in the requested country, or the primary country search;
-2. alternative retailers in the requested country;
+2. alternative sources within the requested country;
 3. unrestricted global fallback.
 
-Every deduplicated URL retained by the bounded candidate pool may receive an isolated LLM-controlled browser investigation. The LLM observes the rendered page and screenshot, plans one safe action, receives the changed page state, and repeats. Deterministic code still enforces product identity, accessibility, scrapability, feature evidence, conflicts, scope priority, and durable `primary_url` acceptance.
+Search remains high-recall, but downstream work is precision-gated:
 
-See [docs/AGENTIC_BROWSER.md](docs/AGENTIC_BROWSER.md).
+```text
+raw SERP occurrence
+→ canonical URL identity
+→ URL-type and product-identity admission
+→ bounded full scrape
+→ evidence-utility validation
+→ bounded agentic-browser escalation
+→ strict primary URL decision
+```
+
+Obvious home, search, category, collection, social, PDF, media, and low-identity URLs remain visible in the audit ledger but do not consume a full scrape or LLM-controlled browser session.
+
+See [docs/CANDIDATE_PRECISION_AND_CONTEXT.md](docs/CANDIDATE_PRECISION_AND_CONTEXT.md) and [docs/AGENTIC_BROWSER.md](docs/AGENTIC_BROWSER.md).
 
 ## One-command Azure ML bootstrap
 
@@ -57,24 +69,33 @@ LLM_DEPLOYMENT=<organization-provided-value>
 
 Equivalent `AZURE_OPENAI_*` names are accepted. LLM values are treated as organization-provided opaque configuration; startup requires them to be present but does not impose key-length or endpoint-format assumptions.
 
-The production controls in `.env.example` should remain unchanged:
+The precision and context controls in `.env.example` should remain unchanged:
 
 ```env
 PRODUCT_HARNESS_WORKFLOW=three_stage_feature_aware
 PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=3
 PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES=0
-PRODUCT_HARNESS_COUNTRY_FIRST=true
-PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK=true
+
+PRODUCT_HARNESS_MAX_FULL_SCRAPES=6
+PRODUCT_HARNESS_MAX_SCRAPES_PER_DOMAIN=2
+PRODUCT_HARNESS_MIN_PREFLIGHT_SCORE=0.28
+PRODUCT_HARNESS_MAX_CANDIDATE_POOL=90
+
 PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE=true
 PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER=true
 PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER=true
-PRODUCT_HARNESS_MAX_CANDIDATE_POOL=90
-PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES=90
-PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE=10
-PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE=20
+PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES=3
+PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE=4
+PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE=6
+PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS=4000
+PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS=15
+PRODUCT_HARNESS_AGENTIC_MAX_IMAGES=8
+
 PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY=true
 PRODUCT_HARNESS_REJECT_EXPIRING_URLS=true
 ```
+
+An existing `.env` with larger legacy browser values remains startup-compatible, but runtime execution and health reporting clamp to the effective hard ceilings of three candidates, four turns, and six actions.
 
 ## Included feature schema
 
@@ -96,63 +117,123 @@ The notebook uses:
 FEATURE_SET = "toy_features"
 ```
 
+## One URL, one authoritative row
+
+The runtime keeps two intentionally different table grains.
+
+### Raw SERP occurrences
+
+`search.serp_results` and notebook `serp_results_df` retain one row for every search result occurrence. A URL may occur in several searches or positions.
+
+### Canonical candidate decisions
+
+`candidate_records`, `candidate_url_records.json`, `candidates.csv`, and notebook `results_df` contain exactly one row per canonical URL.
+
+Canonicalization removes tracking, campaign, referral, session, and fragment noise while preserving product-defining parameters such as SKU, product ID, EAN, GTIN, and variant.
+
+The candidate record distinguishes:
+
+- `full_scrape_attempted` from `fetch_success`;
+- `fetch_success` from `content_extracted`;
+- technical acquisition from `scrape_accepted` evidence quality;
+- deterministic admission from browser escalation;
+- feature completeness from final URL selection.
+
+Every URL ends with one explicit RCA status such as:
+
+```text
+SERP_REJECTED_URL_TYPE
+SERP_REJECTED_LOW_IDENTITY
+QUALIFIED_NOT_SCRAPED_BUDGET
+SCRAPE_FAILED
+SCRAPE_LOW_UTILITY
+IDENTITY_REJECTED
+BROWSER_BLOCKED
+FEATURE_INCOMPLETE
+ELIGIBLE_NOT_SELECTED
+REVIEW_SELECTED
+STRICT_SELECTED
+```
+
+## Progressive acquisition
+
+All three searches share a default six-URL full-scrape budget. Unused capacity rolls forward to later stages, and no domain may consume more than two full scrapes.
+
+Only candidates with a probable product-detail URL, adequate requested-product identity evidence, and sufficient deterministic preflight score are admitted.
+
+A successful HTTP response alone is not considered quality evidence. The runtime separately records:
+
+| Field | Meaning |
+|---|---|
+| `fetch_success` | The acquisition operation succeeded |
+| `content_extracted` | A usable amount of readable content was obtained |
+| `product_page_likelihood` | Evidence that this is an individual product detail page |
+| `content_utility_score` | Combined usefulness for product identity and requested evidence |
+| `scrape_accepted` | Suitable for downstream evidence reasoning |
+
+## Context-efficient agentic browser
+
+The browser is an escalation path for high-potential unresolved candidates, not a second crawler for the complete SERP pool.
+
+The LLM receives:
+
+- only unresolved feature definitions;
+- only newly visible text segments after the first turn;
+- relevance-ranked specification, details, manufacturer, age, warning, gallery, and similar controls;
+- relevance-ranked images;
+- at most two compact previous action summaries.
+
+The prompt mode is:
+
+```text
+incremental_delta_relevance_filtered
+```
+
+The loop stops without another LLM call when all requested features are already resolved.
+
 ## Single-product EDA and RCA notebook
 
-The notebook is not only a runner. After one product completes, it builds a complete diagnostic model with compact pandas tables, a Rich executive summary, Matplotlib charts, Seaborn charts, and an Excel export.
+After one product completes, the notebook builds compact pandas tables, a Rich executive summary, Matplotlib and Seaborn charts, and an Excel export.
 
-The principal table is `results_df`, containing one row per deduplicated retained candidate. It joins search scope, SERP position, scrape outcome, agentic-browser activity, deterministic identity acceptance, feature coverage, rejection reasons, and final `primary_url` selection.
-
-Other diagnostic DataFrames include:
-
-- `search_stages_df`;
-- `serp_results_df`;
-- `funnel_df`;
-- `domain_summary_df`;
-- `stage_quality_df`;
-- `agentic_df`;
-- `feature_evidence_df`;
-- `feature_matrix_df`;
-- `rejection_reasons_df`;
-- `selection_rca_df`.
+The principal `results_df` is the authoritative one-row-per-canonical-URL table. Drill-down tables retain raw SERP occurrences, feature evidence, browser actions, and LLM plans without bloating the default decision view.
 
 The funnel is reported explicitly:
 
 ```text
 SERP rows returned
-→ unique candidate URLs
-→ scrape attempted
-→ scrape successful
-→ agentic investigated
+→ canonical candidate URLs
+→ admitted for full scrape
+→ full scrape attempted
+→ scrape accepted for evidence
+→ browser admitted
 → browser openable
 → identity accepted
 → feature complete
 → selected
 ```
 
-The final diagnostic workbook is written to:
+The diagnostic workbook is written to:
 
 ```text
 data/artifacts/<row_id>/single_product_diagnostics.xlsx
 ```
 
-See [docs/SINGLE_PRODUCT_DIAGNOSTICS.md](docs/SINGLE_PRODUCT_DIAGNOSTICS.md).
+See [docs/SINGLE_PRODUCT_DIAGNOSTICS.md](docs/SINGLE_PRODUCT_DIAGNOSTICS.md) and [docs/NOTEBOOK_USAGE.md](docs/NOTEBOOK_USAGE.md).
 
 ## Final URL acceptance
 
-A top-level `primary_url` is returned only when one LLM-investigated URL is:
+A top-level `primary_url` is returned only when one investigated URL is:
 
 - browser-openable and not blocked;
 - the rendered exact product and variant;
-- text-scrapable;
+- evidence-quality accepted;
 - complete for every requested feature on the same URL;
 - free of feature conflicts;
 - durable and non-expiring.
 
-Otherwise the workflow completes as `REVIEW_REQUIRED`, keeps `primary_url=null`, and retains the candidate investigations and diagnostic multi-URL evidence coverage.
+Otherwise the workflow completes as `REVIEW_REQUIRED`, keeps `primary_url=null`, and retains the complete candidate RCA.
 
 ## Result contract
-
-Important API fields:
 
 | Path | Meaning |
 |---|---|
@@ -160,14 +241,30 @@ Important API fields:
 | `job_status` | `COMPLETED` or `REVIEW_REQUIRED` |
 | `coding_ready` | Strict deterministic final acceptance result |
 | `primary_url` | Accepted durable URL or `null` |
-| `search.stages` | Three-stage search trace |
-| `search.serpapi_requests_used` | Must be `3` |
-| `agentic_browser` | Investigation policy and budgets |
+| `search.stages` | Three-stage search and precision-admission trace |
+| `search.serp_results` | Raw SERP occurrence rows |
+| `search.precision_policy` | Effective scrape and preflight controls |
+| `candidate_records` | Authoritative one-row-per-canonical-URL decisions |
+| `agentic_browser.admission_decisions` | Browser eligibility and budget decisions |
+| `agentic_browser.context_policy` | Effective incremental context limits |
 | `candidate_investigations` | Per-candidate LLM plans and actions |
 | `feature_assessments` | Per-URL requested-feature evidence and coverage |
 | `evidence_set` | Diagnostic selected-source coverage |
 | `primary_url_acceptance` | Authoritative final gate decision |
 | `browser_evidence` | Rendered text, screenshots, blockers, and assets |
+
+## Artifacts
+
+```text
+data/artifacts/<row_id>/
+├── orchestrated_result.json
+├── candidate_state.json
+├── candidate_url_records.json
+├── candidates.csv
+├── feature_evidence.csv
+├── primary_url_acceptance.json
+└── CAND-###/agentic/
+```
 
 ## Operations
 
@@ -179,8 +276,6 @@ docker compose logs -f --tail=200 agent browser
 
 docker compose down
 ```
-
-Generated evidence is written under `data/artifacts/<row_id>/`.
 
 ## Validation
 
@@ -195,6 +290,7 @@ docker compose config --quiet
 
 ## Documentation
 
+- [Candidate precision and context control](docs/CANDIDATE_PRECISION_AND_CONTEXT.md)
 - [Automated Azure ML operations](docs/AZUREML_OPERATIONS.md)
 - [Notebook usage and diagnostic contract](docs/NOTEBOOK_USAGE.md)
 - [Single-product diagnostic interpretation](docs/SINGLE_PRODUCT_DIAGNOSTICS.md)
