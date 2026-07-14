@@ -36,11 +36,8 @@ def _remove_network_primitives(self: LivePageOfflineArtifactBuilder, html: str) 
     )
     if self.config.disable_scripts:
         output = re.sub(
-            r"<script\b([^>]*)\bsrc=['\"]([^'\"]+)['\"]([^>]*)>\s*</script>",
-            lambda match: (
-                '<script type="application/json" data-offline-disabled="external-script" '
-                f'data-offline-src="{escape(match.group(2), quote=True)}"></script>'
-            ),
+            r"<script\b([^>]*)\bsrc=['\"][^'\"]+['\"]([^>]*)>\s*</script>",
+            '<script type="application/json" data-offline-disabled="external-script"></script>',
             output,
             flags=re.I | re.S,
         )
@@ -95,11 +92,17 @@ def apply_compatibility_patches() -> None:
     apply_notebook_candidate_bridge()
 
     # The historical package uses both ``product_evidence_harness`` and
-    # ``src.product_evidence_harness`` imports. Alias the patched modules so both
+    # ``src.product_evidence_harness`` imports. Alias every patched module so both
     # names resolve to the same class objects instead of creating duplicate trees.
-    query_module = sys.modules.get("src.product_evidence_harness.query_builder")
-    offline_module = sys.modules.get("src.product_evidence_harness.offline_capture")
-    if query_module is not None:
-        sys.modules.setdefault("product_evidence_harness.query_builder", query_module)
-    if offline_module is not None:
-        sys.modules.setdefault("product_evidence_harness.offline_capture", offline_module)
+    aliases = {
+        "query_builder": "src.product_evidence_harness.query_builder",
+        "offline_capture": "src.product_evidence_harness.offline_capture",
+        "candidate_store": "src.product_evidence_harness.candidate_store",
+        "candidate_precision": "src.product_evidence_harness.candidate_precision",
+        "candidate_reporting": "src.product_evidence_harness.candidate_reporting",
+        "three_stage_environment": "src.product_evidence_harness.three_stage_environment",
+    }
+    for short_name, source_name in aliases.items():
+        module = sys.modules.get(source_name)
+        if module is not None:
+            sys.modules[f"product_evidence_harness.{short_name}"] = module
