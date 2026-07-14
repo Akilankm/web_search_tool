@@ -84,10 +84,15 @@ def validate_runtime_environment(
         False,
     )
 
+    # The legacy validator still owns credential, permission and security checks.
+    # Present it with a one-credit compatibility view so it does not reject the
+    # new adaptive planning flags as obsolete expansive-search controls.
     compatibility_values = dict(values)
     compatibility_values["PRODUCT_HARNESS_WORKFLOW"] = "one_credit_feature_aware"
     compatibility_values["PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES"] = "1"
     compatibility_values["PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES"] = "0"
+    compatibility_values["PRODUCT_HARNESS_ENABLE_LLM_SEARCH_PLANNING"] = "false"
+    compatibility_values["PRODUCT_HARNESS_ENABLE_LLM_SEARCH_FEEDBACK"] = "false"
     if agentic_enabled:
         compatibility_values["PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING"] = "true"
 
@@ -260,106 +265,20 @@ def _enforce_adaptive_settings(values: Mapping[str, str]) -> dict[str, object]:
                 f"{name} must be true for the production runner"
             )
 
-    # The old organic/AI counters remain accepted for backward compatibility,
-    # but the runtime now enforces one unified three-credit SerpAPI budget.
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES",
-        3,
-        minimum=0,
-        maximum=3,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES",
-        0,
-        minimum=0,
-        maximum=3,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_SEARCH_PLANNER_MAX_CANDIDATES",
-        8,
-        minimum=3,
-        maximum=20,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE",
-        2,
-        minimum=1,
-        maximum=10,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT",
-        3,
-        minimum=1,
-        maximum=90,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES",
-        3,
-        minimum=1,
-        maximum=90,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE",
-        4,
-        minimum=1,
-        maximum=30,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE",
-        6,
-        minimum=1,
-        maximum=60,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS",
-        4000,
-        minimum=1200,
-        maximum=30000,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS",
-        15,
-        minimum=5,
-        maximum=100,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_AGENTIC_MAX_IMAGES",
-        8,
-        minimum=2,
-        maximum=50,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_MAX_FULL_SCRAPES",
-        6,
-        minimum=1,
-        maximum=12,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_MAX_SCRAPES_PER_DOMAIN",
-        2,
-        minimum=1,
-        maximum=4,
-    )
-    _strict_float(
-        values,
-        "PRODUCT_HARNESS_MIN_PREFLIGHT_SCORE",
-        0.28,
-        minimum=0.05,
-        maximum=0.95,
-    )
+    _strict_int(values, "PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES", 3, minimum=0, maximum=3)
+    _strict_int(values, "PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES", 0, minimum=0, maximum=3)
+    _strict_int(values, "PRODUCT_HARNESS_SEARCH_PLANNER_MAX_CANDIDATES", 8, minimum=3, maximum=20)
+    _strict_int(values, "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE", 2, minimum=1, maximum=10)
+    _strict_int(values, "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT", 3, minimum=1, maximum=90)
+    _strict_int(values, "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", 3, minimum=1, maximum=90)
+    _strict_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE", 4, minimum=1, maximum=30)
+    _strict_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE", 6, minimum=1, maximum=60)
+    _strict_int(values, "PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS", 4000, minimum=1200, maximum=30000)
+    _strict_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS", 15, minimum=5, maximum=100)
+    _strict_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_IMAGES", 8, minimum=2, maximum=50)
+    _strict_int(values, "PRODUCT_HARNESS_MAX_FULL_SCRAPES", 6, minimum=1, maximum=12)
+    _strict_int(values, "PRODUCT_HARNESS_MAX_SCRAPES_PER_DOMAIN", 2, minimum=1, maximum=4)
+    _strict_float(values, "PRODUCT_HARNESS_MIN_PREFLIGHT_SCORE", 0.28, minimum=0.05, maximum=0.95)
     return {
         "credits": credits,
         "engines": engines,
@@ -368,11 +287,7 @@ def _enforce_adaptive_settings(values: Mapping[str, str]) -> dict[str, object]:
     }
 
 
-def _strict_bool(
-    values: Mapping[str, str],
-    name: str,
-    default: bool,
-) -> bool:
+def _strict_bool(values: Mapping[str, str], name: str, default: bool) -> bool:
     raw = values.get(name)
     if raw is None or str(raw).strip() == "":
         return default
@@ -396,11 +311,7 @@ def _strict_int(
 ) -> int:
     raw = values.get(name)
     try:
-        value = (
-            default
-            if raw is None or str(raw).strip() == ""
-            else int(str(raw).strip())
-        )
+        value = default if raw is None or str(raw).strip() == "" else int(str(raw).strip())
     except ValueError as exc:
         raise EnvironmentValidationError(f"{name} must be an integer") from exc
     if not minimum <= value <= maximum:
@@ -420,11 +331,7 @@ def _strict_float(
 ) -> float:
     raw = values.get(name)
     try:
-        value = (
-            default
-            if raw is None or str(raw).strip() == ""
-            else float(str(raw).strip())
-        )
+        value = default if raw is None or str(raw).strip() == "" else float(str(raw).strip())
     except ValueError as exc:
         raise EnvironmentValidationError(f"{name} must be numeric") from exc
     if not minimum <= value <= maximum:
