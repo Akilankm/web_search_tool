@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+INVOKING_PWD="${PWD:-}"
 PROJECT_DIR="${PRODUCT_EVIDENCE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ENV_PERMISSION_MODE="${PRODUCT_EVIDENCE_ENV_PERMISSION_MODE:-auto}"
 BUILD_IMAGES=true
@@ -27,6 +28,26 @@ EOF
 
 phase() {
   printf '\n==> %s\n' "$1"
+}
+
+is_azureml_managed_workspace() {
+  local candidate normalized
+  for candidate in \
+    "$PROJECT_DIR" \
+    "$INVOKING_PWD" \
+    "${HOME:-}" \
+    "${AZUREML_ROOT_DIR:-}" \
+    "${AZUREML_CR_COMPUTE_CONTEXT:-}"; do
+    [[ -n "$candidate" ]] || continue
+    normalized="$(printf '%s' "$candidate" | tr '[:upper:]' '[:lower:]')"
+    case "$normalized" in
+      *"/cloudfiles/"*|*"/cloudfiles"|*"/mnt/batch/tasks/shared/ls_root/mounts/"*)
+        return 0
+        ;;
+    esac
+  done
+
+  [[ -n "${AZUREML_COMPUTE_RESOURCE_ID:-}" || -n "${AZUREML_WORKSPACE_ID:-}" ]]
 }
 
 show_failure_diagnostics() {
@@ -129,6 +150,11 @@ for runtime_path in data/artifacts data/runtime; do
   fi
   rm -f "$probe"
 done
+
+if [[ "$ENV_PERMISSION_MODE" == "auto" ]] && is_azureml_managed_workspace; then
+  ENV_PERMISSION_MODE="allow"
+  echo "Azure ML managed workspace detected; .env mode fallback will be applied automatically only if chmod 600 cannot be preserved."
+fi
 
 phase "Validating credentials, feature schemas, Docker, and production controls"
 python scripts/preflight_azureml.py \
