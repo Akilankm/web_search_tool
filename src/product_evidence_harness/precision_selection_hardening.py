@@ -72,7 +72,7 @@ def _wrap_evaluate(original):
             return replace(
                 decision,
                 admitted_for_scrape=False,
-                admission_reason="SERP_REJECTED_LOW_STABLE_IDENTITY_SIGNAL",
+                admission_reason="SERP_REJECTED_LOW_IDENTITY_STABLE_SIGNAL",
             )
         return decision
 
