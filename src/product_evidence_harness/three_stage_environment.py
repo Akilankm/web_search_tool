@@ -28,6 +28,12 @@ class ThreeStageEnvironmentValidationReport:
     one_credit_contract_enforced: bool
     three_stage_contract_enforced: bool
     serpapi_request_limit: int
+    agentic_browser_enabled: bool
+    agentic_browser_required: bool
+    agentic_browser_contract_enforced: bool
+    max_agentic_candidates: int
+    max_agentic_turns_per_candidate: int
+    max_agentic_actions_per_candidate: int
     checks_passed: tuple[str, ...]
 
     def to_dict(self) -> dict[str, object]:
@@ -45,21 +51,28 @@ def validate_runtime_environment(
     strict_file_permissions: bool = True,
     environ: Mapping[str, str] | None = None,
 ) -> ThreeStageEnvironmentValidationReport:
-    """Validate the strict three-stage production contract.
-
-    The legacy validator is reused only for secret, endpoint, permission, and
-    operational checks. Obsolete workflow and cost values are overridden in an
-    internal validation copy; the actual runtime must remain strict three-stage.
-    """
+    """Validate the three-stage search and required LLM-agentic browser contract."""
 
     values = _effective_values(env_file, environ)
     if enforce_three_stage:
         _enforce_three_stage_settings(values)
 
+    agentic_enabled = _strict_bool(values, "PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER", True)
+    agentic_required = _strict_bool(values, "PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER", True)
+    feature_reasoning_enabled = _strict_bool(
+        values,
+        "PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING",
+        False,
+    )
+
     compatibility_values = dict(values)
     compatibility_values["PRODUCT_HARNESS_WORKFLOW"] = "one_credit_feature_aware"
     compatibility_values["PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES"] = "1"
     compatibility_values["PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES"] = "0"
+    # Reuse the legacy transport/credential validator whenever the agentic LLM is
+    # enabled, without changing the actual post-scrape feature-reasoning setting.
+    if agentic_enabled:
+        compatibility_values["PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING"] = "true"
 
     base = _validate_legacy_environment(
         env_file,
@@ -72,18 +85,45 @@ def validate_runtime_environment(
         check
         for check in base.checks_passed
         if check != "one_credit_cost_controls_validated"
-    ) + ("three_stage_cost_and_acceptance_controls_validated",)
+    ) + (
+        "three_stage_cost_and_acceptance_controls_validated",
+        "llm_agentic_browser_contract_validated",
+    )
 
     return ThreeStageEnvironmentValidationReport(
         env_file=base.env_file,
         env_file_loaded=base.env_file_loaded,
         env_file_permissions_checked=base.env_file_permissions_checked,
         serpapi_configured=base.serpapi_configured,
-        llm_feature_reasoning_enabled=base.llm_feature_reasoning_enabled,
+        llm_feature_reasoning_enabled=feature_reasoning_enabled,
         llm_configured=base.llm_configured,
         one_credit_contract_enforced=False,
         three_stage_contract_enforced=enforce_three_stage,
         serpapi_request_limit=3,
+        agentic_browser_enabled=agentic_enabled,
+        agentic_browser_required=agentic_required,
+        agentic_browser_contract_enforced=bool(agentic_enabled and agentic_required),
+        max_agentic_candidates=_strict_int(
+            values,
+            "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES",
+            18,
+            minimum=3,
+            maximum=90,
+        ),
+        max_agentic_turns_per_candidate=_strict_int(
+            values,
+            "PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE",
+            10,
+            minimum=1,
+            maximum=30,
+        ),
+        max_agentic_actions_per_candidate=_strict_int(
+            values,
+            "PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE",
+            20,
+            minimum=1,
+            maximum=60,
+        ),
         checks_passed=checks,
     )
 
@@ -148,6 +188,8 @@ def _enforce_three_stage_settings(values: Mapping[str, str]) -> None:
         "PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY",
         "PRODUCT_HARNESS_REJECT_EXPIRING_URLS",
         "PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE",
+        "PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER",
+        "PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER",
     ):
         if not _strict_bool(values, name, True):
             raise EnvironmentValidationError(
@@ -164,9 +206,51 @@ def _enforce_three_stage_settings(values: Mapping[str, str]) -> None:
     _strict_int(
         values,
         "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT",
-        9,
+        18,
         minimum=3,
+        maximum=90,
+    )
+    _strict_int(
+        values,
+        "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES",
+        18,
+        minimum=3,
+        maximum=90,
+    )
+    _strict_int(
+        values,
+        "PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE",
+        10,
+        minimum=1,
         maximum=30,
+    )
+    _strict_int(
+        values,
+        "PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE",
+        20,
+        minimum=1,
+        maximum=60,
+    )
+    _strict_int(
+        values,
+        "PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS",
+        12_000,
+        minimum=2_000,
+        maximum=30_000,
+    )
+    _strict_int(
+        values,
+        "PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS",
+        60,
+        minimum=10,
+        maximum=100,
+    )
+    _strict_int(
+        values,
+        "PRODUCT_HARNESS_AGENTIC_MAX_IMAGES",
+        30,
+        minimum=4,
+        maximum=50,
     )
 
 
