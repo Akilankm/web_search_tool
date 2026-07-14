@@ -72,6 +72,16 @@ def apply_compatibility_patches() -> None:
     LivePageOfflineArtifactBuilder._remove_network_primitives = _remove_network_primitives  # type: ignore[method-assign]
     LivePageOfflineArtifactBuilder._role_directory = _role_directory  # type: ignore[method-assign]
 
+    from src.product_evidence_harness.precision_search_runtime import (
+        apply_precision_search_patches,
+    )
+    from src.product_evidence_harness.precision_browser_runtime import (
+        apply_precision_browser_patches,
+    )
+
+    apply_precision_search_patches()
+    apply_precision_browser_patches()
+
     # The historical package uses both ``product_evidence_harness`` and
     # ``src.product_evidence_harness`` imports. Alias the patched modules so both
     # names resolve to the same class objects instead of creating duplicate trees.
