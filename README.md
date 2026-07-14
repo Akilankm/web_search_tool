@@ -14,7 +14,7 @@ Search is identity-driven and does not receive the private feature list. Request
 
 ## True agentic browser investigation
 
-Every eligible deduplicated candidate admitted to the bounded investigation pool receives an isolated LLM-controlled browser session:
+Every deduplicated URL retained by the production candidate pool receives an isolated LLM-controlled browser session:
 
 ```text
 Observe rendered page and screenshot
@@ -24,7 +24,7 @@ Observe rendered page and screenshot
   -> repeat until resolved or budget exhausted
 ```
 
-The LLM can click only observed elements, scroll, inspect an observed image, capture a screenshot, or finish. It cannot invent URLs, type, upload, log in, purchase, execute code, or bypass access controls.
+The LLM can click only observed elements, scroll, inspect an observed image, capture a screenshot, or finish. The execution layer blocks invented URLs, cross-site navigation, login, uploads, cart, checkout, payment, transactions, code execution, and access-control bypass.
 
 The LLM controls investigation strategy. Deterministic code still validates evidence and selects the final URL.
 
@@ -105,7 +105,8 @@ PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE=true
 PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER=true
 PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER=true
 
-PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES=18
+PRODUCT_HARNESS_MAX_CANDIDATE_POOL=90
+PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES=90
 PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE=10
 PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE=20
 
@@ -113,13 +114,13 @@ PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY=true
 PRODUCT_HARNESS_REJECT_EXPIRING_URLS=true
 ```
 
-Startup fails when these controls are weakened. Agentic browser investigation requires a valid LLM endpoint and deployment even when optional post-scrape text reasoning is disabled.
+Startup fails when required controls are weakened. Agentic browser investigation requires a valid LLM endpoint and deployment even when optional post-scrape text reasoning is disabled.
 
-## Candidate admission and cost control
+## Candidate coverage and cost control
 
-The raw SerpAPI result set is not sent blindly to the LLM. URLs are merged, deduplicated, preflighted, statically scraped, identity-scored, and admitted to a bounded investigation pool.
+The raw SerpAPI result stream is merged, deduplicated, preflighted, and retained in a bounded candidate pool. The production defaults retain at most 90 candidates and set the agentic limit to the same value, so every retained candidate is investigated.
 
-The default pool is 18 candidates: six per search stage under the standard configuration. Every admitted candidate receives an agentic investigation. Raising candidate or turn limits increases LLM and browser cost.
+This is bounded rather than unlimited because external search providers can return arbitrarily large result sets. Lowering `PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES` deliberately changes the workflow to top-N investigation. Candidate count and turn count directly affect LLM cost and runtime.
 
 ## Artifact contract
 
@@ -192,26 +193,19 @@ The browser never receives SerpAPI or LLM credentials. The agent never exposes u
 ## Operations
 
 ```bash
-# Status
 docker compose ps
-
-# Logs
 docker compose logs -f --tail=200 agent browser
 
-# Stop without deleting artifacts
 docker compose down
-
-# Update and rebuild
 git checkout master
 git pull origin master
-docker compose down
 ./scripts/azureml_startup.sh
 ```
 
 Inspect outputs:
 
 ```bash
-find data/artifacts -maxdepth 7 -type f | sort
+find data/artifacts -maxdepth 8 -type f | sort
 ```
 
 ## Validation
