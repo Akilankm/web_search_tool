@@ -29,6 +29,9 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q src scripts
 
+      - name: Validate bootstrap shell
+        run: bash -n scripts/azureml_startup.sh
+
       - name: Validate notebook JSON
         run: python -m json.tool notebooks/01_run_product_evidence.ipynb >/dev/null
 
@@ -36,7 +39,7 @@ jobs:
         run: |
           cp .env.example .env
           chmod 600 .env
-          mkdir -p artifacts inputs/private secrets
+          mkdir -p data/artifacts data/runtime inputs/private secrets
           printf 'ci-browser-token\n' > secrets/browser_api_token.txt
           docker compose config --quiet
 
@@ -44,6 +47,8 @@ jobs:
         run: |
           PYTHONPATH=src pytest -q \
             tests/test_repository_hygiene.py \
+            tests/test_clone_runtime_contract.py \
+            tests/test_automated_bootstrap.py \
             tests/test_preflight_azureml.py \
             tests/test_serp_harvester.py \
             tests/test_one_credit_feature_workflow.py \
