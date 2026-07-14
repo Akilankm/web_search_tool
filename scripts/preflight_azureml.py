@@ -97,7 +97,7 @@ def _require_int(values: dict[str, str], key: str, default: int, minimum: int, m
 
 def validate_env(values: dict[str, str]) -> None:
     workflow = values.get("PRODUCT_HARNESS_WORKFLOW", "three_stage_feature_aware")
-    if workflow not in {"three_stage_feature_aware", "one_credit_feature_aware"}:
+    if workflow != "three_stage_feature_aware":
         raise PreflightError("PRODUCT_HARNESS_WORKFLOW must be three_stage_feature_aware")
     if values.get("PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES", "3") != "3":
         raise PreflightError("PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES must be 3")
@@ -108,6 +108,8 @@ def validate_env(values: dict[str, str]) -> None:
         "PRODUCT_HARNESS_COUNTRY_FIRST",
         "PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK",
         "PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE",
+        "PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER",
+        "PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER",
         "PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY",
         "PRODUCT_HARNESS_REJECT_EXPIRING_URLS",
     ):
@@ -115,15 +117,22 @@ def validate_env(values: dict[str, str]) -> None:
             raise PreflightError(f"{key} must be true")
 
     _require_int(values, "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE", 6, 1, 10)
-    _require_int(values, "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT", 9, 3, 30)
+    _require_int(values, "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT", 18, 3, 90)
+    _require_int(values, "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", 18, 3, 90)
+    _require_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE", 10, 1, 30)
+    _require_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE", 20, 1, 60)
+    _require_int(values, "PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS", 12000, 2000, 30000)
+    _require_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS", 60, 10, 100)
+    _require_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_IMAGES", 30, 4, 50)
 
     serp_key = values.get("SERPAPI_API_KEY", "")
     if len(serp_key) < 20 or is_placeholder(serp_key):
         raise PreflightError("SERPAPI_API_KEY is missing or still contains the example value")
 
+    agentic_enabled = is_enabled(values, "PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER", True)
     vision_enabled = is_enabled(values, "PRODUCT_HARNESS_ENABLE_VISION_REASONING", True)
     text_llm_enabled = is_enabled(values, "PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING", False)
-    if vision_enabled or text_llm_enabled:
+    if agentic_enabled or vision_enabled or text_llm_enabled:
         required = ("LLM_API_KEY", "LLM_API_VERSION", "LLM_ENDPOINT", "LLM_DEPLOYMENT")
         missing = [key for key in required if is_placeholder(values.get(key, ""))]
         if missing:
@@ -251,6 +260,7 @@ def main() -> int:
     print("Preflight passed.")
     print("Search contract: requested retailer/country -> country alternative -> global")
     print("SerpAPI request limit per product: 3")
+    print("Browser contract: LLM observe -> plan -> safe action -> observe for every admitted candidate")
     print(f"Validated feature sets: {len(feature_files)}")
     print(f"Artifact root: {project_dir / 'data' / 'artifacts'}")
     return 0
