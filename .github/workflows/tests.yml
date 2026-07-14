@@ -59,6 +59,7 @@ jobs:
             tests/test_environment_security.py \
             tests/test_env_example_contract.py \
             tests/test_llm_feature_reasoner.py \
+            tests/test_precision_candidate_runtime.py \
             --junitxml=focused-report-${{ matrix.python-version }}.xml
 
       - name: Run full unit suite
