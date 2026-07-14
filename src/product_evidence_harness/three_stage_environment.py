@@ -51,7 +51,7 @@ def validate_runtime_environment(
     strict_file_permissions: bool = True,
     environ: Mapping[str, str] | None = None,
 ) -> ThreeStageEnvironmentValidationReport:
-    """Validate the three-stage search and required LLM-agentic browser contract."""
+    """Validate the precision-gated search and compact agentic-browser contract."""
 
     values = _effective_values(env_file, environ)
     if enforce_three_stage:
@@ -69,8 +69,6 @@ def validate_runtime_environment(
     compatibility_values["PRODUCT_HARNESS_WORKFLOW"] = "one_credit_feature_aware"
     compatibility_values["PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES"] = "1"
     compatibility_values["PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES"] = "0"
-    # Reuse the legacy transport/credential validator whenever the agentic LLM is
-    # enabled, without changing the actual post-scrape feature-reasoning setting.
     if agentic_enabled:
         compatibility_values["PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING"] = "true"
 
@@ -86,8 +84,30 @@ def validate_runtime_environment(
         for check in base.checks_passed
         if check != "one_credit_cost_controls_validated"
     ) + (
-        "three_stage_cost_and_acceptance_controls_validated",
-        "llm_agentic_browser_contract_validated",
+        "three_stage_precision_and_acceptance_controls_validated",
+        "llm_agentic_browser_context_budget_validated",
+    )
+
+    configured_candidates = _strict_int(
+        values,
+        "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES",
+        3,
+        minimum=1,
+        maximum=90,
+    )
+    configured_turns = _strict_int(
+        values,
+        "PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE",
+        4,
+        minimum=1,
+        maximum=30,
+    )
+    configured_actions = _strict_int(
+        values,
+        "PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE",
+        6,
+        minimum=1,
+        maximum=60,
     )
 
     return ThreeStageEnvironmentValidationReport(
@@ -103,27 +123,9 @@ def validate_runtime_environment(
         agentic_browser_enabled=agentic_enabled,
         agentic_browser_required=agentic_required,
         agentic_browser_contract_enforced=bool(agentic_enabled and agentic_required),
-        max_agentic_candidates=_strict_int(
-            values,
-            "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES",
-            18,
-            minimum=3,
-            maximum=90,
-        ),
-        max_agentic_turns_per_candidate=_strict_int(
-            values,
-            "PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE",
-            10,
-            minimum=1,
-            maximum=30,
-        ),
-        max_agentic_actions_per_candidate=_strict_int(
-            values,
-            "PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE",
-            20,
-            minimum=1,
-            maximum=60,
-        ),
+        max_agentic_candidates=min(3, configured_candidates),
+        max_agentic_turns_per_candidate=min(4, configured_turns),
+        max_agentic_actions_per_candidate=min(6, configured_actions),
         checks_passed=checks,
     )
 
@@ -196,62 +198,19 @@ def _enforce_three_stage_settings(values: Mapping[str, str]) -> None:
                 f"{name} must be true for the production runner"
             )
 
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE",
-        6,
-        minimum=1,
-        maximum=10,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT",
-        18,
-        minimum=3,
-        maximum=90,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES",
-        18,
-        minimum=3,
-        maximum=90,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE",
-        10,
-        minimum=1,
-        maximum=30,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE",
-        20,
-        minimum=1,
-        maximum=60,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS",
-        12_000,
-        minimum=2_000,
-        maximum=30_000,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS",
-        60,
-        minimum=10,
-        maximum=100,
-    )
-    _strict_int(
-        values,
-        "PRODUCT_HARNESS_AGENTIC_MAX_IMAGES",
-        30,
-        minimum=4,
-        maximum=50,
-    )
+    # Legacy values remain accepted so an existing .env does not fail startup.
+    # Runtime code applies the stricter effective ceilings reported above.
+    _strict_int(values, "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE", 2, minimum=1, maximum=10)
+    _strict_int(values, "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT", 3, minimum=1, maximum=90)
+    _strict_int(values, "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", 3, minimum=1, maximum=90)
+    _strict_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE", 4, minimum=1, maximum=30)
+    _strict_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE", 6, minimum=1, maximum=60)
+    _strict_int(values, "PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS", 4000, minimum=1200, maximum=30000)
+    _strict_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS", 15, minimum=5, maximum=100)
+    _strict_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_IMAGES", 8, minimum=2, maximum=50)
+    _strict_int(values, "PRODUCT_HARNESS_MAX_FULL_SCRAPES", 6, minimum=1, maximum=12)
+    _strict_int(values, "PRODUCT_HARNESS_MAX_SCRAPES_PER_DOMAIN", 2, minimum=1, maximum=4)
+    _strict_float(values, "PRODUCT_HARNESS_MIN_PREFLIGHT_SCORE", 0.28, minimum=0.05, maximum=0.95)
 
 
 def _strict_bool(
@@ -282,13 +241,29 @@ def _strict_int(
 ) -> int:
     raw = values.get(name)
     try:
-        value = (
-            default
-            if raw is None or str(raw).strip() == ""
-            else int(str(raw).strip())
-        )
+        value = default if raw is None or str(raw).strip() == "" else int(str(raw).strip())
     except ValueError as exc:
         raise EnvironmentValidationError(f"{name} must be an integer") from exc
+    if not minimum <= value <= maximum:
+        raise EnvironmentValidationError(
+            f"{name} must be between {minimum} and {maximum}"
+        )
+    return value
+
+
+def _strict_float(
+    values: Mapping[str, str],
+    name: str,
+    default: float,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float:
+    raw = values.get(name)
+    try:
+        value = default if raw is None or str(raw).strip() == "" else float(str(raw).strip())
+    except ValueError as exc:
+        raise EnvironmentValidationError(f"{name} must be numeric") from exc
     if not minimum <= value <= maximum:
         raise EnvironmentValidationError(
             f"{name} must be between {minimum} and {maximum}"
