@@ -39,6 +39,16 @@ Required: `main_text`, `country_code`.
 
 Optional: `row_id`, `retailer_name`, `ean`, `language_code`.
 
+## Search and investigation flow
+
+Each product executes three searches in order:
+
+1. requested retailer in the requested country, or the primary country search when no retailer is provided;
+2. other retailers in the requested country;
+3. unrestricted global fallback.
+
+Eligible deduplicated candidates admitted from those stages are then investigated through independent LLM-controlled browser sessions.
+
 ## Runtime flow visible in the notebook
 
 ```text
@@ -92,6 +102,8 @@ The LLM investigates candidates but does not directly approve the final URL. `pr
 - every requested feature supported on that same URL;
 - no conflicting feature evidence;
 - durable URL without session, token, signature, credential, expiry, or TTL parameters.
+
+Among fully accepted candidates, scope priority remains requested retailer and country, then another retailer in the requested country, then global fallback.
 
 Inspect:
 
