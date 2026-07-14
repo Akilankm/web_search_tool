@@ -12,13 +12,19 @@ From a fresh clone:
 
 ```bash
 cp .env.example .env
-# Edit the real SerpAPI and LLM values.
+# Edit only the real SerpAPI and LLM credential values.
 ./scripts/azureml_startup.sh
 ```
 
-The startup script handles directories, internal secrets, Azure ML `cloudfiles` permission fallback, Docker build, container recreation, health checks, and readiness reporting. No additional permission flag or manual `docker compose up` is required.
+The repository already includes:
 
-When it finishes, it prints available `FEATURE_SET` values and writes:
+```text
+inputs/private/toy_features.json
+```
+
+The startup script handles directories, internal secrets, Azure ML `cloudfiles` permission fallback, feature-schema validation, Docker build, container recreation, health checks, and readiness reporting. No feature-file copy, permission flag, or manual `docker compose up` is required.
+
+When it finishes, it prints `toy_features` as an available `FEATURE_SET` and writes:
 
 ```text
 data/runtime/stack_health.json
@@ -32,7 +38,8 @@ The setup cell:
 - reads the bootstrap health snapshot when available;
 - calls the live agent `/health` endpoint;
 - verifies the strict three-stage, LLM-agentic browser, and browser-tool contracts;
-- lists `inputs/private/*.json` as notebook-ready feature sets;
+- discovers the included `inputs/private/toy_features.json` schema;
+- lists any additional local feature schemas;
 - does not print credentials.
 
 If the cell cannot reach the platform, rerun:
@@ -40,6 +47,22 @@ If the cell cannot reach the platform, rerun:
 ```bash
 ./scripts/azureml_startup.sh
 ```
+
+## Included feature set
+
+The default notebook feature set is:
+
+```python
+FEATURE_SET = "toy_features"
+```
+
+It requests these three features:
+
+- brand;
+- manufacturer;
+- minimum recommended age.
+
+No manual feature-set selection is required for the included workflow.
 
 ## Product input
 
@@ -58,7 +81,7 @@ Required: `main_text`, `country_code`.
 
 Optional: `row_id`, `retailer_name`, `ean`, `language_code`.
 
-Select a discovered feature file without `.json`:
+To execute the product:
 
 ```python
 FEATURE_SET = "toy_features"
@@ -75,7 +98,7 @@ Each product executes three searches in order:
 2. alternative retailers in the requested country;
 3. unrestricted global fallback.
 
-Every retained candidate is then investigated through an independent LLM-controlled browser session. The LLM sees the requested features, rendered page text, screenshot, observed elements, and observed images. Deterministic code still validates product identity, feature evidence, conflicts, accessibility, scrapability, and `primary_url` durability.
+Every retained candidate is then investigated through an independent LLM-controlled browser session. The LLM sees the requested toy features, rendered page text, screenshot, observed elements, and observed images. Deterministic code still validates product identity, feature evidence, conflicts, accessibility, scrapability, and `primary_url` durability.
 
 ## Runtime progress
 
