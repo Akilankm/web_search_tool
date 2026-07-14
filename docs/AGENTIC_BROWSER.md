@@ -2,13 +2,13 @@
 
 ## Purpose
 
-The browser stage behaves like a careful human analyst. For every eligible candidate URL admitted to the bounded investigation pool, the agent repeatedly:
+The browser stage behaves like a careful human analyst. For every deduplicated candidate URL retained by the bounded discovery pool, the agent repeatedly:
 
 1. observes the current rendered page;
 2. asks the LLM to plan one safe evidence-seeking action;
 3. executes that action in an isolated Chromium context;
 4. observes the changed page;
-5. continues until the candidate is resolved or the budget is exhausted.
+5. continues until the candidate is resolved or its budget is exhausted.
 
 The LLM controls investigation strategy. Deterministic code still controls safety, evidence validation, and final URL acceptance.
 
@@ -18,8 +18,8 @@ The LLM controls investigation strategy. Deterministic code still controls safet
 Notebook
   -> Agent API
       -> Three deterministic SerpAPI searches
-      -> Static candidate extraction and scoring
-      -> For each admitted candidate:
+      -> Candidate merge, deduplication, preflight and scoring
+      -> For every retained candidate:
            AgenticBrowserInvestigator
              -> Browser session start
              -> Observe page + viewport screenshot
@@ -61,7 +61,7 @@ Every turn can include:
 - requested feature definitions and allowed values;
 - recent LLM plans.
 
-Webpage text is explicitly treated as untrusted evidence. The LLM system prompt instructs the model to ignore page-level prompt injection and never treat retailer content as policy or tool instructions.
+Webpage text is untrusted evidence. The system prompt instructs the model to ignore page-level prompt injection and never treat retailer content as policy or tool instructions.
 
 ## Allowed actions
 
@@ -75,30 +75,28 @@ The LLM may choose exactly one action per turn:
 | `capture_screenshot` | Captures the current viewport as evidence |
 | `finish` | Stops when the candidate is resolved, blocked, wrong, or no action can improve evidence |
 
-The LLM cannot:
+The execution layer independently rejects:
 
-- invent or directly navigate to a URL;
-- invent element IDs;
-- type into forms;
-- upload files;
-- log in or provide credentials;
-- submit purchases;
-- execute JavaScript or arbitrary code;
-- bypass CAPTCHA, bot detection, access controls, or authentication.
+- invented or direct URL navigation;
+- stale or invented element IDs;
+- cross-site navigation;
+- login, account, upload, cart, checkout, order, subscription, or payment actions;
+- typing and file uploads;
+- JavaScript or arbitrary code execution;
+- CAPTCHA, bot-detection, authentication, or access-control bypass.
 
-## Candidate admission
+## Candidate coverage
 
-The search campaign still uses exactly three SerpAPI calls. Candidates are merged, deduplicated, statically preflighted, and score-ranked. The agentic browser investigates every eligible URL admitted to the bounded pool.
-
-Default controls:
+The three searches can retain up to 90 merged and deduplicated candidates under the production candidate-pool contract. The default agentic limit is also 90, so every URL retained by that pool receives an investigation.
 
 ```env
-PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES=18
+PRODUCT_HARNESS_MAX_CANDIDATE_POOL=90
+PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES=90
 PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE=10
 PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE=20
 ```
 
-`18` aligns with the default six statically scraped candidates from each of the three search stages. Raising the limit increases browser and LLM cost.
+The cap protects against unbounded external search output. Lowering it deliberately changes the workflow from full retained-pool investigation to top-N investigation. Increasing turns or candidates can materially increase LLM cost and runtime.
 
 ## Evidence and trust boundary
 
@@ -153,7 +151,7 @@ result["primary_url_acceptance"]
 
 ## Failure semantics
 
-A candidate-level LLM or browser failure is isolated to that candidate. The agent records the failure and continues to the next admitted candidate.
+A candidate-level LLM or browser failure is isolated to that candidate. The agent records the failure and continues to the next retained candidate.
 
 - `COMPLETED`: one candidate passed all strict gates.
 - `REVIEW_REQUIRED`: the workflow completed but no candidate passed all strict gates.
