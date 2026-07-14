@@ -44,10 +44,28 @@ class _AgenticSession:
 class AgenticBrowserController:
     """Stateful, allow-listed browser tools used by the LLM planning loop.
 
-    The LLM never receives Playwright access. It can only act on element IDs that
-    were emitted by the latest observation and it cannot type, upload, execute
-    JavaScript, supply credentials, purchase, or navigate to an invented URL.
+    The LLM never receives Playwright access. It can act only on IDs emitted by
+    the latest observation. The execution layer independently rejects typing,
+    uploads, credentials, transactions, invented navigation, and cross-site
+    navigation even if the model or page requests them.
     """
+
+    PROHIBITED_CLICK_TERMS = (
+        "add to cart",
+        "add to basket",
+        "buy now",
+        "checkout",
+        "place order",
+        "order now",
+        "pay now",
+        "sign in",
+        "log in",
+        "login",
+        "create account",
+        "my account",
+        "subscribe",
+        "upload",
+    )
 
     def __init__(self, base: BrowserEvidenceController) -> None:
         self.base = base
@@ -61,30 +79,33 @@ class AgenticBrowserController:
     async def start(self, request: BrowserEvidenceRequest) -> AgenticBrowserObservation:
         await self.base.start()
         await self.base._semaphore.acquire()
-        session_id = uuid.uuid4().hex
-        root = self.base.config.artifact_root / request.job_id / request.candidate_id / "agentic"
-        root.mkdir(parents=True, exist_ok=True)
-        context = await self.base._browser.new_context(
-            viewport={
-                "width": self.base.config.viewport_width,
-                "height": self.base.config.viewport_height,
-            },
-            locale=self.base._locale(request),
-            accept_downloads=False,
-        )
-        page = await context.new_page()
-        page.set_default_timeout(self.base.config.action_timeout_ms)
-        page.set_default_navigation_timeout(self.base.config.navigation_timeout_ms)
-        session = _AgenticSession(
-            session_id=session_id,
-            request=request,
-            root=root,
-            context=context,
-            page=page,
-        )
-        async with self._lock:
-            self._sessions[session_id] = session
+        context: Any = None
+        session: _AgenticSession | None = None
         try:
+            session_id = uuid.uuid4().hex
+            root = self.base.config.artifact_root / request.job_id / request.candidate_id / "agentic"
+            root.mkdir(parents=True, exist_ok=True)
+            context = await self.base._browser.new_context(
+                viewport={
+                    "width": self.base.config.viewport_width,
+                    "height": self.base.config.viewport_height,
+                },
+                locale=self.base._locale(request),
+                accept_downloads=False,
+            )
+            page = await context.new_page()
+            page.set_default_timeout(self.base.config.action_timeout_ms)
+            page.set_default_navigation_timeout(self.base.config.navigation_timeout_ms)
+            session = _AgenticSession(
+                session_id=session_id,
+                request=request,
+                root=root,
+                context=context,
+                page=page,
+            )
+            async with self._lock:
+                self._sessions[session_id] = session
+
             before = request.url
             response = await page.goto(request.url, wait_until="domcontentloaded")
             await page.wait_for_timeout(1000)
@@ -94,9 +115,16 @@ class AgenticBrowserController:
             status_code = response.status if response is not None else None
             if status_code is not None and status_code >= 400:
                 session.warnings.append(f"HTTP_STATUS_{status_code}")
+            if not self._same_site(request.url, page.url):
+                session.warnings.append("INITIAL_REDIRECT_LEFT_REQUESTED_SITE")
             return await self.observe(session_id)
         except Exception:
-            await self.abort(session_id)
+            if session is not None:
+                await self.abort(session.session_id)
+            else:
+                if context is not None:
+                    await context.close()
+                self.base._semaphore.release()
             raise
 
     async def observe(self, session_id: str) -> AgenticBrowserObservation:
@@ -112,9 +140,10 @@ class AgenticBrowserController:
         visible_name = await self.base._visible_product_name(page)
         interactive = await self._interactive_elements(page)
         images = await self._images(page)
-        observation_index = len(list((session.root / "observations").glob("OBS-*.png")))
-        screenshot_path = session.root / "observations" / f"OBS-{observation_index:03d}.png"
-        screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+        observation_dir = session.root / "observations"
+        observation_dir.mkdir(parents=True, exist_ok=True)
+        observation_index = len(list(observation_dir.glob("OBS-*.png")))
+        screenshot_path = observation_dir / f"OBS-{observation_index:03d}.png"
         try:
             await page.screenshot(path=str(screenshot_path), full_page=False)
             screenshot_value: str | None = str(screenshot_path)
@@ -161,8 +190,29 @@ class AgenticBrowserController:
                 locator = page.locator(f'[data-agentic-id="{action.element_id}"]')
                 if await locator.count() != 1 or not await locator.first.is_visible():
                     raise ValueError("element is not available in the current observation")
+                element_text = (
+                    await locator.first.inner_text(timeout=1500)
+                    or await locator.first.get_attribute("aria-label")
+                    or await locator.first.get_attribute("value")
+                    or ""
+                )
+                href = await locator.first.get_attribute("href")
+                folded = re.sub(r"\s+", " ", element_text).strip().casefold()
+                if any(term in folded for term in self.PROHIBITED_CLICK_TERMS):
+                    raise ValueError("transactional, authentication, or account action is prohibited")
+                if href:
+                    absolute_href = await locator.first.evaluate(
+                        "node => new URL(node.getAttribute('href'), location.href).href"
+                    )
+                    if not self._same_site(session.request.url, absolute_href):
+                        raise ValueError("cross-site navigation is prohibited")
                 await locator.first.click(timeout=self.base.config.action_timeout_ms)
                 await page.wait_for_timeout(700)
+                if not self._same_site(session.request.url, page.url):
+                    try:
+                        await page.go_back(wait_until="domcontentloaded")
+                    finally:
+                        raise ValueError("browser action left the requested site")
             elif action.action is AgenticBrowserActionType.SCROLL:
                 direction = (action.direction or "down").strip().lower()
                 if direction not in {"up", "down", "top", "bottom"}:
@@ -261,7 +311,7 @@ class AgenticBrowserController:
             else BrowserEvidenceStatus.PARTIAL
         )
         try:
-            bundle = await self.base._finalize(
+            return await self.base._finalize(
                 request=session.request,
                 root=session.root,
                 page=page,
@@ -274,7 +324,6 @@ class AgenticBrowserController:
                 error=("Rendered page contains an access blocker." if session.blockers else None),
                 gallery_discovered=bool(session.assets),
             )
-            return bundle
         finally:
             await self._close(session)
 
@@ -352,6 +401,18 @@ class AgenticBrowserController:
             """
         )
         return [AgenticBrowserImage.from_mapping(item) for item in payload]
+
+    @staticmethod
+    def _same_site(left: str, right: str) -> bool:
+        left_host = (urlparse(left).hostname or "").lower().removeprefix("www.")
+        right_host = (urlparse(right).hostname or "").lower().removeprefix("www.")
+        if not left_host or not right_host:
+            return False
+        return bool(
+            left_host == right_host
+            or left_host.endswith("." + right_host)
+            or right_host.endswith("." + left_host)
+        )
 
     @staticmethod
     def _write_json(path: Path, value: Any) -> None:
