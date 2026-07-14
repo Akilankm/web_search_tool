@@ -10,6 +10,7 @@ from product_evidence_harness import (
     ProductQuery,
     SerpAPIConfig,
 )
+from product_evidence_harness.adaptive_search import SearchAction, SearchObservation
 from product_evidence_harness.contracts import OrganicSearchResponse, OrganicSearchResult, ScrapeResult
 
 
@@ -24,7 +25,7 @@ class FakeOrganicClient:
         self.calls.append({"query": query, **kwargs})
         return OrganicSearchResponse(
             query=query,
-            search_id="three-stage",
+            search_id="adaptive-search",
             status="Success",
             results=[
                 OrganicSearchResult(
@@ -44,6 +45,64 @@ class FakeOrganicClient:
                     query=query,
                 ),
             ],
+        )
+
+
+class FakeAdaptivePlanner:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.fallbacks = 0
+
+    def choose_action(self, *, product, credit_number, **kwargs):
+        self.calls += 1
+        if credit_number == 1:
+            return SearchAction(
+                engine="google",
+                purpose="requested_retailer_direct_url",
+                query=f'"{product.main_text}" "{product.retailer_name}"',
+                scope="country",
+                country_code=product.country_code,
+                planner_source="llm",
+            )
+        if credit_number == 2:
+            return SearchAction(
+                engine="google_shopping",
+                purpose="country_alternative_product_resolution",
+                query=f'"{product.main_text}"',
+                scope="country",
+                country_code=product.country_code,
+                planner_source="llm",
+            )
+        return SearchAction(
+            engine="google_ai_mode",
+            purpose="global_exact_product_confirmation",
+            query=f'"{product.main_text}" exact product page',
+            scope="global",
+            country_code=product.country_code,
+            planner_source="llm",
+        )
+
+
+class FakeAdaptiveRouter:
+    def __init__(self, organic: FakeOrganicClient) -> None:
+        self.organic = organic
+
+    def execute(self, action, product):
+        response = self.organic.search(
+            action.query,
+            product=product,
+            scope=action.scope,
+            language_code=action.language_code or product.language_code,
+            exclude_retailer=action.purpose != "requested_retailer_direct_url",
+        )
+        return SearchObservation(
+            action=action,
+            status=response.status,
+            search_id=response.search_id,
+            results=response.results,
+            raw_result_count=len(response.results),
+            external_url_count=len(response.results),
+            raw_payload=response.raw,
         )
 
 
@@ -96,7 +155,10 @@ class FakeScraper:
         )
 
 
-def test_three_stage_search_and_multi_url_diagnostic_coverage(tmp_path):
+def test_adaptive_search_and_multi_url_diagnostic_coverage(tmp_path, monkeypatch):
+    # Force all three synthetic credits so the test can verify cross-source
+    # feature coverage independently of the production early-stop optimization.
+    monkeypatch.setenv("PRODUCT_HARNESS_EARLY_STOP_ON_WORKING_URL", "false")
     organic = FakeOrganicClient()
     schema = FeatureSchema(
         schema_id="toy",
@@ -118,6 +180,9 @@ def test_three_stage_search_and_multi_url_diagnostic_coverage(tmp_path):
         organic_client=organic,
         scraper=FakeScraper(),
     )
+    harness.adaptive_search_planner = FakeAdaptivePlanner()
+    harness.adaptive_search_router = FakeAdaptiveRouter(organic)
+
     result = harness.run(
         ProductQuery(
             row_id="toy-001",
