@@ -93,6 +93,10 @@ def apply_compatibility_patches() -> None:
     from src.product_evidence_harness.adaptive_search_runtime import (
         apply_adaptive_search_runtime_patch,
     )
+    from src.product_evidence_harness.adaptive_injected_client_compat import (
+        capture_pre_adaptive_run,
+        install_injected_client_compatibility,
+    )
 
     apply_precision_search_patches()
     apply_precision_browser_patches()
@@ -100,9 +104,15 @@ def apply_compatibility_patches() -> None:
     apply_precision_selection_hardening()
     apply_precision_terminal_hardening()
     apply_notebook_candidate_bridge()
-    # Apply last: this replaces only the fixed search sequence while preserving
-    # the precision gates, one-URL ledger and compact browser runtime above.
+
+    # Capture the precision-gated fixed runner for programmatic clients that
+    # inject only a legacy ``organic_client.search`` implementation.
+    capture_pre_adaptive_run()
+    # Production construction uses the adaptive multi-engine runtime.
     apply_adaptive_search_runtime_patch()
+    # Explicit adaptive planner/router injection still selects adaptive mode;
+    # only legacy custom organic clients receive the compatibility runner.
+    install_injected_client_compatibility()
 
     # The historical package uses both ``product_evidence_harness`` and
     # ``src.product_evidence_harness`` imports. Alias every patched module so both
@@ -116,6 +126,7 @@ def apply_compatibility_patches() -> None:
         "three_stage_environment": "src.product_evidence_harness.three_stage_environment",
         "adaptive_search": "src.product_evidence_harness.adaptive_search",
         "adaptive_search_runtime": "src.product_evidence_harness.adaptive_search_runtime",
+        "adaptive_injected_client_compat": "src.product_evidence_harness.adaptive_injected_client_compat",
     }
     for short_name, source_name in aliases.items():
         module = sys.modules.get(source_name)
