@@ -78,9 +78,13 @@ def apply_compatibility_patches() -> None:
     from src.product_evidence_harness.precision_browser_runtime import (
         apply_precision_browser_patches,
     )
+    from src.product_evidence_harness.precision_hardening import (
+        apply_precision_hardening,
+    )
 
     apply_precision_search_patches()
     apply_precision_browser_patches()
+    apply_precision_hardening()
 
     # The historical package uses both ``product_evidence_harness`` and
     # ``src.product_evidence_harness`` imports. Alias the patched modules so both
