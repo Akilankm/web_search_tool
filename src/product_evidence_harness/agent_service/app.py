@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException
 
 from src.product_evidence_harness.agent_service.jobs import InMemoryJobStore, JobStatus
+from src.product_evidence_harness.agent_service.progress_context import browser_progress_callback
 from src.product_evidence_harness.agent_service.strict_orchestrator import (
     StrictProductEvidenceOrchestrator,
 )
@@ -13,7 +14,7 @@ from src.product_evidence_harness.three_stage_environment import validate_runtim
 from src.product_evidence_harness.llm.service import LLMConfig
 
 
-app = FastAPI(title="Product Evidence Agent", version="0.7.0")
+app = FastAPI(title="Product Evidence Agent", version="0.7.1")
 store = InMemoryJobStore()
 executor = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("AGENT_WORKERS", "2"))))
 orchestrator = StrictProductEvidenceOrchestrator()
@@ -94,7 +95,8 @@ def _run_job(job_id: str) -> None:
         store.update(job_id, status=JobStatus.RUNNING, stage=stage, message=message)
 
     try:
-        result = orchestrator.run(record.payload, progress=progress)
+        with browser_progress_callback(progress):
+            result = orchestrator.run(record.payload, progress=progress)
         final_status = JobStatus.COMPLETED if result.get("coding_ready") else JobStatus.REVIEW_REQUIRED
         store.update(
             job_id,
