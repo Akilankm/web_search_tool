@@ -30,10 +30,22 @@ def _base_env() -> str:
             "PRODUCT_HARNESS_COUNTRY_FIRST=true",
             "PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK=true",
             "PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE=true",
+            "PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER=true",
+            "PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER=true",
             "PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY=true",
             "PRODUCT_HARNESS_REJECT_EXPIRING_URLS=true",
             "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE=6",
-            "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT=9",
+            "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT=18",
+            "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES=18",
+            "PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE=10",
+            "PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE=20",
+            "PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS=12000",
+            "PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS=60",
+            "PRODUCT_HARNESS_AGENTIC_MAX_IMAGES=30",
+            "LLM_API_KEY=llm_key_abcdefghijklmnopqrstuvwxyz",
+            "LLM_API_VERSION=2025-01-01-preview",
+            "LLM_ENDPOINT=https://approved.company.net/",
+            "LLM_DEPLOYMENT=vision-deployment",
             "",
         ]
     )
@@ -49,7 +61,13 @@ def test_valid_environment_returns_secret_free_report(tmp_path: Path) -> None:
     assert report.one_credit_contract_enforced is False
     assert report.three_stage_contract_enforced is True
     assert report.serpapi_request_limit == 3
+    assert report.agentic_browser_enabled is True
+    assert report.agentic_browser_required is True
+    assert report.agentic_browser_contract_enforced is True
+    assert report.llm_configured is True
+    assert report.max_agentic_candidates == 18
     assert "serp_live_" not in rendered
+    assert "llm_key_" not in rendered
 
 
 def test_placeholder_serpapi_key_is_rejected(tmp_path: Path) -> None:
@@ -104,12 +122,25 @@ def test_strict_acceptance_flags_cannot_be_disabled(tmp_path: Path) -> None:
         validate_runtime_environment(env_file, environ={})
 
 
-def test_llm_enabled_requires_secure_complete_configuration(tmp_path: Path) -> None:
+def test_agentic_browser_cannot_be_disabled(tmp_path: Path) -> None:
     env_file = _write_env(
         tmp_path / ".env",
         _base_env().replace(
-            "PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING=false",
-            "PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING=true",
+            "PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER=true",
+            "PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER=false",
+        ),
+    )
+
+    with pytest.raises(EnvironmentValidationError, match="must be true"):
+        validate_runtime_environment(env_file, environ={})
+
+
+def test_agentic_browser_requires_secure_complete_llm_configuration(tmp_path: Path) -> None:
+    env_file = _write_env(
+        tmp_path / ".env",
+        _base_env().replace(
+            "LLM_API_KEY=llm_key_abcdefghijklmnopqrstuvwxyz",
+            "LLM_API_KEY=",
         ),
     )
 
