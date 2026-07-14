@@ -37,7 +37,8 @@ def test_env_example_uses_placeholders_not_live_secrets() -> None:
     values = dotenv_values(ROOT / ".env.example")
     assert str(values["SERPAPI_API_KEY"]).startswith("replace_with_")
     assert str(values["LLM_API_KEY"]).startswith("replace_with_")
-    assert str(values["LLM_ENDPOINT"]).startswith("https://replace-")
+    assert str(values["LLM_ENDPOINT"]).startswith("replace_with_")
+    assert str(values["LLM_DEPLOYMENT"]).startswith("replace_with_")
 
 
 def test_gitignore_blocks_runtime_secrets_and_private_inputs() -> None:

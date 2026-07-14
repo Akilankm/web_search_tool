@@ -49,7 +49,7 @@ def test_auto_permission_mode_allows_only_cloudfiles_when_chmod_cannot_fix(
     allow, policy = preflight.prepare_env_permissions(env_path, mode="auto")
 
     assert allow is True
-    assert policy == "azureml-cloudfiles-auto-fallback"
+    assert policy == "azureml-managed-mount-auto-fallback"
 
 
 def test_startup_detects_resolved_azureml_mount_path() -> None:
@@ -74,10 +74,10 @@ def test_preflight_accepts_azure_openai_aliases() -> None:
         "PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER": "true",
         "PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY": "true",
         "PRODUCT_HARNESS_REJECT_EXPIRING_URLS": "true",
-        "AZURE_OPENAI_API_KEY": "real_enterprise_llm_key_value",
-        "AZURE_OPENAI_API_VERSION": "2025-01-01-preview",
-        "AZURE_OPENAI_ENDPOINT": "https://approved.company.net/",
-        "AZURE_OPENAI_DEPLOYMENT": "vision-deployment",
+        "AZURE_OPENAI_API_KEY": "x",
+        "AZURE_OPENAI_API_VERSION": "internal-v1",
+        "AZURE_OPENAI_ENDPOINT": "enterprise-gateway/service/openai",
+        "AZURE_OPENAI_DEPLOYMENT": "vision model / production",
     }
 
     preflight.validate_env(values)

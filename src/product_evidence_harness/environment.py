@@ -6,7 +6,6 @@ import stat
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Mapping
-from urllib.parse import urlparse
 
 from dotenv import dotenv_values, load_dotenv
 
@@ -60,10 +59,11 @@ def validate_runtime_environment(
 ) -> EnvironmentValidationReport:
     """Load and validate runtime configuration before any paid network call.
 
-    The validator is deliberately fail-closed. It rejects placeholder secrets,
-    ambiguous aliases, malformed booleans/numbers, insecure local secret files,
-    non-HTTPS LLM endpoints, and settings that can violate the one-credit search
-    contract. Secret values are never included in returned diagnostics.
+    The validator rejects placeholder SerpAPI secrets, malformed booleans and
+    numbers, insecure local secret files, and settings that can violate the
+    search-credit contract. Enterprise-provided LLM credentials and endpoint
+    strings are treated as opaque values and are validated only for presence.
+    Secret values are never included in returned diagnostics.
     """
 
     env_path = Path(env_file).expanduser() if env_file else None
@@ -84,13 +84,10 @@ def validate_runtime_environment(
         file_loaded = True
         checks.append("environment_file_parsed")
     elif env_path:
-        # Managed runtimes may inject secrets directly. Missing .env is allowed only
-        # when the required variables are already available in the process environment.
         checks.append("environment_file_absent_using_process_environment")
 
     values = dict(os.environ if environ is None else environ)
     if env_path and file_loaded and environ is not None:
-        # Explicit test/runtime mappings take precedence without mutating the process.
         parsed = {key: value for key, value in dotenv_values(env_path).items() if value is not None}
         values = {**parsed, **values}
 
@@ -118,7 +115,7 @@ def validate_runtime_environment(
     if llm_enabled:
         _validate_llm_environment(values)
         llm_configured = True
-        checks.append("llm_credentials_and_transport_validated")
+        checks.append("llm_required_fields_present")
     else:
         checks.append("llm_feature_reasoning_disabled")
 
@@ -150,7 +147,7 @@ def _enforce_one_credit_settings(values: Mapping[str, str]) -> None:
 
     organic = _strict_int(values, "PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES", 1, minimum=1, maximum=1)
     ai_mode = _strict_int(values, "PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES", 0, minimum=0, maximum=0)
-    if organic != 1 or ai_mode != 0:  # defensive; bounds above already enforce this
+    if organic != 1 or ai_mode != 0:
         raise EnvironmentValidationError("One-credit workflow requires organic=1 and AI Mode=0")
 
     _strict_int(values, "PRODUCT_HARNESS_SERP_RESULTS", 100, minimum=1, maximum=100)
@@ -187,37 +184,23 @@ def _validate_operational_settings(values: Mapping[str, str]) -> None:
 
 
 def _validate_llm_environment(values: Mapping[str, str]) -> None:
-    key = _coalesced(values, "AZURE_OPENAI_API_KEY", "LLM_API_KEY")
-    version = _coalesced(values, "AZURE_OPENAI_API_VERSION", "LLM_API_VERSION")
-    endpoint = _coalesced(values, "AZURE_OPENAI_ENDPOINT", "LLM_ENDPOINT")
-    deployment = _coalesced(values, "AZURE_OPENAI_DEPLOYMENT", "LLM_DEPLOYMENT")
-    consumer = _coalesced(values, "AZURE_OPENAI_CONSUMER_ID", "LLM_CONSUMER_ID")
-
-    _validate_alias_consistency(values, "AZURE_OPENAI_API_KEY", "LLM_API_KEY")
-    _validate_alias_consistency(values, "AZURE_OPENAI_API_VERSION", "LLM_API_VERSION")
-    _validate_alias_consistency(values, "AZURE_OPENAI_ENDPOINT", "LLM_ENDPOINT")
-    _validate_alias_consistency(values, "AZURE_OPENAI_DEPLOYMENT", "LLM_DEPLOYMENT")
-    _validate_alias_consistency(values, "AZURE_OPENAI_CONSUMER_ID", "LLM_CONSUMER_ID")
-
-    _validate_secret("AZURE_OPENAI_API_KEY/LLM_API_KEY", key, minimum_length=16)
-    if not version or _looks_like_placeholder(version):
-        raise EnvironmentValidationError("LLM API version is missing or still a placeholder")
-    if not deployment or _looks_like_placeholder(deployment):
-        raise EnvironmentValidationError("LLM deployment is missing or still a placeholder")
-    if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", deployment):
-        raise EnvironmentValidationError("LLM deployment contains unsupported characters")
-    if consumer and _looks_like_placeholder(consumer):
-        raise EnvironmentValidationError("LLM consumer ID is still a placeholder")
-    if consumer and (len(consumer) > 256 or any(ord(ch) < 32 for ch in consumer)):
-        raise EnvironmentValidationError("LLM consumer ID is malformed")
-
-    parsed = urlparse(endpoint)
-    if parsed.scheme.lower() != "https" or not parsed.netloc:
-        raise EnvironmentValidationError("LLM endpoint must be an absolute HTTPS URL")
-    if parsed.username or parsed.password or parsed.query or parsed.fragment:
-        raise EnvironmentValidationError("LLM endpoint must not contain credentials, query parameters, or fragments")
-    if parsed.hostname in {"localhost", "127.0.0.1", "0.0.0.0"}:
-        raise EnvironmentValidationError("Loopback LLM endpoints are not allowed in strict production mode")
+    required = {
+        "AZURE_OPENAI_API_KEY/LLM_API_KEY": _coalesced(values, "AZURE_OPENAI_API_KEY", "LLM_API_KEY"),
+        "AZURE_OPENAI_API_VERSION/LLM_API_VERSION": _coalesced(
+            values, "AZURE_OPENAI_API_VERSION", "LLM_API_VERSION"
+        ),
+        "AZURE_OPENAI_ENDPOINT/LLM_ENDPOINT": _coalesced(
+            values, "AZURE_OPENAI_ENDPOINT", "LLM_ENDPOINT"
+        ),
+        "AZURE_OPENAI_DEPLOYMENT/LLM_DEPLOYMENT": _coalesced(
+            values, "AZURE_OPENAI_DEPLOYMENT", "LLM_DEPLOYMENT"
+        ),
+    }
+    missing = [name for name, value in required.items() if not value]
+    if missing:
+        raise EnvironmentValidationError(
+            "Missing required LLM configuration: " + ", ".join(missing)
+        )
 
     _strict_int(values, "LLM_MAX_TOKENS", 1600, minimum=1, maximum=32768)
     _strict_float(values, "LLM_TEMPERATURE", 0.0, minimum=0.0, maximum=2.0)

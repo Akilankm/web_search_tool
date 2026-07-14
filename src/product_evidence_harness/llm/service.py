@@ -6,17 +6,19 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
-from urllib.parse import urlparse
 
 from loguru import logger
 
 
-_PLACEHOLDER_MARKERS = ("replace_", "replace-", "your_", "your-", "example", "placeholder", "<", ">")
-
-
 @dataclass(frozen=True)
 class LLMConfig:
-    """Azure OpenAI-compatible configuration for post-scrape reasoning."""
+    """Azure OpenAI-compatible configuration for post-scrape reasoning.
+
+    Enterprise gateways may issue short opaque keys and non-standard endpoint
+    strings. The application therefore validates only that required values are
+    present and that numeric runtime controls are valid. Authentication and
+    endpoint compatibility are determined by the actual client request.
+    """
 
     api_key: str
     api_version: str
@@ -39,18 +41,6 @@ class LLMConfig:
         missing = [name for name, value in required.items() if not str(value or "").strip()]
         if missing:
             raise ValueError("Missing LLM configuration fields: " + ", ".join(missing))
-        if self._placeholder(self.api_key) or self._placeholder(self.api_version) or self._placeholder(self.endpoint) or self._placeholder(self.deployment):
-            raise ValueError("LLM configuration contains an example or placeholder value")
-        if any(ch.isspace() or ord(ch) < 32 for ch in self.api_key):
-            raise ValueError("LLM API key contains whitespace or control characters")
-
-        parsed = urlparse(self.endpoint)
-        if parsed.scheme.lower() != "https" or not parsed.netloc:
-            raise ValueError("LLM endpoint must be an absolute HTTPS URL")
-        if parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError("LLM endpoint must not contain credentials, query parameters, or fragments")
-        if parsed.hostname in {"localhost", "127.0.0.1", "0.0.0.0"}:
-            raise ValueError("Loopback LLM endpoints are not permitted")
         if not 1 <= int(self.max_tokens) <= 32768:
             raise ValueError("LLM max_tokens must be between 1 and 32768")
         if not 0.0 <= float(self.temperature) <= 2.0:
@@ -61,11 +51,6 @@ class LLMConfig:
             raise ValueError("LLM read_timeout must be between 5 and 600 seconds")
         if not 0 <= int(self.max_retries) <= 5:
             raise ValueError("LLM max_retries must be between 0 and 5")
-
-    @staticmethod
-    def _placeholder(value: str) -> bool:
-        lowered = str(value or "").strip().lower()
-        return not lowered or any(marker in lowered for marker in _PLACEHOLDER_MARKERS)
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
