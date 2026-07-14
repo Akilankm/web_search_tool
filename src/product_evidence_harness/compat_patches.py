@@ -36,8 +36,11 @@ def _remove_network_primitives(self: LivePageOfflineArtifactBuilder, html: str) 
     )
     if self.config.disable_scripts:
         output = re.sub(
-            r"<script\b([^>]*)\bsrc=['\"][^'\"]+['\"]([^>]*)>\s*</script>",
-            '<script type="application/json" data-offline-disabled="external-script"></script>',
+            r"<script\b([^>]*)\bsrc=['\"]([^'\"]+)['\"]([^>]*)>\s*</script>",
+            lambda match: (
+                '<script type="application/json" data-offline-disabled="external-script" '
+                f'data-offline-src="{escape(match.group(2), quote=True)}"></script>'
+            ),
             output,
             flags=re.I | re.S,
         )
