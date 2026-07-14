@@ -90,6 +90,9 @@ def apply_compatibility_patches() -> None:
     from src.product_evidence_harness.notebook_candidate_bridge import (
         apply_notebook_candidate_bridge,
     )
+    from src.product_evidence_harness.adaptive_search_runtime import (
+        apply_adaptive_search_runtime_patch,
+    )
 
     apply_precision_search_patches()
     apply_precision_browser_patches()
@@ -97,6 +100,9 @@ def apply_compatibility_patches() -> None:
     apply_precision_selection_hardening()
     apply_precision_terminal_hardening()
     apply_notebook_candidate_bridge()
+    # Apply last: this replaces only the fixed search sequence while preserving
+    # the precision gates, one-URL ledger and compact browser runtime above.
+    apply_adaptive_search_runtime_patch()
 
     # The historical package uses both ``product_evidence_harness`` and
     # ``src.product_evidence_harness`` imports. Alias every patched module so both
@@ -108,6 +114,8 @@ def apply_compatibility_patches() -> None:
         "candidate_precision": "src.product_evidence_harness.candidate_precision",
         "candidate_reporting": "src.product_evidence_harness.candidate_reporting",
         "three_stage_environment": "src.product_evidence_harness.three_stage_environment",
+        "adaptive_search": "src.product_evidence_harness.adaptive_search",
+        "adaptive_search_runtime": "src.product_evidence_harness.adaptive_search_runtime",
     }
     for short_name, source_name in aliases.items():
         module = sys.modules.get(source_name)
