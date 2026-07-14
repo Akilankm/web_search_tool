@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from src.product_evidence_harness.agent_service.progress_context import emit_browser_progress
+from src.product_evidence_harness.progress_context import emit_browser_progress
 from src.product_evidence_harness.browser_contracts import BrowserEvidenceBundle, BrowserEvidenceRequest
 
 
