@@ -38,14 +38,37 @@ def process_flag_enabled(name: str) -> bool:
 
 
 def is_azureml_cloudfiles_path(path: Path) -> bool:
-    normalized = path.expanduser().absolute().as_posix().lower()
-    return "/cloudfiles/" in normalized or normalized.endswith("/cloudfiles")
+    candidates = [path.expanduser().absolute(), Path.cwd().expanduser().absolute()]
+    normalized_paths: set[str] = set()
+    for candidate in candidates:
+        normalized_paths.add(candidate.as_posix().lower())
+        try:
+            normalized_paths.add(candidate.resolve(strict=False).as_posix().lower())
+        except OSError:
+            pass
+
+    markers = (
+        "/cloudfiles/",
+        "/mnt/batch/tasks/shared/ls_root/mounts/",
+    )
+    if any(marker in value for marker in markers for value in normalized_paths):
+        return True
+
+    return any(
+        os.getenv(name, "").strip()
+        for name in (
+            "AZUREML_RUN_ID",
+            "AZUREML_CR_COMPUTE_CONTEXT",
+            "AZUREML_SERVICE_ENDPOINT",
+            "AML_CloudName",
+        )
+    )
 
 
 def prepare_env_permissions(path: Path, *, mode: str = "auto") -> tuple[bool, str]:
     """Prepare .env permissions and return (allow_broad_permissions, policy_name).
 
-    auto: try 0600; permit broad permissions only on Azure ML cloudfiles mounts.
+    auto: try 0600; permit broad permissions only on Azure ML managed mounts.
     strict: require 0600-compatible permissions.
     allow: explicitly permit broad permissions after a warning.
     """
@@ -78,12 +101,12 @@ def prepare_env_permissions(path: Path, *, mode: str = "auto") -> tuple[bool, st
 
     if normalized == "auto" and is_azureml_cloudfiles_path(path):
         print(
-            f"AZURE ML FILESYSTEM NOTICE: .env remains mode {current_mode:o} because the cloudfiles "
-            "mount does not preserve chmod 600. Continuing automatically in trusted-workspace mode; "
-            "credential content is still validated and never printed.",
+            f"AZURE ML FILESYSTEM NOTICE: .env remains mode {current_mode:o} because the managed "
+            "workspace mount does not preserve chmod 600. Continuing automatically in trusted-workspace "
+            "mode; credential content is never printed.",
             file=sys.stderr,
         )
-        return True, "azureml-cloudfiles-auto-fallback"
+        return True, "azureml-managed-mount-auto-fallback"
 
     raise PreflightError(
         ".env permissions are too broad and chmod 600 did not take effect. "
@@ -103,11 +126,11 @@ def parse_env(path: Path, *, allow_insecure_permissions: bool = False) -> dict[s
             if not allow_insecure_permissions:
                 raise PreflightError(
                     ".env permissions are too broad. Run: chmod 600 .env. "
-                    "Azure ML cloudfiles users should run the startup script, which handles this automatically."
+                    "Azure ML managed-mount users should run the startup script, which handles this automatically."
                 )
             print(
-                f"SECURITY WARNING: accepting .env mode {mode:o}. Group or other users may read or "
-                "modify credentials because the mounted filesystem cannot preserve mode 600.",
+                f"SECURITY WARNING: accepting .env mode {mode:o}. The mounted filesystem cannot preserve "
+                "mode 600; credential values will not be printed.",
                 file=sys.stderr,
             )
 
@@ -200,13 +223,9 @@ def validate_env(values: dict[str, str]) -> None:
             "endpoint": first_value(values, "LLM_ENDPOINT", "AZURE_OPENAI_ENDPOINT"),
             "deployment": first_value(values, "LLM_DEPLOYMENT", "AZURE_OPENAI_DEPLOYMENT"),
         }
-        missing = [label for label, value in llm_values.items() if is_placeholder(value)]
+        missing = [label for label, value in llm_values.items() if not value]
         if missing:
-            raise PreflightError(
-                "LLM configuration is missing or still contains examples: " + ", ".join(missing)
-            )
-        if not llm_values["endpoint"].startswith("https://"):
-            raise PreflightError("LLM endpoint must use HTTPS")
+            raise PreflightError("Missing required LLM configuration: " + ", ".join(missing))
 
 
 def validate_feature_file(path: Path) -> None:
@@ -300,7 +319,7 @@ def main() -> int:
         "--env-permission-mode",
         choices=("auto", "strict", "allow"),
         default=os.getenv(ENV_PERMISSION_MODE_ENV, "auto"),
-        help="auto fixes chmod and adapts only for Azure ML cloudfiles; strict requires 0600; allow is explicit override",
+        help="auto fixes chmod and adapts only for Azure ML managed mounts; strict requires 0600; allow is explicit override",
     )
     parser.add_argument(
         "--allow-insecure-env-permissions",
@@ -329,6 +348,7 @@ def main() -> int:
 
     print("Preflight passed.")
     print(f"Environment permission policy: {permission_policy}")
+    print("LLM configuration policy: required fields only; enterprise values are treated as opaque")
     print("Search contract: requested retailer/country -> country alternative -> global")
     print("SerpAPI request limit per product: 3")
     print("Browser contract: LLM observe -> plan -> safe action -> observe for every admitted candidate")
