@@ -1,43 +1,63 @@
-# Browser Candidate Progress
+# Agentic Browser Candidate Progress
 
-The supported notebook reports browser verification at candidate level.
+The supported notebook reports the LLM-controlled browser investigation at candidate and turn level.
 
 Example:
 
 ```text
-TEST-001-...: RUNNING | REQUESTING_BROWSER_EVIDENCE | CAND-001 | attempt 1/3 | STARTED | mercadolibre.com.co
-TEST-001-...: RUNNING | REQUESTING_BROWSER_EVIDENCE | CAND-001 | COMPLETED | openable=True | scrapable=True | rendered_exact=True | 18.4s | mercadolibre.com.co
-TEST-001-...: RUNNING | REQUESTING_BROWSER_EVIDENCE | CAND-002 | RETRYING | attempt 1/3 failed with ReadTimeout after 180.0s | retailer.example
-TEST-001-...: RUNNING | REQUESTING_BROWSER_EVIDENCE | CAND-002 | FAILED | 3/3 attempts | ReadTimeout | 180.0s | retailer.example
+TEST-001-...: RUNNING | AGENTIC_BROWSER_INVESTIGATION | LLM-investigating 12 candidate URLs with observe-plan-act browser sessions
+TEST-001-...: RUNNING | AGENTIC_BROWSER_INVESTIGATION | CAND-001 | turn 0/10 | OBSERVED | retailer.example
+TEST-001-...: RUNNING | AGENTIC_BROWSER_INVESTIGATION | CAND-001 | turn 1/10 | CLICK | retailer.example
+TEST-001-...: RUNNING | AGENTIC_BROWSER_INVESTIGATION | CAND-001 | turn 2/10 | SCROLL | retailer.example
+TEST-001-...: RUNNING | AGENTIC_BROWSER_INVESTIGATION | CAND-001 | turn 3/10 | INSPECT_IMAGE | retailer.example
+TEST-001-...: RUNNING | AGENTIC_BROWSER_INVESTIGATION | CAND-001 | COMPLETED | turns=4 | actions=3 | openable=True | scrapable=True | retailer.example
 ```
 
 ## Notebook behavior
 
-The notebook polls the job API every three seconds but prints only when `status`, `stage`, or `message` changes. When a browser request remains active, it prints one heartbeat every 30 seconds with total elapsed time instead of repeating the same line every poll.
+The notebook polls every three seconds but prints only when `status`, `stage`, or `message` changes. When an LLM or browser operation remains active, it prints one heartbeat every 30 seconds with total elapsed time.
 
 ## Meaning of fields
 
 | Field | Meaning |
 |---|---|
-| `CAND-001` | Candidate sequence identifier for the current product run |
-| `attempt 1/3` | Current browser-service request attempt and configured maximum |
-| `STARTED` | Browser request has been submitted |
-| `RETRYING` | A transport, timeout, HTTP, or response-decoding error occurred and another attempt will be made |
-| `COMPLETED`, `PARTIAL`, `ACCESS_BLOCKED`, `FAILED` | Browser evidence bundle status |
-| `openable` | Browser successfully opened the page |
-| `scrapable` | Rendered product text was extractable |
-| `rendered_exact` | Rendered page matched the requested product identity |
-| elapsed seconds | Duration of the current attempt |
-| domain | Candidate domain only; query parameters and tokens are never printed |
+| `CAND-001` | Candidate identifier for the current product run |
+| `turn 2/10` | Current LLM planning turn and configured maximum |
+| `OBSERVED` | Initial browser state is available to the LLM |
+| `CLICK` | LLM selected one currently observed `E###` element |
+| `SCROLL` | LLM selected a bounded page scroll |
+| `INSPECT_IMAGE` | LLM selected one currently observed `I###` image for evidence |
+| `CAPTURE_SCREENSHOT` | LLM preserved the current viewport as evidence |
+| `COMPLETED` | Candidate session finalized into a browser evidence bundle |
+| `openable` | Chromium opened a usable rendered page |
+| `scrapable` | Sufficient rendered text was extracted |
+| domain | Domain only; query parameters, tokens, and credentials are not printed |
 
-Candidate failures do not fail the complete product workflow. The orchestrator continues with the next candidate and performs strict final URL acceptance after browser verification finishes.
+The LLM action is a plan, not the final URL decision. Every action is checked against the current observation before execution. The final URL is still selected by deterministic identity, feature, access, scrapability, conflict, durability, and scope-priority gates.
+
+## Candidate failure isolation
+
+A candidate may fail because of:
+
+- browser timeout or transport failure;
+- invalid or stale LLM-selected element ID;
+- access blocker;
+- invalid LLM JSON;
+- exhausted turn or action budget.
+
+That failure is recorded in:
+
+```text
+data/artifacts/<row_id>/CAND-###/agentic/investigation.json
+```
+
+The workflow continues to the next admitted candidate.
 
 ## Operational diagnosis
 
-Use the notebook output first. For deeper inspection:
-
 ```bash
 docker compose logs -f --tail=200 agent browser
+find data/artifacts/<row_id> -maxdepth 8 -type f | sort
 ```
 
-A 30-second heartbeat means the current browser request is still active. A `RETRYING` message means the client is using its configured retry allowance. A terminal candidate `FAILED` message means that candidate was abandoned and the workflow moved to the next candidate.
+A 30-second heartbeat means the current LLM or browser call remains active. Inspect `investigation.json`, `latest_observation.json`, and `browser_actions.json` to distinguish model planning, browser execution, and deterministic final acceptance.
