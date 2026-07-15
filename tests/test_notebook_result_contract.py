@@ -66,10 +66,13 @@ def test_notebook_builds_complete_single_product_eda_tables() -> None:
         "search_engine_summary_df",
         "search_handles_df",
         "search_decision_rca_df",
+        "source_hierarchy_df",
+        "source_tier_summary_df",
     ):
         assert name in source
 
-    assert "Candidate-level acceptance and selection" in source
+    assert "One URL per row — source authority and final acceptance" in source
+    assert "Standardized source hierarchy by SerpAPI credit" in source
     assert "Final URL selection RCA" in source
     assert "SERP stage quality ratios" in source
     assert "Domain-level candidate quality" in source
@@ -94,6 +97,10 @@ def test_notebook_exposes_candidate_acceptance_funnel() -> None:
         "strict_selected",
         "review_selected",
         "final_candidate_status",
+        "source_tier",
+        "source_tier_name",
+        "source_role",
+        "marketplace",
     ):
         assert field in source
 
@@ -104,6 +111,7 @@ def test_notebook_exposes_adaptive_search_contract() -> None:
 
     for field in (
         "engine_sequence",
+        "target_source_tiers",
         "serpapi_requests_used",
         "search_stop_reason",
         "planner_source",
@@ -173,6 +181,7 @@ def test_notebook_uses_repository_local_artifact_paths_and_exports_rca() -> None
     assert "diagnostics.tables()" in source
     assert "export_adaptive_search_tables" in source
     assert "adaptive_search_trace.json" in source
+    assert "source_tier_summary" in source
 
 
 def test_notebook_documents_terminal_status_semantics() -> None:
@@ -180,23 +189,27 @@ def test_notebook_documents_terminal_status_semantics() -> None:
 
     assert "REVIEW_REQUIRED" in source
     assert "successful terminal workflow states" in source
-    assert "Only `FAILED` represents an execution failure" in source
+    assert "Only `FAILED` is an execution failure" in source
 
 
 def test_notebook_docs_match_diagnostic_contract() -> None:
     notebook_doc = (ROOT / "docs" / "NOTEBOOK_USAGE.md").read_text(encoding="utf-8")
     diagnostics_doc = (ROOT / "docs" / "SINGLE_PRODUCT_DIAGNOSTICS.md").read_text(encoding="utf-8")
     adaptive_doc = (ROOT / "docs" / "ADAPTIVE_SERPAPI_SEARCH.md").read_text(encoding="utf-8")
+    hierarchy_doc = (ROOT / "docs" / "SOURCE_AUTHORITY_HIERARCHY.md").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    for text in (notebook_doc, diagnostics_doc, adaptive_doc, hierarchy_doc, readme):
+        assert "candidate" in text.lower()
+        assert "deterministic" in text.lower() or "hierarchy" in text.lower()
 
     for text in (notebook_doc, diagnostics_doc, adaptive_doc, readme):
         assert "results_df" in text
-        assert "candidate" in text.lower()
         assert "primary_url" in text
         assert "three" in text.lower()
-        assert "deterministic" in text.lower()
 
     assert "inputs/private/toy_features.json" in notebook_doc
     assert "single_product_diagnostics.xlsx" in diagnostics_doc
     assert "docs/SINGLE_PRODUCT_DIAGNOSTICS.md" in readme
     assert "search_actions_df" in adaptive_doc
+    assert "Amazon/eBay" in hierarchy_doc
