@@ -127,6 +127,6 @@ def test_notebook_and_runtime_contain_bootstrap_and_feature_discovery_contract()
     assert "./scripts/azureml_startup.sh" in readme
     assert 'project_root / "data" / "artifacts"' in runtime
     assert "RUN_SINGLE_PRODUCT = False" in source
-    assert "Available FEATURE_SET values" in source
+    assert "Available feature sets" in source
     assert "Default feature set" in source
     assert "adaptive_search_contract_enforced" in runtime
