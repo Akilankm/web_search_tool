@@ -21,11 +21,16 @@ def _base_env() -> str:
             "SERPAPI_API_KEY=serp_live_abcdefghijklmnopqrstuvwxyz0123456789",
             "PRODUCT_HARNESS_WORKFLOW=three_stage_feature_aware",
             "PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE=false",
+            "PRODUCT_HARNESS_MAX_SERPAPI_CREDITS=3",
+            "PRODUCT_HARNESS_ALLOWED_SEARCH_ENGINES=google,google_shopping,google_ai_mode,google_immersive_product,google_lens,amazon,ebay,walmart,home_depot",
+            "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_PLANNING=true",
+            "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_FEEDBACK=true",
+            "PRODUCT_HARNESS_REQUIRE_LLM_SEARCH_PLANNING=true",
+            "PRODUCT_HARNESS_EARLY_STOP_ON_WORKING_URL=true",
+            "PRODUCT_HARNESS_SEARCH_PLANNER_MAX_CANDIDATES=8",
             "PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=3",
             "PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES=0",
             "PRODUCT_HARNESS_SERP_RESULTS=100",
-            "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_PLANNING=false",
-            "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_FEEDBACK=false",
             "PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING=false",
             "PRODUCT_HARNESS_COUNTRY_FIRST=true",
             "PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK=true",
@@ -34,7 +39,10 @@ def _base_env() -> str:
             "PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER=true",
             "PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY=true",
             "PRODUCT_HARNESS_REJECT_EXPIRING_URLS=true",
-            "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE=6",
+            "PRODUCT_HARNESS_MAX_FULL_SCRAPES=6",
+            "PRODUCT_HARNESS_MAX_SCRAPES_PER_DOMAIN=2",
+            "PRODUCT_HARNESS_MIN_PREFLIGHT_SCORE=0.28",
+            "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE=2",
             "PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT=18",
             "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES=18",
             "PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE=10",
@@ -51,7 +59,7 @@ def _base_env() -> str:
     )
 
 
-def test_valid_environment_returns_secret_free_report(tmp_path: Path) -> None:
+def test_valid_environment_returns_secret_free_adaptive_report(tmp_path: Path) -> None:
     env_file = _write_env(tmp_path / ".env", _base_env())
 
     report = validate_runtime_environment(env_file, environ={})
@@ -60,13 +68,16 @@ def test_valid_environment_returns_secret_free_report(tmp_path: Path) -> None:
     assert report.serpapi_configured is True
     assert report.one_credit_contract_enforced is False
     assert report.three_stage_contract_enforced is True
+    assert report.adaptive_search_contract_enforced is True
     assert report.serpapi_request_limit == 3
+    assert report.llm_search_planning_enabled is True
+    assert report.llm_search_feedback_enabled is True
+    assert "google_shopping" in report.allowed_search_engines
+    assert "google_immersive_product" in report.allowed_search_engines
     assert report.agentic_browser_enabled is True
     assert report.agentic_browser_required is True
     assert report.agentic_browser_contract_enforced is True
     assert report.llm_configured is True
-    # Legacy .env values remain accepted, but the runtime reports and enforces
-    # the effective context ceilings rather than the larger configured values.
     assert report.max_agentic_candidates == 3
     assert report.max_agentic_turns_per_candidate == 4
     assert report.max_agentic_actions_per_candidate == 6
@@ -82,7 +93,6 @@ def test_placeholder_serpapi_key_is_rejected(tmp_path: Path) -> None:
             "replace_with_real_serpapi_key",
         ),
     )
-
     with pytest.raises(EnvironmentValidationError, match="placeholder"):
         validate_runtime_environment(env_file, environ={})
 
@@ -95,7 +105,6 @@ def test_expansive_legacy_search_mode_is_rejected(tmp_path: Path) -> None:
             "PRODUCT_HARNESS_ENABLE_TOURNAMENT_MODE=true",
         ),
     )
-
     with pytest.raises(EnvironmentValidationError, match="forbids"):
         validate_runtime_environment(env_file, environ={})
 
@@ -104,12 +113,23 @@ def test_search_budget_must_be_exactly_three(tmp_path: Path) -> None:
     env_file = _write_env(
         tmp_path / ".env",
         _base_env().replace(
-            "PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=3",
-            "PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES=2",
+            "PRODUCT_HARNESS_MAX_SERPAPI_CREDITS=3",
+            "PRODUCT_HARNESS_MAX_SERPAPI_CREDITS=2",
         ),
     )
-
     with pytest.raises(EnvironmentValidationError, match="between 3 and 3"):
+        validate_runtime_environment(env_file, environ={})
+
+
+def test_llm_search_planning_cannot_be_disabled(tmp_path: Path) -> None:
+    env_file = _write_env(
+        tmp_path / ".env",
+        _base_env().replace(
+            "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_PLANNING=true",
+            "PRODUCT_HARNESS_ENABLE_LLM_SEARCH_PLANNING=false",
+        ),
+    )
+    with pytest.raises(EnvironmentValidationError, match="requires LLM search planning"):
         validate_runtime_environment(env_file, environ={})
 
 
@@ -121,7 +141,6 @@ def test_strict_acceptance_flags_cannot_be_disabled(tmp_path: Path) -> None:
             "PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY=false",
         ),
     )
-
     with pytest.raises(EnvironmentValidationError, match="must be true"):
         validate_runtime_environment(env_file, environ={})
 
@@ -134,12 +153,11 @@ def test_agentic_browser_cannot_be_disabled(tmp_path: Path) -> None:
             "PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER=false",
         ),
     )
-
     with pytest.raises(EnvironmentValidationError, match="must be true"):
         validate_runtime_environment(env_file, environ={})
 
 
-def test_agentic_browser_requires_secure_complete_llm_configuration(tmp_path: Path) -> None:
+def test_search_planner_requires_complete_llm_configuration(tmp_path: Path) -> None:
     env_file = _write_env(
         tmp_path / ".env",
         _base_env().replace(
@@ -147,7 +165,6 @@ def test_agentic_browser_requires_secure_complete_llm_configuration(tmp_path: Pa
             "LLM_API_KEY=",
         ),
     )
-
     with pytest.raises(EnvironmentValidationError, match="LLM_API_KEY"):
         validate_runtime_environment(env_file, environ={})
 
@@ -157,7 +174,6 @@ def test_duplicate_keys_are_rejected(tmp_path: Path) -> None:
         tmp_path / ".env",
         _base_env() + "SERPAPI_API_KEY=second_value_that_must_not_win\n",
     )
-
     with pytest.raises(EnvironmentValidationError, match="Duplicate"):
         validate_runtime_environment(env_file, environ={})
 
@@ -167,6 +183,5 @@ def test_group_readable_env_file_is_rejected(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(_base_env(), encoding="utf-8")
     env_file.chmod(0o644)
-
     with pytest.raises(EnvironmentValidationError, match="chmod 600"):
         validate_runtime_environment(env_file, environ={})

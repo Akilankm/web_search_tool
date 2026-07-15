@@ -11,7 +11,6 @@ from src.product_evidence_harness.query_builder import QueryBuilder
 
 
 def _searchable_ean(self: QueryBuilder, task) -> str | None:
-    """Keep a supplied GTIN searchable without treating it as validated evidence."""
     normalized = normalize_gtin(task.ean)
     if normalized:
         return normalized
@@ -20,7 +19,6 @@ def _searchable_ean(self: QueryBuilder, task) -> str | None:
 
 
 def _strict_requested_retailer_search(self: QueryBuilder, task) -> str:
-    """Suppress invalid GTINs for retailer-targeted strict retrieval."""
     if task.ean and normalize_gtin(task.ean) is None:
         task = replace(task, ean=None)
     return self.country_language_search(task, language_index=0, include_retailer=True)
@@ -72,24 +70,16 @@ def apply_compatibility_patches() -> None:
     LivePageOfflineArtifactBuilder._remove_network_primitives = _remove_network_primitives  # type: ignore[method-assign]
     LivePageOfflineArtifactBuilder._role_directory = _role_directory  # type: ignore[method-assign]
 
-    from src.product_evidence_harness.precision_search_runtime import (
-        apply_precision_search_patches,
-    )
-    from src.product_evidence_harness.precision_browser_runtime import (
-        apply_precision_browser_patches,
-    )
-    from src.product_evidence_harness.precision_hardening import (
-        apply_precision_hardening,
-    )
-    from src.product_evidence_harness.precision_selection_hardening import (
-        apply_precision_selection_hardening,
-    )
-    from src.product_evidence_harness.precision_terminal_hardening import (
-        apply_precision_terminal_hardening,
-    )
-    from src.product_evidence_harness.notebook_candidate_bridge import (
-        apply_notebook_candidate_bridge,
-    )
+    from src.product_evidence_harness.precision_search_runtime import apply_precision_search_patches
+    from src.product_evidence_harness.precision_browser_runtime import apply_precision_browser_patches
+    from src.product_evidence_harness.precision_hardening import apply_precision_hardening
+    from src.product_evidence_harness.precision_selection_hardening import apply_precision_selection_hardening
+    from src.product_evidence_harness.precision_terminal_hardening import apply_precision_terminal_hardening
+    from src.product_evidence_harness.notebook_candidate_bridge import apply_notebook_candidate_bridge
+    from src.product_evidence_harness.adaptive_search_runtime import apply_adaptive_search_runtime_patch
+    from src.product_evidence_harness.adaptive_injected_client_compat import capture_pre_adaptive_run, install_injected_client_compatibility
+    from src.product_evidence_harness.source_authority_runtime import apply_source_authority_patches
+    from src.product_evidence_harness.source_authority_reporting import apply_source_authority_reporting_patch
 
     apply_precision_search_patches()
     apply_precision_browser_patches()
@@ -97,19 +87,35 @@ def apply_compatibility_patches() -> None:
     apply_precision_selection_hardening()
     apply_precision_terminal_hardening()
     apply_notebook_candidate_bridge()
+    capture_pre_adaptive_run()
+    apply_adaptive_search_runtime_patch()
+    apply_source_authority_patches()
+    apply_source_authority_reporting_patch()
+    install_injected_client_compatibility()
 
-    # The historical package uses both ``product_evidence_harness`` and
-    # ``src.product_evidence_harness`` imports. Alias every patched module so both
-    # names resolve to the same class objects instead of creating duplicate trees.
     aliases = {
         "query_builder": "src.product_evidence_harness.query_builder",
         "offline_capture": "src.product_evidence_harness.offline_capture",
         "candidate_store": "src.product_evidence_harness.candidate_store",
         "candidate_precision": "src.product_evidence_harness.candidate_precision",
         "candidate_reporting": "src.product_evidence_harness.candidate_reporting",
+        "ranker": "src.product_evidence_harness.ranker",
         "three_stage_environment": "src.product_evidence_harness.three_stage_environment",
+        "adaptive_search": "src.product_evidence_harness.adaptive_search",
+        "adaptive_search_runtime": "src.product_evidence_harness.adaptive_search_runtime",
+        "adaptive_injected_client_compat": "src.product_evidence_harness.adaptive_injected_client_compat",
+        "source_authority": "src.product_evidence_harness.source_authority",
+        "source_authority_runtime": "src.product_evidence_harness.source_authority_runtime",
+        "source_authority_reporting": "src.product_evidence_harness.source_authority_reporting",
+        "source_authority_compatibility": "src.product_evidence_harness.source_authority_compatibility",
     }
     for short_name, source_name in aliases.items():
         module = sys.modules.get(source_name)
         if module is not None:
             sys.modules[f"product_evidence_harness.{short_name}"] = module
+
+    from src.product_evidence_harness.source_authority_compatibility import (
+        apply_source_authority_compatibility,
+    )
+
+    apply_source_authority_compatibility()
