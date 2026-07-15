@@ -2,7 +2,7 @@
 
 Use only `notebooks/01_run_product_evidence.ipynb`.
 
-The notebook is both the supported single-product runner and the complete search, candidate, browser and final-selection EDA/RCA report.
+The notebook is the supported single-product runner and the complete search, source-authority, candidate, browser and final-selection EDA/RCA report.
 
 ## Fresh setup
 
@@ -34,59 +34,57 @@ product = {
 
 `main_text` and `country_code` are required. Keep EAN/GTIN as text. `RUN_SINGLE_PRODUCT` defaults to `False` to prevent accidental paid requests.
 
-## Readiness contract
+## Standardized source hierarchy
 
-The notebook fails before submission unless `/health` confirms:
+When a retailer is supplied, that retailer is preferred first. Otherwise:
 
-- adaptive three-credit search is enforced;
-- SerpAPI request limit is exactly three;
-- LLM search planning is enabled;
-- LLM search feedback is enabled;
-- the allowed search-engine list is present;
-- LLM configuration is present;
-- browser agentic tools are healthy.
+```text
+Local/regional manufacturer
+→ Global manufacturer
+→ Major retailer in requested country
+→ Other local website
+→ Other global website
+→ Amazon/eBay last resort
+```
+
+Amazon/eBay receive first priority only when explicitly supplied as `retailer_name`.
 
 ## Adaptive credit flow
 
 ```text
-LLM selects one engine/query
-→ execute one paid SerpAPI request
+identify highest unresolved source tier
+→ LLM selects one suitable engine/query
+→ execute one SerpAPI request
 → normalize URLs, product tokens, IDs and images
+→ classify source authority
 → precision admission and bounded scraping
 → validate current best URL
-→ stop when working, otherwise replan with remaining credits
+→ stop or target the next source tier
 ```
 
-The planner may use:
-
-- Google Search;
-- Google Shopping;
-- Google AI Mode;
-- Google Immersive Product;
-- Google Lens;
-- requested-retailer native Amazon, eBay, Walmart or Home Depot search.
-
-The notebook reports the actual engine sequence. It does not assume a fixed retailer/country/global sequence.
+The notebook reports the actual source-tier and engine sequence. It does not assume a fixed retailer/country/global sequence.
 
 ## Adaptive search tables
 
 | DataFrame | Purpose |
 |---|---|
-| `search_actions_df` | One row per paid credit: engine, purpose, planner source, query, yield and current best URL |
-| `search_engine_summary_df` | Engine-level credits, URL yield, handle yield, qualification and scrape conversion |
+| `source_hierarchy_df` | One row per credit: target source tier, engine, yield and continuation reason |
+| `search_actions_df` | Complete paid-credit decision trace |
+| `search_engine_summary_df` | Engine-level URL, handle, qualification and scrape yield |
 | `search_handles_df` | Product tokens, IDs and image URLs available for follow-up |
-| `search_decision_rca_df` | Policy, credit usage, planner calls/fallbacks, engine sequence and stop reason |
+| `search_decision_rca_df` | Budget, hierarchy, planner calls/fallbacks and stop reason |
 
-A `planner_source` of `llm` means the enterprise LLM selected the action. `deterministic_fallback` means the guarded fallback policy selected a non-duplicate action after a planner failure.
+A `planner_source` of `llm` means the enterprise LLM selected the route. `deterministic_fallback` means the guarded hierarchy policy selected a valid non-duplicate route after planner failure.
 
 ## Candidate and evidence tables
 
 | DataFrame | Purpose |
 |---|---|
 | `overview_df` | Executive metrics and final state |
-| `search_stages_df` | Per-credit adaptive trace, retained for compatibility |
+| `search_stages_df` | Per-credit adaptive trace |
 | `serp_results_df` | Raw result occurrences across engines and credits |
 | `results_df` | Authoritative one-row-per-canonical-URL decision ledger |
+| `source_tier_summary_df` | Candidate/scrape/identity/selection conversion by source tier |
 | `agentic_df` | Browser turns, actions, termination and errors |
 | `feature_evidence_df` | URL-feature evidence records |
 | `feature_matrix_df` | URL by requested-feature support matrix |
@@ -100,25 +98,39 @@ A `planner_source` of `llm` means the enterprise LLM selected the action. `deter
 
 ### `serp_results_df`
 
-One row per result occurrence. The same canonical URL may occur in multiple engines, credits or positions. Columns include engine, purpose and source section.
+One row per raw result occurrence. The same URL may appear in multiple engines, credits or positions.
 
 ### `results_df`
 
-Exactly one row per canonical URL. The notebook asserts URL uniqueness. Tracking, campaign, referral, session and fragment noise are removed while product-defining parameters remain.
-
-The same authoritative grain is persisted to:
+Exactly one row per canonical URL. The same authoritative grain is persisted to:
 
 ```text
 data/artifacts/<row_id>/candidate_url_records.json
 data/artifacts/<row_id>/candidates.csv
 ```
 
-## `results_df` field groups
+## `results_df` source-authority fields
+
+| Field | Meaning |
+|---|---|
+| `source_tier` | Numeric business priority; lower is stronger |
+| `source_tier_name` | Requested retailer, manufacturer, major retailer, other or marketplace |
+| `source_role` | Functional source classification |
+| `country_alignment` | Local/regional or global/unknown |
+| `requested_retailer_match` | Candidate belongs to explicitly supplied retailer |
+| `manufacturer_match` | Candidate domain matches manufacturer/brand evidence |
+| `major_country_retailer` | Country-aligned merchant from a product-oriented surface |
+| `marketplace` | Amazon/eBay marketplace marker |
+| `source_priority_reason` | Reason for the assigned tier |
+| `higher_priority_tier_exhausted` | Whether a stronger viable source remained |
+| `selected_within_tier` | Best candidate within its own tier |
+
+## Remaining `results_df` field groups
 
 | Group | Important fields |
 |---|---|
 | URL identity | `canonical_url`, `requested_url`, `final_url`, `domain` |
-| Search support | engine/credit markers, appearance count, best position and title |
+| Search support | engine/credit markers, appearance count and position |
 | Admission | `url_type`, `preflight_score`, `admitted_for_scrape`, `admission_reason` |
 | Acquisition | `full_scrape_attempted`, `fetch_success`, `content_extracted`, `technical_scrapable` |
 | Evidence quality | `product_page_likelihood`, `content_utility_score`, `scrape_accepted` |
@@ -127,7 +139,7 @@ data/artifacts/<row_id>/candidates.csv
 | Browser | admission, turns, actions and outcome |
 | Final RCA | terminal status, rejection category and selection |
 
-Feature-specific scalar columns are created dynamically:
+Feature-specific columns are created dynamically:
 
 ```text
 feature_<feature_id>_value
@@ -135,17 +147,30 @@ feature_<feature_id>_status
 feature_<feature_id>_confidence
 ```
 
+## Selection interpretation
+
+A lower source tier does not rescue a wrong product. The order is:
+
+```text
+exact product identity
+→ usable product-detail page
+→ source authority
+→ confidence/richness within the source tier
+```
+
+A lower-tier URL is selected only after higher tiers were absent or failed mandatory product/evidence gates.
+
 ## Scrape semantics
 
-The stable notebook field `scrape_success` means **evidence-quality accepted**, not merely HTTP success.
+The notebook field `scrape_success` means **evidence-quality accepted**, not merely HTTP success.
 
 | Field | Meaning |
 |---|---|
 | `fetch_success` | Acquisition operation succeeded |
 | `content_extracted` | Readable content was obtained |
 | `technical_scrapable` | Technical scrape checks passed |
-| `product_page_likelihood` | Evidence for an individual product detail page |
-| `content_utility_score` | Usefulness for product identity and feature evidence |
+| `product_page_likelihood` | Evidence for an individual product page |
+| `content_utility_score` | Usefulness for identity and feature evidence |
 | `scrape_accepted` | Accepted for downstream reasoning |
 
 ## Graphical EDA
@@ -153,61 +178,51 @@ The stable notebook field `scrape_success` means **evidence-quality accepted**, 
 Separate charts show:
 
 - SerpAPI credit allocation by engine;
-- engine result, candidate, qualification and scrape yield;
+- source-authority tier targeted by each credit;
+- engine result/candidate/qualification/scrape yield;
 - best candidate confidence after each credit;
 - overall conversion funnel;
-- per-credit yield;
-- candidate outcome distribution;
-- confidence and feature coverage;
-- domain contribution;
-- rejection reasons;
+- candidate outcomes, confidence and feature coverage;
+- domain contribution and rejection reasons;
 - URL-feature support heatmap.
 
-## Search and candidate RCA
+## RCA questions answered
 
-The notebook makes these questions directly answerable:
-
-1. Which engine did the LLM choose for each credit, and why?
-2. Did the result produce direct URLs, a product token, an image or only weak candidates?
-3. How many new canonical URLs were produced?
-4. How many passed pre-scrape admission?
-5. How many were scraped and evidence-quality accepted?
-6. Did the current best URL become a validated working URL?
-7. Why was another credit spent or why did the search stop early?
-8. Why was each candidate selected or rejected?
+1. Which source tier was targeted for each credit?
+2. Why was that engine selected for the tier?
+3. Were manufacturer or requested-retailer pages found?
+4. Why did the process move to a lower tier?
+5. How many candidates were scraped and evidence-quality accepted per tier?
+6. Were Amazon/eBay considered only after stronger sources?
+7. Why did the chosen URL outrank the alternatives?
+8. Why did a candidate fail identity, scrape, browser or feature gates?
 
 ## Export
 
-The export cell writes:
+The workbook is written to:
 
 ```text
 data/artifacts/<row_id>/single_product_diagnostics.xlsx
 ```
 
-The workbook includes the original candidate/browser/feature sheets and these adaptive search sheets:
+It includes:
 
 ```text
 adaptive_actions
 engine_summary
 search_handles
 search_rca
+source_hierarchy
+source_tier_summary
 ```
 
-The run also writes:
-
-```text
-adaptive_search_trace.json
-serp_credit_01_<engine>_raw.json
-serp_credit_02_<engine>_raw.json
-serp_credit_03_<engine>_raw.json
-```
-
-Only raw files for credits actually used are created.
+The run also writes `adaptive_search_trace.json` and raw response files for only the SerpAPI credits actually used.
 
 `COMPLETED` and `REVIEW_REQUIRED` are successful terminal states. `REVIEW_REQUIRED` means no URL passed every mandatory gate. Only `FAILED` is an execution failure.
 
 See:
 
 - `docs/ADAPTIVE_SERPAPI_SEARCH.md`
+- `docs/SOURCE_AUTHORITY_HIERARCHY.md`
 - `docs/CANDIDATE_PRECISION_AND_CONTEXT.md`
 - `docs/SINGLE_PRODUCT_DIAGNOSTICS.md`
