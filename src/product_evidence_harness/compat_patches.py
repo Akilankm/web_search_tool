@@ -72,31 +72,18 @@ def apply_compatibility_patches() -> None:
     LivePageOfflineArtifactBuilder._remove_network_primitives = _remove_network_primitives  # type: ignore[method-assign]
     LivePageOfflineArtifactBuilder._role_directory = _role_directory  # type: ignore[method-assign]
 
-    from src.product_evidence_harness.precision_search_runtime import (
-        apply_precision_search_patches,
-    )
-    from src.product_evidence_harness.precision_browser_runtime import (
-        apply_precision_browser_patches,
-    )
-    from src.product_evidence_harness.precision_hardening import (
-        apply_precision_hardening,
-    )
-    from src.product_evidence_harness.precision_selection_hardening import (
-        apply_precision_selection_hardening,
-    )
-    from src.product_evidence_harness.precision_terminal_hardening import (
-        apply_precision_terminal_hardening,
-    )
-    from src.product_evidence_harness.notebook_candidate_bridge import (
-        apply_notebook_candidate_bridge,
-    )
-    from src.product_evidence_harness.adaptive_search_runtime import (
-        apply_adaptive_search_runtime_patch,
-    )
+    from src.product_evidence_harness.precision_search_runtime import apply_precision_search_patches
+    from src.product_evidence_harness.precision_browser_runtime import apply_precision_browser_patches
+    from src.product_evidence_harness.precision_hardening import apply_precision_hardening
+    from src.product_evidence_harness.precision_selection_hardening import apply_precision_selection_hardening
+    from src.product_evidence_harness.precision_terminal_hardening import apply_precision_terminal_hardening
+    from src.product_evidence_harness.notebook_candidate_bridge import apply_notebook_candidate_bridge
+    from src.product_evidence_harness.adaptive_search_runtime import apply_adaptive_search_runtime_patch
     from src.product_evidence_harness.adaptive_injected_client_compat import (
         capture_pre_adaptive_run,
         install_injected_client_compatibility,
     )
+    from src.product_evidence_harness.source_authority_runtime import apply_source_authority_patches
 
     apply_precision_search_patches()
     apply_precision_browser_patches()
@@ -105,18 +92,11 @@ def apply_compatibility_patches() -> None:
     apply_precision_terminal_hardening()
     apply_notebook_candidate_bridge()
 
-    # Capture the precision-gated fixed runner for programmatic clients that
-    # inject only a legacy ``organic_client.search`` implementation.
     capture_pre_adaptive_run()
-    # Production construction uses the adaptive multi-engine runtime.
     apply_adaptive_search_runtime_patch()
-    # Explicit adaptive planner/router injection still selects adaptive mode;
-    # only legacy custom organic clients receive the compatibility runner.
+    apply_source_authority_patches()
     install_injected_client_compatibility()
 
-    # The historical package uses both ``product_evidence_harness`` and
-    # ``src.product_evidence_harness`` imports. Alias every patched module so both
-    # names resolve to the same class objects instead of creating duplicate trees.
     aliases = {
         "query_builder": "src.product_evidence_harness.query_builder",
         "offline_capture": "src.product_evidence_harness.offline_capture",
@@ -127,6 +107,8 @@ def apply_compatibility_patches() -> None:
         "adaptive_search": "src.product_evidence_harness.adaptive_search",
         "adaptive_search_runtime": "src.product_evidence_harness.adaptive_search_runtime",
         "adaptive_injected_client_compat": "src.product_evidence_harness.adaptive_injected_client_compat",
+        "source_authority": "src.product_evidence_harness.source_authority",
+        "source_authority_runtime": "src.product_evidence_harness.source_authority_runtime",
     }
     for short_name, source_name in aliases.items():
         module = sys.modules.get(source_name)
