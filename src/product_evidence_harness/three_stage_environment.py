@@ -39,6 +39,7 @@ class ThreeStageEnvironmentValidationReport:
     allowed_search_engines: tuple[str, ...]
     llm_search_planning_enabled: bool
     llm_search_feedback_enabled: bool
+    max_llm_calls_per_product: int
     agentic_browser_enabled: bool
     agentic_browser_required: bool
     agentic_browser_contract_enforced: bool
@@ -70,6 +71,7 @@ def validate_runtime_environment(
         "engines": DEFAULT_ALLOWED_ENGINES,
         "planning": True,
         "feedback": True,
+        "llm_calls": 6,
     }
 
     agentic_enabled = _strict_bool(
@@ -86,13 +88,17 @@ def validate_runtime_environment(
 
     # The legacy validator still owns credential, permission and security checks.
     # Present it with a one-credit compatibility view so it does not reject the
-    # new adaptive planning flags as obsolete expansive-search controls.
+    # adaptive planner or its six-call per-product budget. The adaptive validator
+    # above remains authoritative for the real production LLM-call ceiling.
     compatibility_values = dict(values)
     compatibility_values["PRODUCT_HARNESS_WORKFLOW"] = "one_credit_feature_aware"
     compatibility_values["PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES"] = "1"
     compatibility_values["PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES"] = "0"
     compatibility_values["PRODUCT_HARNESS_ENABLE_LLM_SEARCH_PLANNING"] = "false"
     compatibility_values["PRODUCT_HARNESS_ENABLE_LLM_SEARCH_FEEDBACK"] = "false"
+    compatibility_values["PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT"] = str(
+        min(4, int(adaptive["llm_calls"]))
+    )
     if agentic_enabled:
         compatibility_values["PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING"] = "true"
 
@@ -110,6 +116,7 @@ def validate_runtime_environment(
     ) + (
         "adaptive_three_credit_multi_engine_search_validated",
         "llm_search_planner_and_feedback_validated",
+        "adaptive_llm_call_budget_validated",
         "precision_and_acceptance_controls_validated",
         "llm_agentic_browser_context_budget_validated",
     )
@@ -150,6 +157,7 @@ def validate_runtime_environment(
         allowed_search_engines=tuple(adaptive["engines"]),
         llm_search_planning_enabled=bool(adaptive["planning"]),
         llm_search_feedback_enabled=bool(adaptive["feedback"]),
+        max_llm_calls_per_product=int(adaptive["llm_calls"]),
         agentic_browser_enabled=agentic_enabled,
         agentic_browser_required=agentic_required,
         agentic_browser_contract_enforced=bool(
@@ -278,12 +286,20 @@ def _enforce_adaptive_settings(values: Mapping[str, str]) -> dict[str, object]:
     _strict_int(values, "PRODUCT_HARNESS_AGENTIC_MAX_IMAGES", 8, minimum=2, maximum=50)
     _strict_int(values, "PRODUCT_HARNESS_MAX_FULL_SCRAPES", 6, minimum=1, maximum=12)
     _strict_int(values, "PRODUCT_HARNESS_MAX_SCRAPES_PER_DOMAIN", 2, minimum=1, maximum=4)
+    llm_calls = _strict_int(
+        values,
+        "PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT",
+        6,
+        minimum=0,
+        maximum=6,
+    )
     _strict_float(values, "PRODUCT_HARNESS_MIN_PREFLIGHT_SCORE", 0.28, minimum=0.05, maximum=0.95)
     return {
         "credits": credits,
         "engines": engines,
         "planning": planning,
         "feedback": feedback,
+        "llm_calls": llm_calls,
     }
 
 
