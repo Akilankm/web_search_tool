@@ -32,6 +32,7 @@ def _base_env() -> str:
             "PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES=0",
             "PRODUCT_HARNESS_SERP_RESULTS=100",
             "PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING=false",
+            "PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT=6",
             "PRODUCT_HARNESS_COUNTRY_FIRST=true",
             "PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK=true",
             "PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE=true",
@@ -72,6 +73,8 @@ def test_valid_environment_returns_secret_free_adaptive_report(tmp_path: Path) -
     assert report.serpapi_request_limit == 3
     assert report.llm_search_planning_enabled is True
     assert report.llm_search_feedback_enabled is True
+    assert report.max_llm_calls_per_product == 6
+    assert "adaptive_llm_call_budget_validated" in report.checks_passed
     assert "google_shopping" in report.allowed_search_engines
     assert "google_immersive_product" in report.allowed_search_engines
     assert report.agentic_browser_enabled is True
@@ -83,6 +86,18 @@ def test_valid_environment_returns_secret_free_adaptive_report(tmp_path: Path) -
     assert report.max_agentic_actions_per_candidate == 6
     assert "serp_live_" not in rendered
     assert "llm_key_" not in rendered
+
+
+def test_adaptive_llm_call_budget_above_six_is_rejected(tmp_path: Path) -> None:
+    env_file = _write_env(
+        tmp_path / ".env",
+        _base_env().replace(
+            "PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT=6",
+            "PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT=7",
+        ),
+    )
+    with pytest.raises(EnvironmentValidationError, match="between 0 and 6"):
+        validate_runtime_environment(env_file, environ={})
 
 
 def test_placeholder_serpapi_key_is_rejected(tmp_path: Path) -> None:
