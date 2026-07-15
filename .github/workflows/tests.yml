@@ -65,6 +65,7 @@ jobs:
             tests/test_serp_harvester.py \
             tests/test_adaptive_search.py \
             tests/test_source_authority_hierarchy.py \
+            tests/test_mandatory_product_url_policy.py \
             tests/test_adaptive_notebook_diagnostics.py \
             tests/test_notebook_result_contract.py \
             tests/test_one_credit_feature_workflow.py \
