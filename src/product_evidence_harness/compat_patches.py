@@ -99,6 +99,7 @@ def apply_compatibility_patches() -> None:
         "candidate_store": "src.product_evidence_harness.candidate_store",
         "candidate_precision": "src.product_evidence_harness.candidate_precision",
         "candidate_reporting": "src.product_evidence_harness.candidate_reporting",
+        "ranker": "src.product_evidence_harness.ranker",
         "three_stage_environment": "src.product_evidence_harness.three_stage_environment",
         "adaptive_search": "src.product_evidence_harness.adaptive_search",
         "adaptive_search_runtime": "src.product_evidence_harness.adaptive_search_runtime",
@@ -106,8 +107,15 @@ def apply_compatibility_patches() -> None:
         "source_authority": "src.product_evidence_harness.source_authority",
         "source_authority_runtime": "src.product_evidence_harness.source_authority_runtime",
         "source_authority_reporting": "src.product_evidence_harness.source_authority_reporting",
+        "source_authority_compatibility": "src.product_evidence_harness.source_authority_compatibility",
     }
     for short_name, source_name in aliases.items():
         module = sys.modules.get(source_name)
         if module is not None:
             sys.modules[f"product_evidence_harness.{short_name}"] = module
+
+    from src.product_evidence_harness.source_authority_compatibility import (
+        apply_source_authority_compatibility,
+    )
+
+    apply_source_authority_compatibility()
