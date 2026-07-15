@@ -80,7 +80,6 @@ def apply_compatibility_patches() -> None:
     from src.product_evidence_harness.adaptive_injected_client_compat import capture_pre_adaptive_run, install_injected_client_compatibility
     from src.product_evidence_harness.source_authority_runtime import apply_source_authority_patches
     from src.product_evidence_harness.source_authority_reporting import apply_source_authority_reporting_patch
-    from src.product_evidence_harness.source_authority_notebook import apply_source_authority_notebook_patch
 
     apply_precision_search_patches()
     apply_precision_browser_patches()
@@ -92,7 +91,6 @@ def apply_compatibility_patches() -> None:
     apply_adaptive_search_runtime_patch()
     apply_source_authority_patches()
     apply_source_authority_reporting_patch()
-    apply_source_authority_notebook_patch()
     install_injected_client_compatibility()
 
     aliases = {
@@ -108,7 +106,6 @@ def apply_compatibility_patches() -> None:
         "source_authority": "src.product_evidence_harness.source_authority",
         "source_authority_runtime": "src.product_evidence_harness.source_authority_runtime",
         "source_authority_reporting": "src.product_evidence_harness.source_authority_reporting",
-        "source_authority_notebook": "src.product_evidence_harness.source_authority_notebook",
     }
     for short_name, source_name in aliases.items():
         module = sys.modules.get(source_name)
