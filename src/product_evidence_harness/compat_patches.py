@@ -102,6 +102,7 @@ def apply_compatibility_patches() -> None:
         "candidate_precision": "src.product_evidence_harness.candidate_precision",
         "candidate_reporting": "src.product_evidence_harness.candidate_reporting",
         "ranker": "src.product_evidence_harness.ranker",
+        "selector": "src.product_evidence_harness.selector",
         "three_stage_environment": "src.product_evidence_harness.three_stage_environment",
         "adaptive_search": "src.product_evidence_harness.adaptive_search",
         "adaptive_search_runtime": "src.product_evidence_harness.adaptive_search_runtime",
