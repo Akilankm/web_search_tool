@@ -4,11 +4,7 @@ import json
 from dataclasses import replace
 from typing import Sequence
 
-from src.product_evidence_harness.adaptive_search import (
-    BudgetAwareSearchPlanner,
-    SearchAction,
-    SearchEngine,
-)
+from src.product_evidence_harness.adaptive_search import BudgetAwareSearchPlanner, SearchAction, SearchEngine
 from src.product_evidence_harness.contracts import ProductQuery, URLCandidate
 from src.product_evidence_harness.ranker import ProductURLRanker
 from src.product_evidence_harness.selector import FinalSelector
@@ -17,7 +13,7 @@ from src.product_evidence_harness.source_authority import (
     SourceTier,
     marketplace_name,
     source_tier,
-    source_tier_name,
+    tier_from_signals,
 )
 from src.product_evidence_harness.three_stage_pipeline import ThreeStageProductEvidenceHarness
 
@@ -54,16 +50,15 @@ def _engine_allowed(engine: str, target: str) -> bool:
 
 
 def _hierarchy_action(
-    planner: BudgetAwareSearchPlanner,
     product: ProductQuery,
     target: str,
     available_engines: Sequence[str],
     reason: str,
 ) -> SearchAction:
     native = ""
-    requested = (product.retailer_name or "").lower()
+    requested = (product.retailer_name or "").lower().replace(" ", "")
     for name in ("amazon", "ebay", "walmart", "home_depot"):
-        if name.replace("_", "") in requested.replace(" ", "") and name in available_engines:
+        if name.replace("_", "") in requested and name in available_engines:
             native = name
             break
     if target.startswith("REQUESTED_RETAILER") and native:
@@ -108,7 +103,7 @@ def apply_source_authority_patches() -> None:
             "hierarchy": list(policy.hierarchy(product)),
             "current_target_tier": target,
             "amazon_ebay_last_resort": not bool(product.retailer_name and marketplace_name(product.retailer_name)),
-            "selection_rule": "Among exact working URLs, the lower source tier wins before richness or confidence.",
+            "selection_rule": "Among exact working URLs, lower source tier wins before richness or confidence.",
         }
         payload["rules"] = [
             f"Target source tier {target}; do not route to a lower tier while this tier is unresolved.",
@@ -131,7 +126,7 @@ def apply_source_authority_patches() -> None:
         )
         available = self._available_engines(product, handles)
         if not _engine_allowed(action.engine, target):
-            action = _hierarchy_action(self, product, target, available, "The proposed engine did not match the target tier.")
+            action = _hierarchy_action(product, target, available, "The proposed engine did not match the target tier.")
         signals = tuple(item for item in action.expected_signals if not str(item).startswith("SOURCE_TIER:"))
         return replace(
             action,
@@ -143,7 +138,6 @@ def apply_source_authority_patches() -> None:
         target = getattr(self, "_source_authority_target", policy.next_target(product, observations))
         try:
             return _hierarchy_action(
-                self,
                 product,
                 target,
                 available_engines,
@@ -208,6 +202,7 @@ def apply_source_authority_patches() -> None:
 
     import src.product_evidence_harness.adaptive_search_runtime as adaptive_runtime
     original_working = adaptive_runtime._working_url_found
+    original_write = adaptive_runtime._write_adaptive_artifacts
 
     def hierarchy_working(self, match):
         if not original_working(self, match):
@@ -219,15 +214,52 @@ def apply_source_authority_patches() -> None:
             retailer_name=match.retailer_name,
             ean=match.ean,
         )
-        candidate = URLCandidate(url=match.product_url, title=match.main_text)
-        decision = policy.classify(product, candidate)
-        early_tiers = {
+        decision = policy.classify(
+            product,
+            URLCandidate(url=match.product_url, title=match.main_text),
+        )
+        return decision.source_tier in {
             int(SourceTier.REQUESTED_RETAILER_LOCAL),
             int(SourceTier.REQUESTED_RETAILER_GLOBAL),
             int(SourceTier.LOCAL_MANUFACTURER),
             int(SourceTier.GLOBAL_MANUFACTURER),
         }
-        return decision.source_tier in early_tiers
+
+    def write_artifacts(root, **kwargs):
+        trace = kwargs.get("trace") or []
+        product = kwargs["product"]
+        for row in trace:
+            target = tier_from_signals(row.get("expected_signals") or ())
+            row["target_source_tier"] = target or "UNKNOWN"
+        original_write(root, **kwargs)
+        result_path = root / "result.json"
+        payload = json.loads(result_path.read_text(encoding="utf-8"))
+        search = payload.setdefault("search", {})
+        search.update(
+            {
+                "source_authority_hierarchy_enforced": True,
+                "requested_retailer_override": bool(product.retailer_name),
+                "source_hierarchy": list(policy.hierarchy(product)),
+                "amazon_ebay_last_resort": not bool(product.retailer_name and marketplace_name(product.retailer_name)),
+                "target_source_tiers": [row.get("target_source_tier") for row in trace],
+            }
+        )
+        result_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str) + "\n", encoding="utf-8")
+        trace_path = root / "adaptive_search_trace.json"
+        if trace_path.is_file():
+            trace_payload = json.loads(trace_path.read_text(encoding="utf-8"))
+            trace_payload["search"] = search
+            trace_path.write_text(json.dumps(trace_payload, indent=2, ensure_ascii=False, default=str) + "\n", encoding="utf-8")
+        review_path = root / "review.md"
+        if review_path.is_file():
+            review_path.write_text(
+                review_path.read_text(encoding="utf-8")
+                + "\n## Source-authority hierarchy\n\n"
+                + " → ".join(policy.hierarchy(product))
+                + "\n\nAmazon and eBay are last resort unless explicitly requested.\n",
+                encoding="utf-8",
+            )
 
     adaptive_runtime._working_url_found = hierarchy_working
+    adaptive_runtime._write_adaptive_artifacts = write_artifacts
     BudgetAwareSearchPlanner._source_authority_applied = True
