@@ -10,15 +10,38 @@ The credits are **three adaptive decisions**, not three predefined organic searc
 
 ```text
 product identity
-→ LLM selects one SerpAPI engine and query
+→ determine highest unresolved source-authority tier
+→ LLM selects one suitable SerpAPI engine and query
 → normalize direct URLs, product tokens, IDs and images
 → precision-gated scrape and exact-product validation
-→ stop when a working URL is found, otherwise replan with remaining credits
+→ stop when a strong working URL is found, otherwise replan
 ```
 
 The LLM may choose Google Search, Google Shopping, Google AI Mode, Google Immersive Product, Google Lens, or a supported retailer-native engine. Deterministic code enforces the budget, validates action parameters, prevents duplicate searches, rejects weak URLs before scraping, and remains authoritative for final URL acceptance.
 
-See [Adaptive three-credit SerpAPI search](docs/ADAPTIVE_SERPAPI_SEARCH.md), [Candidate precision and context control](docs/CANDIDATE_PRECISION_AND_CONTEXT.md), and [Agentic browser](docs/AGENTIC_BROWSER.md).
+See [Adaptive three-credit SerpAPI search](docs/ADAPTIVE_SERPAPI_SEARCH.md), [Standardized source-authority hierarchy](docs/SOURCE_AUTHORITY_HIERARCHY.md), [Candidate precision and context control](docs/CANDIDATE_PRECISION_AND_CONTEXT.md), and [Agentic browser](docs/AGENTIC_BROWSER.md).
+
+## Standardized source hierarchy
+
+When `retailer_name` is supplied, that retailer receives first priority. Otherwise the internal standard is:
+
+```text
+Local/regional manufacturer website
+→ Global manufacturer website
+→ Major retailer in the requested country
+→ Other local website
+→ Other global exact-product website
+→ Amazon/eBay last resort
+```
+
+Amazon or eBay receive first priority only when explicitly supplied as `retailer_name`.
+
+The hierarchy applies twice:
+
+1. **Search routing:** each credit targets the highest unresolved source tier before choosing an engine.
+2. **Final selection:** among exact working URLs, source tier outranks richness or confidence differences.
+
+A valid manufacturer URL therefore outranks a richer Amazon/eBay URL unless the marketplace was explicitly requested.
 
 ## One-command Azure ML bootstrap
 
@@ -71,14 +94,14 @@ PRODUCT_HARNESS_SEARCH_PLANNER_MAX_CANDIDATES=8
 
 | Engine | Role |
 |---|---|
-| `google` | Exact EAN/model and direct product-page recovery |
-| `google_shopping` | Product identity, merchant results and product-token discovery |
+| `google` | Requested retailer, manufacturer, exact EAN/model and direct-page recovery |
+| `google_shopping` | Major local retailer/product identity and merchant discovery |
 | `google_immersive_product` | Expand a product token into direct store URLs |
-| `google_ai_mode` | Resolve ambiguity and collect cited/shopping URLs |
+| `google_ai_mode` | Resolve manufacturer/product ambiguity and collect cited URLs |
 | `google_lens` | Visual matching when a real product image is available |
-| `amazon`, `ebay`, `walmart`, `home_depot` | Requested-retailer native discovery |
+| `amazon`, `ebay`, `walmart`, `home_depot` | Requested-retailer native discovery only |
 
-Immersive Product is available to the planner only after a real token is returned. Lens is available only after a real image URL is returned. Retailer-native engines are exposed only when the requested retailer matches.
+Immersive Product is available only after a real token is returned. Lens is available only after a real image URL is returned. Retailer-native engines are exposed only when the requested retailer matches.
 
 ## Precision-gated acquisition
 
@@ -87,6 +110,7 @@ All engine responses enter one canonical candidate pool:
 ```text
 raw result occurrence
 → canonical URL
+→ source-authority classification
 → URL-type and product-identity admission
 → bounded full scrape
 → evidence-utility validation
@@ -151,6 +175,21 @@ Two table grains are preserved intentionally:
 - `search.serp_results` / `serp_results_df`: one row per result occurrence from every engine and credit;
 - `candidate_records` / `candidate_url_records.json` / `candidates.csv` / `results_df`: one row per canonical URL.
 
+Every candidate row includes source authority fields such as:
+
+```text
+source_tier
+source_tier_name
+source_role
+country_alignment
+requested_retailer_match
+manufacturer_match
+major_country_retailer
+marketplace
+higher_priority_tier_exhausted
+selected_within_tier
+```
+
 Every canonical URL ends with one explicit RCA status such as:
 
 ```text
@@ -174,16 +213,18 @@ The supported notebook exposes:
 | DataFrame | Purpose |
 |---|---|
 | `search_actions_df` | One row per paid adaptive credit and LLM decision |
+| `source_hierarchy_df` | Target source tier, engine and outcome per credit |
 | `search_engine_summary_df` | Per-engine yield and conversion |
 | `search_handles_df` | Product tokens, IDs and image handles |
-| `search_decision_rca_df` | Budget, planner fallback and stop RCA |
+| `search_decision_rca_df` | Budget, hierarchy, planner fallback and stop RCA |
 | `serp_results_df` | Raw cross-engine result occurrences |
-| `results_df` | One row per canonical candidate URL |
+| `results_df` | One row per canonical candidate URL with source authority |
+| `source_tier_summary_df` | Candidate/scrape/identity/selection conversion by tier |
 | `funnel_df` | Search-to-selection conversion |
 | `rejection_reasons_df` | Normalized candidate blockers |
 | `selection_rca_df` | Final primary-URL decision |
 
-Charts show engine credit allocation, engine candidate yield, best-candidate confidence after each credit, candidate funnel, source quality, rejection reasons and feature coverage.
+Charts show engine credit allocation, source-tier routing, engine candidate yield, best-candidate confidence after each credit, candidate funnel, source quality, rejection reasons and feature coverage.
 
 The Excel workbook is written to:
 
@@ -235,6 +276,7 @@ docker compose config --quiet
 ## Documentation
 
 - [Adaptive three-credit SerpAPI search](docs/ADAPTIVE_SERPAPI_SEARCH.md)
+- [Standardized source-authority hierarchy](docs/SOURCE_AUTHORITY_HIERARCHY.md)
 - [Candidate precision and context control](docs/CANDIDATE_PRECISION_AND_CONTEXT.md)
 - [Notebook usage and diagnostic contract](docs/NOTEBOOK_USAGE.md)
 - [Single-product diagnostic interpretation](docs/SINGLE_PRODUCT_DIAGNOSTICS.md)
