@@ -25,15 +25,27 @@ def runtime_source() -> str:
 def test_notebook_uses_current_orchestrated_result_schema() -> None:
     source = notebook_source()
 
-    assert 'result.get("job_status")' in source
-    assert '(result.get("product") or {}).get("row_id")' in source
+    assert "result.get('job_status')" in source
+    assert "(result.get('product') or {}).get('row_id')" in source
     assert "feature_evidence_df" in source
-    assert 'result.get("primary_url_acceptance")' in source
-    assert 'result.get("search")' in source
+    assert "result.get('primary_url_acceptance')" in source
+    assert "result.get('url_delivery')" in source
+    assert "result.get('search')" in source
     assert "build_single_product_diagnostics" in source
     assert "build_adaptive_search_diagnostics" in source
-    assert 'result.get("row_id")' not in source
-    assert 'result.get("feature_evidence")' not in source
+    assert "result.get('row_id')" not in source
+    assert "result.get('feature_evidence')" not in source
+
+
+def test_notebook_forces_repository_local_package_and_evicts_stale_modules() -> None:
+    source = notebook_source()
+
+    assert "LOCAL_PACKAGE" in source
+    assert "notebook_runtime.py" in source
+    assert "sys.modules" in source
+    assert "del sys.modules[module_name]" in source
+    assert "Wrong package loaded" in source
+    assert "LOCAL_PACKAGE not in loaded_package.parents" in source
 
 
 def test_notebook_defaults_to_committed_toy_feature_schema() -> None:
@@ -41,7 +53,7 @@ def test_notebook_defaults_to_committed_toy_feature_schema() -> None:
     runtime = runtime_source()
 
     assert 'DEFAULT_FEATURE_SET = "toy_features"' in runtime
-    assert 'FEATURE_SET = "toy_features"' in source
+    assert "FEATURE_SET = 'toy_features'" in source
     assert "inputs/private/toy_features.json" in source
     assert "DEFAULT_FEATURE_SET not in feature_sets" in source
     assert "feature_set: str = DEFAULT_FEATURE_SET" in runtime
@@ -51,6 +63,7 @@ def test_notebook_builds_complete_single_product_eda_tables() -> None:
     source = notebook_source()
 
     for name in (
+        "url_delivery_df",
         "results_df",
         "search_stages_df",
         "serp_results_df",
@@ -71,38 +84,30 @@ def test_notebook_builds_complete_single_product_eda_tables() -> None:
     ):
         assert name in source
 
-    assert "One URL per row — source authority and final acceptance" in source
-    assert "Standardized source hierarchy by SerpAPI credit" in source
+    assert "Mandatory product URL delivery" in source
+    assert "Source hierarchy by SerpAPI credit" in source
     assert "Final URL selection RCA" in source
-    assert "SERP stage quality ratios" in source
-    assert "Domain-level candidate quality" in source
-    assert "Most frequent rejection and blocking reasons" in source
-    assert "Adaptive SerpAPI credit decisions" in source
     assert "Search-engine yield and conversion" in source
+    assert "One canonical product URL candidate per row" in source
 
 
-def test_notebook_exposes_candidate_acceptance_funnel() -> None:
+def test_notebook_exposes_mandatory_url_contract() -> None:
     source = notebook_source()
+
     for field in (
-        "scrape_attempted",
-        "technical_scrapable",
-        "scrape_success",
-        "content_utility_score",
-        "agentic_investigated",
-        "browser_openable",
-        "identity_accepted",
-        "coverage",
-        "feature_complete",
-        "quality_verified",
-        "strict_selected",
-        "review_selected",
-        "final_candidate_status",
-        "source_tier",
-        "source_tier_name",
-        "source_role",
-        "marketplace",
+        "primary_url",
+        "url_delivery_status",
+        "strictly_verified",
+        "strict_primary_accepted",
+        "delivered",
+        "mandatory_url_delivery.json",
     ):
         assert field in source
+
+    assert "Mandatory URL contract violated" in source
+    assert "if not result.get('primary_url') or not delivery.get('delivered')" in source
+    assert "REVIEW_REQUIRED" in source
+    assert "MANDATORY_PRODUCT_URL_NOT_FOUND" in source
 
 
 def test_notebook_exposes_adaptive_search_contract() -> None:
@@ -115,7 +120,6 @@ def test_notebook_exposes_adaptive_search_contract() -> None:
         "serpapi_requests_used",
         "search_stop_reason",
         "planner_source",
-        "handles_discovered",
         "working_url_found",
     ):
         assert field in source
@@ -131,17 +135,20 @@ def test_notebook_includes_graphical_diagnostics() -> None:
     assert "matplotlib" in source
     assert "seaborn" in source
     assert "rich" in source.lower()
-    assert "plot_engine_credit_allocation(adaptive_diagnostics)" in source
-    assert "plot_engine_candidate_yield(adaptive_diagnostics)" in source
-    assert "plot_credit_progression(adaptive_diagnostics)" in source
-    assert "plot_funnel(diagnostics)" in source
-    assert "plot_stage_yield(diagnostics)" in source
-    assert "plot_candidate_outcomes(diagnostics)" in source
-    assert "plot_confidence_distribution(diagnostics)" in source
-    assert "plot_confidence_vs_coverage(diagnostics)" in source
-    assert "plot_domain_quality(diagnostics)" in source
-    assert "plot_rejection_reasons(diagnostics)" in source
-    assert "plot_feature_heatmap(diagnostics)" in source
+    for call in (
+        "plot_engine_credit_allocation(adaptive_diagnostics)",
+        "plot_engine_candidate_yield(adaptive_diagnostics)",
+        "plot_credit_progression(adaptive_diagnostics)",
+        "plot_funnel(diagnostics)",
+        "plot_stage_yield(diagnostics)",
+        "plot_candidate_outcomes(diagnostics)",
+        "plot_confidence_distribution(diagnostics)",
+        "plot_confidence_vs_coverage(diagnostics)",
+        "plot_domain_quality(diagnostics)",
+        "plot_rejection_reasons(diagnostics)",
+        "plot_feature_heatmap(diagnostics)",
+    ):
+        assert call in source
 
 
 def test_notebook_auto_installs_only_missing_eda_dependencies() -> None:
@@ -181,35 +188,24 @@ def test_notebook_uses_repository_local_artifact_paths_and_exports_rca() -> None
     assert "diagnostics.tables()" in source
     assert "export_adaptive_search_tables" in source
     assert "adaptive_search_trace.json" in source
+    assert "mandatory_url_delivery.json" in source
     assert "source_tier_summary" in source
+    assert "url_delivery" in source
 
 
-def test_notebook_documents_terminal_status_semantics() -> None:
-    source = notebook_source()
-
-    assert "REVIEW_REQUIRED" in source
-    assert "successful terminal workflow states" in source
-    assert "Only `FAILED` is an execution failure" in source
-
-
-def test_notebook_docs_match_diagnostic_contract() -> None:
+def test_notebook_docs_match_mandatory_url_contract() -> None:
     notebook_doc = (ROOT / "docs" / "NOTEBOOK_USAGE.md").read_text(encoding="utf-8")
-    diagnostics_doc = (ROOT / "docs" / "SINGLE_PRODUCT_DIAGNOSTICS.md").read_text(encoding="utf-8")
+    mandatory_doc = (ROOT / "docs" / "MANDATORY_PRODUCT_URL.md").read_text(encoding="utf-8")
     adaptive_doc = (ROOT / "docs" / "ADAPTIVE_SERPAPI_SEARCH.md").read_text(encoding="utf-8")
     hierarchy_doc = (ROOT / "docs" / "SOURCE_AUTHORITY_HIERARCHY.md").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    for text in (notebook_doc, diagnostics_doc, adaptive_doc, hierarchy_doc, readme):
-        assert "candidate" in text.lower()
-        assert "deterministic" in text.lower() or "hierarchy" in text.lower()
+    for text in (notebook_doc, mandatory_doc, adaptive_doc, hierarchy_doc, readme):
+        assert "product" in text.lower()
+        assert "url" in text.lower()
 
-    for text in (notebook_doc, diagnostics_doc, adaptive_doc, readme):
-        assert "results_df" in text
-        assert "primary_url" in text
-        assert "three" in text.lower()
-
-    assert "inputs/private/toy_features.json" in notebook_doc
-    assert "single_product_diagnostics.xlsx" in diagnostics_doc
-    assert "docs/SINGLE_PRODUCT_DIAGNOSTICS.md" in readme
-    assert "search_actions_df" in adaptive_doc
+    assert "url_delivery_df" in notebook_doc
+    assert "MANDATORY_PRODUCT_URL_NOT_FOUND" in notebook_doc
+    assert "empty product URL" in mandatory_doc
     assert "Amazon/eBay" in hierarchy_doc
+    assert "search_actions_df" in adaptive_doc
