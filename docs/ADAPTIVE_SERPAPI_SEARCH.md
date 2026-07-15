@@ -2,155 +2,244 @@
 
 ## Objective
 
-The search subsystem has one operational goal:
-
-> Use at most three paid SerpAPI requests to obtain a direct, durable, exact-product URL that can pass live scrape and browser validation.
-
-The budget is not mapped to three predefined queries. Before every request, the LLM examines the evidence already obtained and chooses the next engine and parameters.
+Use at most three paid SerpAPI requests to obtain a direct, durable, exact-product URL that passes live scrape and browser validation **and** is the strongest available source under the internal source-authority hierarchy.
 
 ```text
 product identity
-→ LLM credit decision
-→ one SerpAPI engine call
+→ determine highest unresolved source tier
+→ LLM selects one suitable engine/query
+→ one SerpAPI request
 → normalize URLs, product tokens, IDs and images
+→ classify source authority
 → precision admission and bounded scraping
 → validate current best URL
-→ stop or plan the next credit
+→ stop or target the next unresolved tier
 ```
+
+## Standardized source hierarchy
+
+When `retailer_name` is supplied:
+
+```text
+Requested retailer in country
+→ Requested retailer outside country
+→ Local/regional manufacturer
+→ Global manufacturer
+→ Major country retailer
+→ Other local website
+→ Other global website
+→ Amazon/eBay last resort
+```
+
+Without `retailer_name`:
+
+```text
+Local/regional manufacturer
+→ Global manufacturer
+→ Major country retailer
+→ Other local website
+→ Other global website
+→ Amazon/eBay last resort
+```
+
+Amazon or eBay receive first priority only when explicitly requested.
+
+See [SOURCE_AUTHORITY_HIERARCHY.md](SOURCE_AUTHORITY_HIERARCHY.md).
 
 ## Hard guarantees
 
 - Maximum successful SerpAPI requests per product: **3**.
 - One action is selected per credit.
+- Each action records `target_source_tier`.
 - Duplicate engine/query/token/image actions are blocked.
-- Tokens, image URLs, product IDs and direct links must come from real SerpAPI responses.
-- Google/SerpAPI intermediary links are never accepted as the final product URL.
-- Every direct or derived URL must pass the existing live scrape, identity, durability and browser gates.
-- The workflow may stop after credit 1 or 2 when a verified working URL is already available.
+- Tokens, image URLs, product IDs and direct links must originate from actual SerpAPI responses.
+- Google/SerpAPI intermediary links are never accepted as the final URL.
+- Every direct or derived URL must pass live scrape, identity, durability and browser gates.
+- Source authority is applied after mandatory exact-product validity.
+- A lower-tier URL cannot outrank a valid higher-tier URL merely because it is richer.
+- Amazon/eBay do not trigger early stopping unless explicitly requested.
 
 ## Supported engines
 
 | Engine | Primary role |
 |---|---|
-| `google` | Exact EAN/model search and direct product-page recovery |
-| `google_shopping` | Commercial product resolution, merchant results and product-token discovery |
+| `google` | Requested retailer, manufacturer, EAN/model and direct-page recovery |
+| `google_shopping` | Major country retailers, merchant URLs and product-token discovery |
 | `google_immersive_product` | Expand a Shopping token into direct store product URLs |
-| `google_ai_mode` | Resolve ambiguity and harvest cited/shopping URLs |
+| `google_ai_mode` | Resolve manufacturer/product ambiguity and collect cited URLs |
 | `google_lens` | Visual product matching when a real image handle is available |
 | `amazon` | Requested-retailer native Amazon search |
 | `ebay` | Requested-retailer native eBay search |
 | `walmart` | Requested-retailer native Walmart search |
 | `home_depot` | Requested-retailer native Home Depot search |
 
-The planner does not expose retailer-native engines unless the requested retailer matches that engine. It does not expose Immersive Product without a real page token and does not expose Lens without a real image URL.
+Retailer-native engines are exposed only when the requested retailer matches. Immersive Product requires an actual token. Lens requires an actual image URL.
+
+## How engine routing is identified
+
+The business source tier is selected before the technical engine:
+
+```text
+source tier target
+→ suitable engine subset
+→ LLM engine/query decision
+→ deterministic validation
+```
+
+Examples:
+
+| Target source tier | Suitable first routes |
+|---|---|
+| Requested retailer | Native retailer engine, Google Search, Shopping, AI Mode |
+| Local/global manufacturer | Google Search or AI Mode |
+| Major country retailer | Shopping, Immersive Product, Google Search |
+| Other local/global source | Google Search, AI Mode, Lens where justified |
+| Amazon/eBay fallback | Broad Google recovery unless explicitly requested |
+
+The LLM cannot select Shopping as the first route for a manufacturer target unless the deterministic policy accepts that engine for the tier. An incompatible action is replaced by a guarded hierarchy action.
 
 ## Search planner input
 
-The planner receives a compact state packet rather than raw response payloads:
+The planner receives a compact state packet:
 
-- input product text, EAN/GTIN, retailer, country and language;
-- current credit number and credits remaining;
-- previous engine, purpose, status, URL yield and handle yield;
-- available product tokens, product IDs and image URLs;
-- a bounded list of current top candidates;
+- product text, EAN/GTIN, retailer, country and language;
+- credit number and credits remaining;
+- standardized source hierarchy and current target tier;
+- previous engine, purpose, URL yield and handle yield;
+- product tokens, IDs and image URLs;
+- bounded top candidate summaries;
 - deterministic rejection counts;
-- available engines for the current state.
+- engines available for the current state.
 
-Raw HTML, complete SerpAPI JSON and browser context are excluded from the planning prompt.
+Raw HTML, complete SerpAPI JSON and browser context are excluded.
 
 ## Planner output
 
-The LLM returns one JSON action:
-
 ```json
 {
-  "engine": "google_shopping",
-  "purpose": "resolve_product_identity_and_product_token",
-  "query": "LEGO 75379 R2-D2",
+  "engine": "google",
+  "purpose": "source_hierarchy_local_manufacturer",
+  "query": "\"5702017584379 LEGO R2-D2 75379\" official manufacturer product GB",
   "scope": "country",
   "language_code": "en",
   "country_code": "GB",
-  "page_token": "",
-  "image_url": "",
-  "lens_type": "products",
-  "more_stores": true,
-  "expected_signals": ["exact model", "merchant URL", "immersive token"],
-  "reason": "Organic candidates were mostly category pages."
+  "expected_signals": [
+    "SOURCE_TIER:LOCAL_MANUFACTURER",
+    "DIRECT_EXACT_PRODUCT_URL"
+  ],
+  "reason": "Local/regional manufacturer is the highest unresolved source tier."
 }
 ```
 
-Deterministic code validates the engine, required parameters, remaining budget and duplicate signature before execution.
+Deterministic code validates engine suitability, required parameters, budget and duplicate signature before execution.
 
-## Typical adaptive routes
+## Typical routes
 
-### Exact EAN supplied
+### Requested retailer supplied
 
 ```text
-Google exact identifier search
-→ validate direct URLs
-→ Shopping only when direct results are weak
-→ Immersive Product when Shopping yields a token
+Requested retailer route
+→ validate exact retailer page
+→ local manufacturer
+→ global manufacturer or major country retailer
 ```
 
-### Strong model but no EAN
+### No retailer supplied
 
 ```text
-Google Shopping
-→ Immersive Product when token exists
-→ Google exact phrase or AI Mode only when unresolved
+Local/regional manufacturer
+→ global manufacturer
+→ major country retailer
 ```
 
-### Ambiguous text
+Other local and marketplace results may still appear in any response, but they remain lower-tier candidates.
+
+### Shopping token discovered
 
 ```text
-AI Mode or Shopping
-→ use resolved brand/model/token
-→ direct search, Immersive Product or Lens
-```
-
-### Supported retailer requested
-
-```text
-retailer-native engine
-→ validate direct product URLs
-→ Google/Shopping fallback only when needed
+Shopping
+→ immersive product token
+→ direct merchant URLs
+→ classify merchant authority and country alignment
 ```
 
 ### Product image discovered
 
 ```text
-Google Lens products/exact matches
+Lens products/exact matches
 → normalize external links
-→ validate the candidate product page
+→ classify source tier
+→ validate exact product page
 ```
+
+## Candidate source classification
+
+Every canonical URL is assigned:
+
+```text
+source_tier
+source_tier_name
+source_role
+country_alignment
+requested_retailer_match
+manufacturer_match
+major_country_retailer
+marketplace
+source_priority_reason
+higher_priority_tier_exhausted
+selected_within_tier
+```
+
+Manufacturer classification combines domain identity with product brand/manufacturer evidence. Country alignment uses country profiles and localized URL patterns. Shopping and Immersive merchant results qualify as major country retailers only when country-aligned.
+
+## Final selection
+
+Selection is lexicographic:
+
+```text
+exact product identity
+→ usable product-detail page
+→ source tier
+→ confidence/richness within the tier
+```
+
+This ensures an official manufacturer page with sufficient validity outranks Amazon/eBay even when the marketplace page has more content.
+
+## Early stopping
+
+The search may stop after credit 1 or 2 only for:
+
+- requested retailer;
+- local/regional manufacturer;
+- global manufacturer.
+
+Major retailers, other websites and unrequested Amazon/eBay results do not stop the search while credits remain for stronger tiers.
 
 ## Response normalization
 
-All engines normalize into the existing URL candidate contract. Additional follow-up evidence is stored as handles:
+All engines normalize into one URL candidate contract. Follow-up handles include:
 
 | Handle | Purpose |
 |---|---|
-| `immersive_product_page_token` | Follow-up Immersive Product call |
-| `image_url` | Optional Lens call |
-| `product_id` | Identity trace and diagnostics |
+| `immersive_product_page_token` | Immersive Product follow-up |
+| `image_url` | Lens follow-up |
+| `product_id` | Identity trace |
 | `asin` | Amazon identity and derived `/dp/` URL |
 | `walmart_item_id` | Walmart identity and derived `/ip/` URL |
 
-Derived URLs are candidates only. They are never trusted without live validation.
+Derived URLs remain candidates only and require live validation.
 
 ## Working URL definition
 
 A working URL is:
 
-- an external direct URL;
+- external and direct;
 - an individual product-detail page;
-- browser-openable and not access-blocked;
-- text or rendered-content scrapable;
-- the exact requested product and variant;
+- browser-openable;
+- technically and semantically scrapable;
+- the exact product and variant;
 - durable and non-expiring;
-- complete enough for the configured final acceptance policy.
-
-A successful HTTP response alone is insufficient. A URL that passes the complete acceptance contract is returned as top-level `primary_url`; otherwise `primary_url` remains `null` and the best review candidates stay in the audit artifacts.
+- complete enough for final evidence policy.
 
 ## Environment contract
 
@@ -164,9 +253,9 @@ PRODUCT_HARNESS_EARLY_STOP_ON_WORKING_URL=true
 PRODUCT_HARNESS_SEARCH_PLANNER_MAX_CANDIDATES=8
 ```
 
-`PRODUCT_HARNESS_MAX_ORGANIC_SEARCHES` and `PRODUCT_HARNESS_MAX_AI_MODE_SEARCHES` remain only for compatibility with older `.env` files. They do not determine the adaptive route.
+The source hierarchy is an internal business standard, not a user-tunable ranking weight.
 
-## Result and artifact contract
+## Result contract
 
 `result.json` contains:
 
@@ -175,7 +264,11 @@ search.policy
 search.maximum_serpapi_credits
 search.serpapi_requests_used
 search.adaptive_search_contract_enforced
-search.allowed_engines
+search.source_authority_hierarchy_enforced
+search.requested_retailer_override
+search.source_hierarchy
+search.amazon_ebay_last_resort
+search.target_source_tiers
 search.engine_sequence
 search.planner_calls
 search.planner_fallbacks
@@ -187,7 +280,7 @@ search.serp_results
 primary_url
 ```
 
-Artifacts:
+## Artifacts and notebook
 
 ```text
 data/artifacts/<row_id>/
@@ -201,17 +294,11 @@ data/artifacts/<row_id>/
 └── single_product_diagnostics.xlsx
 ```
 
-Only files for credits actually used are written.
+The notebook exposes:
 
-## Notebook EDA
-
-The supported notebook exposes:
-
-- `search_actions_df`: one row per paid credit;
-- `search_engine_summary_df`: engine-level yield and conversion;
-- `search_handles_df`: product tokens, IDs and image handles;
-- `search_decision_rca_df`: budget, fallback and stop RCA;
-- `serp_results_df`: raw occurrence grain;
-- `results_df`: authoritative one-canonical-URL grain.
-
-Charts show credit allocation, engine yield and best-candidate confidence after each credit.
+- `source_hierarchy_df`;
+- `source_tier_summary_df`;
+- `search_actions_df` with `target_source_tier`;
+- source authority columns in `results_df`;
+- a source-route chart;
+- `source_hierarchy` and `source_tier_summary` Excel sheets.
