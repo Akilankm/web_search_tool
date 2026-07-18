@@ -1,137 +1,69 @@
-# Standardized Source-Authority Hierarchy
+# Market Decision Hierarchy
 
 ## Business rule
 
-The product URL workflow does not treat all technically valid URLs as equally desirable.
-
-When `retailer_name` is supplied, that retailer is preferred first. Otherwise the standardized internal hierarchy is:
+The product URL workflow follows one immutable trajectory:
 
 ```text
-Local/regional manufacturer website
-→ Global manufacturer website
-→ Major retailer in the requested country
-→ Other local website
-→ Other global exact-product website
-→ Amazon/eBay last resort
+1. Requested retailer in the requested country, when retailer_name is supplied
+2. Alternative retailer within the requested country
+3. Global fallback
 ```
 
-Amazon or eBay receive requested-retailer priority only when they are explicitly supplied as `retailer_name`.
+Without `retailer_name`, the path starts with the requested-country market and then moves to global fallback.
 
-## Complete hierarchy with retailer input
+These are different commercial markets. The selected scope must remain explicit in search traces and final output.
 
-```text
-0. Requested retailer in requested country
-1. Requested retailer outside requested country
-2. Local/regional manufacturer website
-3. Global manufacturer website
-4. Major retailer in requested country
-5. Other local website
-6. Other global exact-product website
-7. Amazon/eBay marketplace fallback
-```
+## Why this hierarchy exists
 
-## Search routing
+The team will open the returned URL in a browser and eyeball the product. Therefore a preferred page must satisfy all three conditions:
 
-SerpAPI engine selection happens after the target source tier is determined.
+1. exact product identity;
+2. browser-openable, information-rich product-detail page;
+3. best available market position.
 
-```text
-input product
-→ determine highest unresolved source tier
-→ expose only engines suitable for that tier
-→ LLM selects engine and query
-→ deterministic validation
-→ one SerpAPI credit
-→ classify and validate returned URLs
-→ stop or move to the next unresolved tier
-```
+A retailer-domain match cannot rescue a wrong variant, model, pack, refill/accessory, or non-product page.
 
-Typical engine choices:
+## Stage 1 — Requested retailer
 
-| Target tier | Preferred engines |
-|---|---|
-| Requested retailer | Retailer-native engine when supported; otherwise Google, Shopping, or AI Mode |
-| Local/global manufacturer | Google Search or AI Mode |
-| Major country retailer | Google Shopping, Immersive Product, Google Search |
-| Other local/global website | Google Search, AI Mode, Shopping where useful |
-| Amazon/eBay last resort | Broad Google recovery unless explicitly requested |
+Executed only when a retailer is provided. The search preserves the leading product hypothesis, user-provided identifier, critical variant/size/pack attributes, retailer, and country.
 
-The LLM cannot route to a lower source tier while the current higher tier remains the current standardized target.
+Advance when no direct candidate exists, pages are inaccessible, pages are listings/homepages, the result is a sibling product, or the page is too weak for review.
 
-## Candidate classification
+## Stage 2 — Alternative retailer in country
 
-Every canonical URL receives:
+The requested-retailer constraint is removed while country and exact identity constraints remain. Any browser-openable, information-rich retailer product page in the requested country may be selected.
 
-```text
-source_tier
-source_tier_name
-source_role
-country_alignment
-requested_retailer_match
-manufacturer_match
-major_country_retailer
-marketplace
-source_priority_reason
-higher_priority_tier_exhausted
-selected_within_tier
-```
+## Stage 3 — Global fallback
 
-Manufacturer classification uses the candidate domain together with product brand/manufacturer evidence. Country alignment uses the configured country profiles and localized URL patterns. Merchant URLs returned through Shopping or Immersive Product are classified as major country retailers only when country-aligned.
+Executed only after the requested-country market failed to yield a usable exact URL. Country restrictions are relaxed, but product identity is not. The selected result is labelled `global_fallback`.
 
-## Selection semantics
+Amazon/eBay may appear as requested-retailer or global candidates, but they do not bypass exact identity, browser usability, or the market path.
 
-Source authority is lexicographic after mandatory product validity:
+## Final selection
 
 ```text
 exact product identity
-→ technically usable product page
-→ source tier
-→ remaining confidence/richness signals
+→ browser-openable individual product page
+→ information richness and scrapability
+→ requested retailer / country alternative / global fallback
+→ confidence and secondary quality signals
 ```
 
-Therefore, a valid manufacturer URL outranks a richer Amazon/eBay page when Amazon/eBay was not requested.
+A global manufacturer page cannot outrank a valid country retailer merely because the source brand is stronger. A country page cannot outrank a requested-retailer page when both pass the same exact-product and usability gates.
 
-A lower-tier URL can be selected only when:
+## Output fields
 
-- stronger-tier URLs were not found;
-- stronger-tier URLs failed exact-product identity;
-- stronger-tier URLs were inaccessible or not scrapable;
-- stronger-tier URLs failed the final evidence policy.
+```text
+selection_scope
+selected_domain
+selected_retailer_name
+selected_from_requested_retailer
+selected_from_other_country_retailer
+selected_from_global_fallback
+url_decision_status
+```
 
 ## Early stopping
 
-The search may stop before all three credits only when a validated URL belongs to one of these tiers:
-
-- requested retailer;
-- local/regional manufacturer;
-- global manufacturer.
-
-A major retailer, other website, Amazon, or eBay result does not cause premature stopping while stronger source tiers can still be investigated with remaining credits.
-
-## Notebook RCA
-
-The supported notebook exposes:
-
-- `source_hierarchy_df`: one row per SerpAPI credit and target source tier;
-- `source_tier_summary_df`: candidate, scrape, identity, and selection conversion by tier;
-- source authority columns directly in `results_df`;
-- a source-tier route chart;
-- `source_hierarchy` and `source_tier_summary` Excel worksheets.
-
-This makes the final decision explainable as both:
-
-1. **Was this the exact working product URL?**
-2. **Was this the strongest available source according to the internal hierarchy?**
-
-## Audit artifacts
-
-`result.json` and `adaptive_search_trace.json` include:
-
-```text
-search.source_authority_hierarchy_enforced
-search.requested_retailer_override
-search.source_hierarchy
-search.amazon_ebay_last_resort
-search.target_source_tiers
-```
-
-`candidate_url_records.json` and `candidates.csv` retain the source classification for every canonical URL.
+A stage stops the search only after a production-ready URL passes browser, rendered-page, scrape, exact identity, critical evidence, and durability gates. A SERP snippet or unvalidated URL never qualifies.
