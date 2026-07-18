@@ -82,6 +82,7 @@ def apply_compatibility_patches() -> None:
     from src.product_evidence_harness.source_authority_reporting import apply_source_authority_reporting_patch
     from src.product_evidence_harness.mandatory_url_policy import apply_mandatory_product_url_policy
     from src.product_evidence_harness.mandatory_url_identity_safety import apply_mandatory_url_identity_safety
+    from src.product_evidence_harness.belief_runtime import apply_belief_driven_resolution_patch
 
     apply_precision_search_patches()
     apply_precision_browser_patches()
@@ -96,6 +97,9 @@ def apply_compatibility_patches() -> None:
     install_injected_client_compatibility()
     apply_mandatory_product_url_policy()
     apply_mandatory_url_identity_safety()
+    # Applied last so product understanding and the immutable market path govern
+    # every previously installed search/selection compatibility layer.
+    apply_belief_driven_resolution_patch()
 
     aliases = {
         "query_builder": "src.product_evidence_harness.query_builder",
@@ -115,14 +119,13 @@ def apply_compatibility_patches() -> None:
         "source_authority_compatibility": "src.product_evidence_harness.source_authority_compatibility",
         "mandatory_url_policy": "src.product_evidence_harness.mandatory_url_policy",
         "mandatory_url_identity_safety": "src.product_evidence_harness.mandatory_url_identity_safety",
+        "belief": "src.product_evidence_harness.belief",
+        "belief_runtime": "src.product_evidence_harness.belief_runtime",
     }
     for short_name, source_name in aliases.items():
         module = sys.modules.get(source_name)
         if module is not None:
             sys.modules[f"product_evidence_harness.{short_name}"] = module
 
-    from src.product_evidence_harness.source_authority_compatibility import (
-        apply_source_authority_compatibility,
-    )
-
+    from src.product_evidence_harness.source_authority_compatibility import apply_source_authority_compatibility
     apply_source_authority_compatibility()
