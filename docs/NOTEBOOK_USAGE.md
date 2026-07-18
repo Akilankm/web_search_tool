@@ -6,191 +6,110 @@ Use only:
 notebooks/01_run_product_evidence.ipynb
 ```
 
-The notebook is the supported single-product runner and the complete adaptive-search, source-authority, mandatory-URL, candidate, browser, feature, and final-selection EDA/RCA report.
+The notebook runs one product and exposes product interpretation, belief state, immutable market route, paid search decisions, candidate evidence, browser investigation, and mandatory URL delivery.
 
-## Fresh setup
+## Setup
 
 ```bash
 git checkout master
 git pull origin master
 cp .env.example .env
-# Edit the real SerpAPI and enterprise LLM values.
+# Add real SerpAPI and enterprise LLM values.
 ./scripts/azureml_startup.sh
 ```
 
-After pulling new code, restart the notebook kernel before running any cell.
+Restart the kernel after pulling code. The bootstrap cell forces the repository-local package, removes stale modules, discovers available feature sets, checks the live agent, and defaults to the committed `inputs/private/toy_features.json`.
 
-The first notebook cell now:
-
-1. locates the repository root;
-2. places the repository root and `src/` first on `sys.path`;
-3. evicts stale `product_evidence_harness` modules from `sys.modules`;
-4. verifies that the package was loaded from the current checkout rather than `site-packages`;
-5. confirms that `notebook_runtime.py` exists;
-6. checks the live agent health contract.
-
-This prevents an older installed package from shadowing the current repository.
-
-## Run one product
+## Input
 
 ```python
-FEATURE_SET = "toy_features"
-RUN_SINGLE_PRODUCT = True
+FEATURE_SET = 'toy_features'
+RUN_SINGLE_PRODUCT = False
 
 product = {
-    "row_id": "TEST-001",
-    "main_text": "Exact product identity text",
-    "country_code": "CO",
-    "retailer_name": None,
-    "ean": None,
-    "language_code": None,
+    'row_id': 'TEST-001',
+    'main_text': 'Vendor product main text',
+    'country_code': 'CZ',
+    'retailer_name': None,
+    'ean': None,
+    'language_code': None,
 }
 ```
 
-`main_text` and `country_code` are mandatory. Keep EAN/GTIN as text.
+`main_text` and `country_code` are mandatory. EAN/GTIN remains text. Set `RUN_SINGLE_PRODUCT = True` only after replacing the sample input.
 
-`RUN_SINGLE_PRODUCT` defaults to `False` to prevent accidental paid calls.
-
-## Mandatory product URL contract
-
-Every `COMPLETED` or `REVIEW_REQUIRED` run must contain:
+## Before search
 
 ```text
-primary_url
-product_match.product_url
-product_match.best_available_url
-evidence_set.primary_url
-url_delivery.delivered = true
+deterministic parsing
+→ no-web LLM interpretation
+→ competing product hypotheses
+→ uncertainty metrics
+→ first market evidence plan
 ```
 
-Strict verification and URL delivery are separate:
+The result exposes `product_identification.leading_hypothesis`, resolution status, posterior margin, readiness metrics, critical uncertainties, evidence count, and `search.market_decision_path`.
 
-| Field | Meaning |
-|---|---|
-| `primary_url_acceptance.accepted` | Every strict browser, identity, feature, scrapability, and durability gate passed |
-| `url_delivery.delivered` | A real direct external product-page URL was returned |
-| `url_delivery.strictly_verified` | The delivered URL also passed strict acceptance |
-| `url_delivery.status` | `STRICT_VERIFIED_PRODUCT_URL` or `BEST_AVAILABLE_REVIEW_URL` |
-| `job_status` | `COMPLETED`, `REVIEW_REQUIRED`, or `FAILED` |
-
-A review-required run still returns the strongest real product URL.
-
-A run with no direct external product-page candidate after all three credits fails with:
+## Market path
 
 ```text
-MANDATORY_PRODUCT_URL_NOT_FOUND
+requested retailer, when provided
+→ alternative retailer within country
+→ global fallback
 ```
 
-The notebook asserts this contract immediately after the run. It cannot continue diagnostics with an empty URL.
+A stage is skipped only when it does not apply. Search may stop early when a production-ready URL is validated.
 
-See `docs/MANDATORY_PRODUCT_URL.md`.
+## Mandatory URL contract
 
-## Standardized source hierarchy
+Every `COMPLETED` or `REVIEW_REQUIRED` run must deliver a real direct product URL in `primary_url`, `product_match.product_url`, and the URL-delivery fields. The notebook immediately asserts the contract.
 
-When `retailer_name` is supplied, that retailer is preferred first. Otherwise:
+A review-required URL is still browser-openable and useful, but one or more exactness or strict acceptance gates require manual confirmation. When no safe direct product page exists, the terminal reason is `MANDATORY_PRODUCT_URL_NOT_FOUND`; diagnostics never proceed with an empty product URL.
+
+The reviewer should eyeball product identity, model, variant, size, pack interpretation, page detail quality, and selection scope.
+
+## Belief artifacts
 
 ```text
-Local/regional manufacturer
-→ Global manufacturer
-→ Major retailer in requested country
-→ Other local website
-→ Other global website
-→ Amazon/eBay last resort
+product_belief.json
+product_understanding.md
+market_decision_path.md
+belief_updates.md
+evidence_ledger.jsonl
 ```
 
-Amazon or eBay receive first priority only when explicitly supplied as `retailer_name`.
+The JSON file is the complete machine-readable belief state. Markdown files are observable decision summaries, not hidden chain-of-thought.
 
-## Three-credit adaptive flow
-
-```text
-identify highest unresolved source tier
-→ LLM selects one suitable engine/query
-→ execute one paid SerpAPI request
-→ normalize URLs, product tokens, IDs and images
-→ classify source authority
-→ precision admission and bounded scraping
-→ validate current best URL
-→ stop only for a strong high-priority exact URL
-→ otherwise use the remaining credits
-```
-
-If the final credit starts without any direct external candidate, the planner enters mandatory recovery. It first expands a real immersive-product token when available; otherwise it uses AI Mode, Shopping, or Google Search to maximize exact product-page URL recall.
-
-## Main notebook tables
+## Main tables
 
 | DataFrame | Purpose |
 |---|---|
-| `url_delivery_df` | Mandatory URL, strict-verification state, and job status |
-| `source_hierarchy_df` | Target source tier and engine per credit |
-| `search_actions_df` | Complete paid-credit decision trace |
-| `search_engine_summary_df` | Engine-level URL and candidate yield |
-| `search_handles_df` | Product tokens, IDs, and image handles |
-| `search_decision_rca_df` | Budget, planner, fallback, and stop RCA |
-| `serp_results_df` | Raw result occurrences across engines and credits |
+| `product_identification_df` | Leading hypothesis, probability, margin, readiness, resolution |
+| `hypotheses_df` | Competing product hypotheses |
+| `uncertainties_df` | Decision-critical unresolved fields |
+| `belief_updates_df` | Probability snapshots after evidence |
+| `evidence_ledger_df` | Atomic evidence from pages |
+| `url_delivery_df` | Mandatory URL and strict-verification status |
+| `source_hierarchy_df` | Market/source target by SerpAPI credit |
+| `search_actions_df` | Paid-credit decision trace |
+| `search_engine_summary_df` | Search-engine yield |
+| `search_handles_df` | Product tokens, IDs, image handles |
+| `search_decision_rca_df` | Budget, planner, fallback, stop RCA |
+| `serp_results_df` | Raw search-result occurrences |
 | `results_df` | One authoritative row per canonical URL |
-| `source_tier_summary_df` | Candidate conversion by source-authority tier |
-| `agentic_df` | Browser turns, actions, termination, and errors |
-| `feature_evidence_df` | URL-feature evidence records |
-| `funnel_df` | Result-to-selection conversion |
-| `rejection_reasons_df` | Normalized rejection and review reasons |
+| `source_tier_summary_df` | Candidate conversion summary |
+| `agentic_df` | Browser investigations |
+| `feature_evidence_df` | URL-feature evidence |
+| `funnel_df` | Candidate conversion funnel |
+| `rejection_reasons_df` | Rejection and review reasons |
 | `selection_rca_df` | Final URL decision RCA |
-
-## Two intentional URL grains
-
-`serp_results_df` has one row per raw result occurrence. A URL may appear more than once across engines and credits.
-
-`results_df` has exactly one row per canonical URL and is persisted to:
-
-```text
-data/artifacts/<row_id>/candidate_url_records.json
-data/artifacts/<row_id>/candidates.csv
-```
-
-## Selection interpretation
-
-A stronger source does not rescue the wrong product. Selection order is:
-
-```text
-identity and variant evidence
-→ strict failure severity
-→ source authority
-→ product-page likelihood
-→ scrapability and reachability
-→ richness and confidence
-```
-
-When no URL passes every strict gate, the same ordering chooses the strongest direct review URL rather than returning an empty field.
 
 ## Export
 
-The workbook is written to:
+The notebook writes `single_product_diagnostics.xlsx` and includes belief, URL delivery, search, candidate, browser, feature, and selection tables. It also retains `adaptive_search_trace.json` and `mandatory_url_delivery.json`.
 
-```text
-data/artifacts/<row_id>/single_product_diagnostics.xlsx
-```
+## Terminal outcomes
 
-It includes the normal diagnostic tables plus:
-
-```text
-url_delivery
-source_hierarchy
-source_tier_summary
-adaptive_actions
-engine_summary
-search_handles
-search_rca
-```
-
-The run also writes:
-
-```text
-data/artifacts/<row_id>/mandatory_url_delivery.json
-data/artifacts/<row_id>/adaptive_search_trace.json
-data/artifacts/<row_id>/serp_credit_<n>_<engine>_raw.json
-```
-
-## Terminal interpretation
-
-- `COMPLETED`: a strictly verified URL was delivered.
-- `REVIEW_REQUIRED`: a real product URL was delivered but one or more strict gates require confirmation.
-- `FAILED`: execution failed, including the non-negotiable case where no direct product URL was produced.
+- `COMPLETED`: exact URL passed strict gates.
+- `REVIEW_REQUIRED`: a real product URL was delivered, but a reviewer must confirm one or more gates.
+- `FAILED`: execution failed, including inability to produce a safe direct product-page URL.
