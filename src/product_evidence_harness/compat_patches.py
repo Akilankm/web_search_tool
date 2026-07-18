@@ -84,6 +84,7 @@ def apply_compatibility_patches() -> None:
     from src.product_evidence_harness.mandatory_url_policy import apply_mandatory_product_url_policy
     from src.product_evidence_harness.mandatory_url_identity_safety import apply_mandatory_url_identity_safety
     from src.product_evidence_harness.belief_runtime import apply_belief_driven_resolution_patch
+    from src.product_evidence_harness.belief_compatibility import apply_belief_compatibility_patch
 
     apply_precision_search_patches()
     apply_precision_browser_patches()
@@ -119,14 +120,15 @@ def apply_compatibility_patches() -> None:
         "mandatory_url_identity_safety": "src.product_evidence_harness.mandatory_url_identity_safety",
         "belief": "src.product_evidence_harness.belief",
         "belief_runtime": "src.product_evidence_harness.belief_runtime",
+        "belief_compatibility": "src.product_evidence_harness.belief_compatibility",
     }
     for short_name, source_name in aliases.items():
         module = sys.modules.get(source_name)
         if module is not None:
             sys.modules[f"product_evidence_harness.{short_name}"] = module
 
-    # The older compatibility patch may replace planner/ranker methods. Install it
-    # first, then apply belief-driven market routing last so the business decision
-    # path remains authoritative.
+    # Install legacy source-authority helpers first, then belief-driven market
+    # routing, and finally stable public trace labels.
     apply_source_authority_compatibility()
     apply_belief_driven_resolution_patch()
+    apply_belief_compatibility_patch()
