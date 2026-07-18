@@ -48,6 +48,13 @@ def _store(product: Any, state: ProductBeliefState) -> None:
         _REGISTRY[_key(product)] = state
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def _market_from_url(product: Any, url: str) -> str:
     folded = (url or "").lower()
     retailer_tokens = [
@@ -72,14 +79,10 @@ def _market_from_url(product: Any, url: str) -> str:
     return MarketStage.GLOBAL_FALLBACK.value
 
 
-def _write(
-    root: str | Path | None, product: Any, state: Any = None
-) -> None:
+def _write(root: str | Path | None, product: Any, state: Any = None) -> None:
     if not root:
         return
-    belief = (
-        getattr(state, "product_belief", None) if state is not None else None
-    )
+    belief = getattr(state, "product_belief", None) if state is not None else None
     belief = belief or _REGISTRY.get(_key(product))
     if belief is None:
         return
@@ -100,9 +103,7 @@ def _normalize_action(
 
     stage = _ENGINE.market_stage_for_credit(product, credit)
     belief.current_market_stage = stage.value
-    query = _ENGINE.query_for_stage(
-        product, belief, stage, diagnostic=credit > 1
-    )
+    query = _ENGINE.query_for_stage(product, belief, stage, diagnostic=credit > 1)
     engine = action.engine
     page_token = action.page_token
     image_url = action.image_url
@@ -110,6 +111,8 @@ def _normalize_action(
         SearchEngine.GOOGLE.value,
         SearchEngine.GOOGLE_SHOPPING.value,
         SearchEngine.GOOGLE_AI_MODE.value,
+        SearchEngine.GOOGLE_IMMERSIVE_PRODUCT.value,
+        SearchEngine.GOOGLE_LENS.value,
         SearchEngine.AMAZON.value,
         SearchEngine.EBAY.value,
         SearchEngine.WALMART.value,
@@ -126,12 +129,8 @@ def _normalize_action(
     }
     normalized_query = (action.query or query) if handle_engine else query
     purpose = {
-        MarketStage.REQUESTED_RETAILER: (
-            "requested_retailer_exact_product_resolution"
-        ),
-        MarketStage.COUNTRY_ALTERNATIVE: (
-            "same_country_alternative_retailer_resolution"
-        ),
+        MarketStage.REQUESTED_RETAILER: "requested_retailer_exact_product_resolution",
+        MarketStage.COUNTRY_ALTERNATIVE: "same_country_alternative_retailer_resolution",
         MarketStage.GLOBAL_FALLBACK: "global_exact_product_fallback",
     }[stage]
     leading = belief.leading_hypothesis
@@ -140,11 +139,7 @@ def _normalize_action(
         engine=engine,
         purpose=purpose,
         query=normalized_query,
-        scope=(
-            "global"
-            if stage == MarketStage.GLOBAL_FALLBACK
-            else "country"
-        ),
+        scope="global" if stage == MarketStage.GLOBAL_FALLBACK else "country",
         country_code=product.country_code,
         language_code=product.language_code or action.language_code or "en",
         page_token=page_token,
@@ -161,11 +156,10 @@ def _normalize_action(
             )
         ),
         reason=(
-            "Belief-driven market stage="
-            f"{stage.value}; leading_hypothesis="
+            f"Belief-driven market stage={stage.value}; leading_hypothesis="
             f"{leading.canonical_name if leading else product.main_text}; "
-            f"status={belief.resolution_status.value}; "
-            f"margin={belief.posterior_margin:.3f}. {action.reason}"
+            f"status={belief.resolution_status.value}; margin={belief.posterior_margin:.3f}. "
+            f"{action.reason}"
         )[:1200],
         planner_source=f"belief_driven:{action.planner_source}",
     )
@@ -181,22 +175,17 @@ def _three_stage_run(
     from src.product_evidence_harness.budget import BudgetTracker
     from src.product_evidence_harness.contracts import ProductSearchState
     from src.product_evidence_harness.feature_evidence import EvidenceSetSelector
-    from src.product_evidence_harness.identity.graph import (
-        ProductIdentityGraphBuilder,
-    )
-    from src.product_evidence_harness.one_credit_pipeline import (
-        FeatureAwareHarnessResult,
-    )
-    from src.product_evidence_harness.pipeline import (
-        ProductEvidenceHarness as LegacyHarness,
-    )
+    from src.product_evidence_harness.identity.graph import ProductIdentityGraphBuilder
+    from src.product_evidence_harness.one_credit_pipeline import FeatureAwareHarnessResult
+    from src.product_evidence_harness.pipeline import ProductEvidenceHarness as LegacyHarness
 
     product = self._with_language(product)
     per_stage = max(1, min(4, int(self.scrape_top_k_per_stage)))
+    early_stop_enabled = _env_bool(
+        "PRODUCT_HARNESS_EARLY_STOP_ON_WORKING_URL", True
+    )
     try:
-        scrape_cap = int(
-            os.getenv("PRODUCT_HARNESS_MAX_FULL_SCRAPES", "6")
-        )
+        scrape_cap = int(os.getenv("PRODUCT_HARNESS_MAX_FULL_SCRAPES", "6"))
     except ValueError:
         scrape_cap = 6
     budget = BudgetTracker(
@@ -219,9 +208,7 @@ def _three_stage_run(
         elif stage.name == "requested_retailer_country":
             belief.current_market_stage = MarketStage.REQUESTED_RETAILER.value
         else:
-            belief.current_market_stage = (
-                MarketStage.COUNTRY_ALTERNATIVE.value
-            )
+            belief.current_market_stage = MarketStage.COUNTRY_ALTERNATIVE.value
 
         budget.consume_organic()
         response = self._search_stage(stage, product)
@@ -229,14 +216,11 @@ def _three_stage_run(
         state.organic_responses.append(response)
         before = {candidate.url for candidate in state.candidates}
         state.candidates = self._tag_stage(
-            self.candidate_store.merge_organic(
-                state.candidates, response
-            ),
-            stage,
+            self.candidate_store.merge_organic(state.candidates, response), stage
         )
-        state.candidates = self._preflight_rank(
-            product, state.candidates
-        )[: self.candidate_store.max_pool_size]
+        state.candidates = self._preflight_rank(product, state.candidates)[
+            : self.candidate_store.max_pool_size
+        ]
 
         remaining = budget.snapshot().scrape_remaining
         stages_remaining = max(1, self.max_serp_credits - stage_index)
@@ -244,11 +228,7 @@ def _three_stage_run(
             min(
                 per_stage,
                 remaining,
-                max(
-                    1,
-                    (remaining + stages_remaining - 1)
-                    // stages_remaining,
-                ),
+                max(1, (remaining + stages_remaining - 1) // stages_remaining),
             )
             if remaining
             else 0
@@ -263,9 +243,7 @@ def _three_stage_run(
         for candidate, scrape in zip(stage_candidates, scrapes):
             state.scrapes[candidate.url] = scrape
             state.verifications[candidate.url] = self.verifier.verify(
-                product,
-                scrape,
-                identity_graph=state.identity_graph,
+                product, scrape, identity_graph=state.identity_graph
             )
 
         state.scorecards = self.ranker.score(
@@ -277,18 +255,12 @@ def _three_stage_run(
         product_match = self.selector.select(
             task=product,
             scorecards=state.scorecards,
-            termination_reason=(
-                f"BELIEF_MARKET_STAGE_{stage.name.upper()}"
-            ),
+            termination_reason=f"BELIEF_MARKET_STAGE_{stage.name.upper()}",
             budget_snapshot=budget.snapshot(),
             state=state,
         )
-        product_match = (
-            LegacyHarness._enforce_production_grade_product_url(
-                product_match,
-                state,
-                production_gate=self.production_gate,
-            )
+        product_match = LegacyHarness._enforce_production_grade_product_url(
+            product_match, state, production_gate=self.production_gate
         )
         belief = _REGISTRY.get(_key(product), belief)
         state.product_belief = belief
@@ -306,17 +278,11 @@ def _three_stage_run(
                 "market_stage": belief.current_market_stage,
                 "results_returned": len(response.results),
                 "new_candidate_urls": len(
-                    {
-                        candidate.url
-                        for candidate in state.candidates
-                    }
-                    - before
+                    {candidate.url for candidate in state.candidates} - before
                 ),
                 "candidates_scraped": len(stage_candidates),
                 "belief_status": belief.resolution_status.value,
-                "leading_hypothesis": (
-                    leading.canonical_name if leading else None
-                ),
+                "leading_hypothesis": leading.canonical_name if leading else None,
                 "leading_probability": (
                     leading.posterior_probability if leading else 0.0
                 ),
@@ -324,7 +290,7 @@ def _three_stage_run(
                 "working_browser_url_found": working,
             }
         )
-        if working:
+        if working and early_stop_enabled:
             break
 
     state.termination_reason = (
@@ -340,17 +306,12 @@ def _three_stage_run(
             budget_snapshot=budget.snapshot(),
             state=state,
         )
-        product_match = (
-            LegacyHarness._enforce_production_grade_product_url(
-                product_match,
-                state,
-                production_gate=self.production_gate,
-            )
+        product_match = LegacyHarness._enforce_production_grade_product_url(
+            product_match, state, production_gate=self.production_gate
         )
     else:
         product_match = replace(
-            product_match,
-            termination_reason=state.termination_reason,
+            product_match, termination_reason=state.termination_reason
         )
     state.final_result = product_match
     state.search_stage_trace = trace
@@ -358,19 +319,14 @@ def _three_stage_run(
     assessments = ()
     evidence_set = None
     if feature_schema is not None:
-        assessments = self._assess_features(
-            product, feature_schema, state
-        )
+        assessments = self._assess_features(product, feature_schema, state)
         evidence_set = EvidenceSetSelector(
-            max_supplementary_urls=(
-                self.one_credit.max_supplementary_urls
-            )
+            max_supplementary_urls=self.one_credit.max_supplementary_urls
         ).select(
             schema=feature_schema,
             assessments=assessments,
             preferred_primary_url=(
-                product_match.product_url
-                or product_match.best_available_url
+                product_match.product_url or product_match.best_available_url
             ),
         )
 
@@ -399,8 +355,8 @@ def _three_stage_run(
         artifact_dir=artifact_dir,
     )
     logger.info(
-        "Belief-driven market workflow completed | row_id={} | "
-        "serp_calls={} | scrapes={} | belief={} | url={}",
+        "Belief-driven market workflow completed | row_id={} | serp_calls={} | "
+        "scrapes={} | belief={} | url={}",
         product.row_id,
         budget.organic_used,
         budget.scrape_used,
@@ -410,9 +366,7 @@ def _three_stage_run(
     return result if return_trace else product_match
 
 
-def _enrich(
-    payload: dict[str, Any], result: dict[str, Any]
-) -> dict[str, Any]:
+def _enrich(payload: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     product = dict(payload.get("product") or payload)
     key = "|".join(
         [
@@ -438,9 +392,7 @@ def _enrich(
         return result
     leading = belief.leading_hypothesis
     result["product_identification"] = {
-        "leading_hypothesis": (
-            leading.to_dict() if leading else None
-        ),
+        "leading_hypothesis": leading.to_dict() if leading else None,
         "resolution_status": belief.resolution_status.value,
         "posterior_margin": belief.posterior_margin,
         "metrics": belief.to_dict()["metrics"],
@@ -465,12 +417,7 @@ def _enrich(
         _WRITER.write(artifact_dir, belief)
         try:
             (Path(artifact_dir) / "orchestrated_result.json").write_text(
-                json.dumps(
-                    result,
-                    indent=2,
-                    ensure_ascii=False,
-                    default=str,
-                )
+                json.dumps(result, indent=2, ensure_ascii=False, default=str)
                 + "\n",
                 encoding="utf-8",
             )
@@ -485,9 +432,7 @@ def apply_belief_driven_resolution_patch() -> None:
         return
     _PATCHED = True
 
-    from src.product_evidence_harness.adaptive_search import (
-        BudgetAwareSearchPlanner,
-    )
+    from src.product_evidence_harness.adaptive_search import BudgetAwareSearchPlanner
     from src.product_evidence_harness.agent_service.orchestrator import (
         ProductEvidenceOrchestrator,
     )
@@ -503,18 +448,14 @@ def apply_belief_driven_resolution_patch() -> None:
         IDENTITY_WEAK,
     )
     from src.product_evidence_harness.contracts import ProductSearchState
-    from src.product_evidence_harness.identity_verifier import (
-        ProductIdentityVerifier,
-    )
+    from src.product_evidence_harness.identity_verifier import ProductIdentityVerifier
     from src.product_evidence_harness.one_credit_pipeline import (
         OneCreditProductEvidenceHarness,
     )
     from src.product_evidence_harness.pipeline import ProductEvidenceHarness
     from src.product_evidence_harness.ranker import ProductURLRanker
     from src.product_evidence_harness.selector import FinalSelector
-    from src.product_evidence_harness.source_authority import (
-        SourceAuthorityPolicy,
-    )
+    from src.product_evidence_harness.source_authority import SourceAuthorityPolicy
     from src.product_evidence_harness.three_stage_pipeline import (
         SearchStage,
         ThreeStageProductEvidenceHarness,
@@ -522,11 +463,7 @@ def apply_belief_driven_resolution_patch() -> None:
     import src.product_evidence_harness.adaptive_search_runtime as adaptive_runtime
 
     SourceAuthorityPolicy.hierarchy = lambda self, product: (
-        (
-            "REQUESTED_RETAILER",
-            "COUNTRY_ALTERNATIVE",
-            "GLOBAL_FALLBACK",
-        )
+        ("REQUESTED_RETAILER", "COUNTRY_ALTERNATIVE", "GLOBAL_FALLBACK")
         if product.retailer_name
         else ("COUNTRY_ALTERNATIVE", "GLOBAL_FALLBACK")
     )
@@ -537,15 +474,9 @@ def apply_belief_driven_resolution_patch() -> None:
         base = original_sort(self, card)
         requested = 1 if card.retailer_check == "MATCHED" else 0
         in_country = (
-            1
-            if card.country_check in {"MATCHED", "NOT_PROVIDED"}
-            else 0
+            1 if card.country_check in {"MATCHED", "NOT_PROVIDED"} else 0
         )
-        global_fallback = (
-            1 if card.country_check == "ALTERNATIVE" else 0
-        )
-        # Preserve identity/scrapability as the first two gates, then apply
-        # market precedence before authority/richness tie-breakers.
+        global_fallback = 1 if card.country_check == "ALTERNATIVE" else 0
         return (
             base[0],
             base[1],
@@ -575,16 +506,13 @@ def apply_belief_driven_resolution_patch() -> None:
             identity_rank,
             1 if not card.hard_failures else 0,
             1
-            if card.llm_decision
-            in {"EXACT_MATCH", "EXACT_MATCH_WITH_WARNING"}
+            if card.llm_decision in {"EXACT_MATCH", "EXACT_MATCH_WITH_WARNING"}
             else 0,
             1 if scrape and scrape.is_scrapable else 0,
             1 if scrape and scrape.looks_like_product_page else 0,
             1 if scrape and scrape.reachable else 0,
             1 if card.retailer_check == "MATCHED" else 0,
-            1
-            if card.country_check in {"MATCHED", "NOT_PROVIDED"}
-            else 0,
+            1 if card.country_check in {"MATCHED", "NOT_PROVIDED"} else 0,
             1 if card.country_check == "ALTERNATIVE" else 0,
             card.richness_score,
             card.final_confidence,
@@ -594,18 +522,14 @@ def apply_belief_driven_resolution_patch() -> None:
         return next(
             (
                 card
-                for card in sorted(
-                    cards, key=market_key, reverse=True
-                )
+                for card in sorted(cards, key=market_key, reverse=True)
                 if card.validation_status == "VERIFIED"
                 and self._is_final_usable(card)
             ),
             None,
         )
 
-    def select_best(
-        self, cards, *, allow_hard_rejected: bool = False
-    ):
+    def select_best(self, cards, *, allow_hard_rejected: bool = False):
         candidates = (
             list(cards)
             if allow_hard_rejected
@@ -624,26 +548,20 @@ def apply_belief_driven_resolution_patch() -> None:
         and match.product_url
         and match.is_exact_product_match
         and float(match.confidence or 0.0)
-        >= float(
-            self.config.with_effective_policy().policy.min_verified_confidence
-        )
+        >= float(self.config.with_effective_policy().policy.min_verified_confidence)
     )
 
     original_verify = ProductIdentityVerifier.verify
 
     def verify(self, product, scrape, *args, **kwargs):
-        verification = original_verify(
-            self, product, scrape, *args, **kwargs
-        )
+        verification = original_verify(self, product, scrape, *args, **kwargs)
         belief = _get(product, kwargs.get("identity_graph"))
         _ENGINE.update_from_scrape(
             belief,
             product,
             scrape,
             verification,
-            market_stage=_market_from_url(
-                product, scrape.final_url or scrape.url
-            ),
+            market_stage=_market_from_url(product, scrape.final_url or scrape.url),
         )
         _store(product, belief)
         return verification
@@ -659,9 +577,7 @@ def apply_belief_driven_resolution_patch() -> None:
         action = original_choose(self, *args, **kwargs)
         if str(action.planner_source).startswith("belief_driven:"):
             return action
-        return _normalize_action(
-            product, _get(product), action, credit
-        )
+        return _normalize_action(product, _get(product), action, credit)
 
     def fallback(self, *args, **kwargs):
         product = kwargs["product"]
@@ -679,45 +595,24 @@ def apply_belief_driven_resolution_patch() -> None:
     original_build_stage = ThreeStageProductEvidenceHarness._build_stage
 
     def build_stage(self, product, state, stage_index):
-        original = original_build_stage(
-            self, product, state, stage_index
-        )
-        belief = _get(
-            product, getattr(state, "identity_graph", None)
-        )
-        market = _ENGINE.market_stage_for_credit(
-            product, stage_index + 1
-        )
+        original = original_build_stage(self, product, state, stage_index)
+        belief = _get(product, getattr(state, "identity_graph", None))
+        market = _ENGINE.market_stage_for_credit(product, stage_index + 1)
         belief.current_market_stage = market.value
         return SearchStage(
             name={
-                MarketStage.REQUESTED_RETAILER: (
-                    "requested_retailer_country"
-                ),
-                MarketStage.COUNTRY_ALTERNATIVE: (
-                    "country_alternative"
-                ),
+                MarketStage.REQUESTED_RETAILER: "requested_retailer_country",
+                MarketStage.COUNTRY_ALTERNATIVE: "country_alternative",
                 MarketStage.GLOBAL_FALLBACK: "global_fallback",
             }[market],
-            scope=(
-                "global"
-                if market == MarketStage.GLOBAL_FALLBACK
-                else "country"
-            ),
+            scope="global" if market == MarketStage.GLOBAL_FALLBACK else "country",
             query=_ENGINE.query_for_stage(
-                product,
-                belief,
-                market,
-                diagnostic=stage_index > 0,
+                product, belief, market, diagnostic=stage_index > 0
             ),
             language_code=(
-                self.config.global_fallback_language_code or "en"
+                (self.config.global_fallback_language_code or "en")
                 if market == MarketStage.GLOBAL_FALLBACK
-                else (
-                    product.language_code
-                    or original.language_code
-                    or "en"
-                )
+                else (product.language_code or original.language_code or "en")
             ),
         )
 
@@ -743,9 +638,7 @@ def apply_belief_driven_resolution_patch() -> None:
         _get(product)
         result = original_legacy(self, product, *args, **kwargs)
         if getattr(result, "state", None) is not None:
-            result.state.product_belief = _REGISTRY.get(
-                _key(product)
-            )
+            result.state.product_belief = _REGISTRY.get(_key(product))
         return result
 
     ProductEvidenceHarness.run = legacy
@@ -754,12 +647,10 @@ def apply_belief_driven_resolution_patch() -> None:
 
     def state_dict(self):
         data = original_state_dict(self)
-        belief = getattr(
-            self, "product_belief", None
-        ) or _REGISTRY.get(_key(self.task))
-        data["product_belief"] = (
-            belief.to_dict() if belief else None
+        belief = getattr(self, "product_belief", None) or _REGISTRY.get(
+            _key(self.task)
         )
+        data["product_belief"] = belief.to_dict() if belief else None
         return data
 
     ProductSearchState.to_dict = state_dict
@@ -781,15 +672,11 @@ def apply_belief_driven_resolution_patch() -> None:
 
     def orchestrator_run(self, payload, *args, **kwargs):
         return _enrich(
-            payload,
-            original_orchestrator(self, payload, *args, **kwargs),
+            payload, original_orchestrator(self, payload, *args, **kwargs)
         )
 
     def strict_run(self, payload, *args, **kwargs):
-        return _enrich(
-            payload,
-            original_strict(self, payload, *args, **kwargs),
-        )
+        return _enrich(payload, original_strict(self, payload, *args, **kwargs))
 
     ProductEvidenceOrchestrator.run = orchestrator_run
     StrictProductEvidenceOrchestrator.run = strict_run
