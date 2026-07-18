@@ -80,6 +80,7 @@ def apply_compatibility_patches() -> None:
     from src.product_evidence_harness.adaptive_injected_client_compat import capture_pre_adaptive_run, install_injected_client_compatibility
     from src.product_evidence_harness.source_authority_runtime import apply_source_authority_patches
     from src.product_evidence_harness.source_authority_reporting import apply_source_authority_reporting_patch
+    from src.product_evidence_harness.source_authority_compatibility import apply_source_authority_compatibility
     from src.product_evidence_harness.mandatory_url_policy import apply_mandatory_product_url_policy
     from src.product_evidence_harness.mandatory_url_identity_safety import apply_mandatory_url_identity_safety
     from src.product_evidence_harness.belief_runtime import apply_belief_driven_resolution_patch
@@ -97,9 +98,6 @@ def apply_compatibility_patches() -> None:
     install_injected_client_compatibility()
     apply_mandatory_product_url_policy()
     apply_mandatory_url_identity_safety()
-    # Applied last so product understanding and the immutable market path govern
-    # every previously installed search/selection compatibility layer.
-    apply_belief_driven_resolution_patch()
 
     aliases = {
         "query_builder": "src.product_evidence_harness.query_builder",
@@ -127,5 +125,8 @@ def apply_compatibility_patches() -> None:
         if module is not None:
             sys.modules[f"product_evidence_harness.{short_name}"] = module
 
-    from src.product_evidence_harness.source_authority_compatibility import apply_source_authority_compatibility
+    # The older compatibility patch may replace planner/ranker methods. Install it
+    # first, then apply belief-driven market routing last so the business decision
+    # path remains authoritative.
     apply_source_authority_compatibility()
+    apply_belief_driven_resolution_patch()
