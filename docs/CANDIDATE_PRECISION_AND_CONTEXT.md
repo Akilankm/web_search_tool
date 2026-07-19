@@ -2,45 +2,50 @@
 
 ## Purpose
 
-This document defines how a single product run moves from high-recall SERP results to one defensible product URL without spending scrape or LLM context on obviously weak candidates.
+This document defines how a single product run moves from high-recall search results to one defensible product-truth URL without spending scrape or LLM context on obviously weak candidates.
 
-The search contract remains exactly three organic SerpAPI requests:
+The search contract remains exactly three paid SerpAPI requests:
 
-1. requested retailer and country, or the primary country search;
-2. alternative sources within the requested country;
-3. global fallback.
+```text
+1. manufacturer_primary
+2. requested_retailer_country or country_alternative
+3. global_fallback
+```
 
-The downstream contract is now precision-gated:
+The downstream contract is precision-gated:
 
 ```text
 raw SERP occurrence
 → canonical URL identity
 → deterministic URL-type and identity admission
+→ source-role classification
 → bounded full scrape
 → evidence-utility validation
+→ requested-feature assessment
 → bounded agentic-browser escalation
-→ strict primary URL decision
+→ strict URL gates
+→ manufacturer-first authority decision
 ```
 
 ## Two table grains
 
 ### Raw SERP occurrence grain
 
-`search.serp_results` and `serp_results_df` retain one row for every search result occurrence. The same canonical URL can occur in several queries and positions. Repetition is expected and useful for search-stage analysis.
+`search.serp_results` and `serp_results_df` retain one row for every search occurrence. The same canonical URL can appear in several queries and positions. Repetition is expected and useful for stage and engine analysis.
 
 ### Canonical candidate grain
 
-`candidate_records`, `candidate_url_records.json`, `candidates.csv`, and notebook `results_df` use exactly one row per canonical URL.
+`candidate_records`, `candidate_url_records.json`, `candidates.csv`, and notebook `results_df` contain exactly one row per canonical URL.
 
-The canonicalization contract:
+Canonicalization:
 
-- removes URL fragments;
+- removes fragments;
 - removes tracking, campaign, referral, and session parameters;
-- normalizes the hostname and path;
+- normalizes hostname and path;
 - preserves product-defining parameters such as `sku`, `productid`, `ean`, `gtin`, and `variant`;
-- rejects duplicate canonical URLs from the final candidate ledger.
+- rejects duplicate canonical URLs from the final ledger.
 
-The runtime asserts that `canonical_url` is unique. A duplicate is treated as a contract failure rather than being silently displayed twice.
+A duplicate canonical URL is treated as a contract failure rather than silently displayed twice.
 
 ## Pre-scrape admission
 
@@ -51,15 +56,17 @@ Rejected URL classes include:
 - homepage;
 - internal search result;
 - category or collection page;
+- family or campaign page;
 - social or community page;
 - PDF, image, video, or archive;
 - malformed or non-HTTP URL.
 
-A remaining candidate receives a deterministic preflight score from:
+A remaining candidate receives deterministic preflight signals from:
 
 - requested-product identity overlap;
-- exact EAN or GTIN signal, when supplied;
-- retailer signal, when supplied;
+- exact EAN/GTIN signal, when supplied;
+- model, variant, size, quantity, pack, and product-form terms;
+- manufacturer or retailer source role;
 - probable product-detail path structure;
 - independent SERP support;
 - best SERP position.
@@ -70,17 +77,34 @@ The admission decision is recorded for every canonical URL:
 url_type
 preflight_score
 identity_overlap
+source_role
+source_tier
 admitted_for_scrape
 admission_reason
 ```
 
-Rejected candidates remain in the audit ledger. They do not consume a full scrape.
+Rejected candidates remain in the audit ledger but do not consume a full scrape.
+
+## Source authority classification
+
+Candidates are classified into:
+
+```text
+LOCAL_MANUFACTURER
+GLOBAL_MANUFACTURER
+REQUESTED_RETAILER_LOCAL
+REQUESTED_RETAILER_GLOBAL
+MAJOR_COUNTRY_RETAILER
+OTHER_LOCAL_WEBSITE
+OTHER_GLOBAL_WEBSITE
+MARKETPLACE_LAST_RESORT
+```
+
+Authority does not bypass quality gates. It is used only after exact identity, requested-feature, rendered-page, scrapability, and durability checks pass.
 
 ## Progressive acquisition budget
 
 All three searches share one full-scrape budget.
-
-Default and hard production controls:
 
 ```env
 PRODUCT_HARNESS_MAX_FULL_SCRAPES=6
@@ -88,9 +112,9 @@ PRODUCT_HARNESS_MAX_SCRAPES_PER_DOMAIN=2
 PRODUCT_HARNESS_MIN_PREFLIGHT_SCORE=0.28
 ```
 
-Unused capacity rolls forward to later search stages. The final global stage can use remaining capacity, but only for qualified candidates.
+Unused capacity rolls forward to later credits. The global stage can use remaining capacity only for qualified candidates.
 
-The per-domain limit is cumulative across stages. One retailer cannot consume the complete scrape budget simply by returning many similar URLs.
+The per-domain limit is cumulative across stages. One source cannot consume the entire scrape budget by returning many similar URLs.
 
 ## Acquisition semantics
 
@@ -98,20 +122,37 @@ A technical fetch is not treated as useful product evidence.
 
 | Field | Meaning |
 |---|---|
-| `full_scrape_attempted` | The candidate consumed a full scrape slot |
+| `full_scrape_attempted` | Candidate consumed a full scrape slot |
 | `fetch_success` | HTTP or browser acquisition succeeded |
-| `content_extracted` | A usable amount of readable content was obtained |
-| `product_page_likelihood` | Evidence that the page is an individual product detail page |
-| `identity_status` | Product and variant identity decision |
+| `content_extracted` | Usable readable content was obtained |
+| `product_page_likelihood` | Evidence that the page is an individual product-detail page |
+| `identity_status` | Product and variant decision |
 | `feature_evidence_count` | Requested features with grounded support |
 | `content_utility_score` | Combined usefulness for the requested product task |
-| `scrape_accepted` | The acquisition is suitable for downstream evidence reasoning |
+| `scrape_accepted` | Acquisition is suitable for downstream evidence reasoning |
 
-This prevents a page with a successful HTTP response, a price, or one image from being reported as a quality scrape when it lacks relevant product evidence.
+A successful HTTP response, price, or single image does not make a page production-ready.
+
+## Requested feature completeness
+
+A candidate cannot become strict primary unless the requested feature schema is satisfied according to the configured acceptance policy.
+
+The candidate record exposes:
+
+```text
+coverage
+required_coverage
+critical_coverage
+missing_features
+conflicting_features
+feature_evidence_count
+```
+
+An official manufacturer page that is missing required evidence does not outrank a complete retailer page.
 
 ## Agentic-browser admission
 
-The LLM-controlled browser is an escalation path, not a second crawler for every SERP URL.
+The LLM-controlled browser is an escalation path, not a second crawler for every search result.
 
 A candidate is eligible only when it:
 
@@ -122,7 +163,7 @@ A candidate is eligible only when it:
 - is not an identity mismatch;
 - can plausibly resolve missing evidence or verify a high-quality static candidate.
 
-Default and hard effective ceilings:
+Effective ceilings:
 
 ```env
 PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES=3
@@ -133,9 +174,9 @@ PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS=15
 PRODUCT_HARNESS_AGENTIC_MAX_IMAGES=8
 ```
 
-An older `.env` with larger legacy values remains startup-compatible, but runtime execution and health reporting clamp to the effective production ceilings.
-
 The browser first selects different domains, then fills remaining capacity with the next strongest candidates.
+
+When browser planning fails, including `403 Forbidden`, deterministic rendered-page acquisition retains usable evidence. Strict gates remain unchanged.
 
 ## Incremental LLM context
 
@@ -144,31 +185,32 @@ The planning prompt uses `incremental_delta_relevance_filtered` context.
 Each turn contains:
 
 - product identity;
-- only unresolved feature definitions;
-- only newly visible text segments when the page changed;
+- unresolved feature definitions only;
+- newly visible text segments when the page changed;
 - relevance-ranked controls such as specifications, details, manufacturer, age, warning, and gallery elements;
 - relevance-ranked images;
 - at most two compact previous action summaries.
 
-The prompt excludes already resolved feature definitions and unchanged page text. Transactional and account controls are negatively ranked.
+The prompt excludes resolved feature definitions and unchanged page text. Transactional and account controls are negatively ranked.
 
 The browser loop stops without another LLM request when:
 
-- all requested features are already resolved;
+- all requested features are resolved;
 - the page is the wrong product or variant;
 - the page is not an individual product page;
 - access is blocked;
-- no safe action can improve the evidence;
+- no safe action can improve evidence;
 - action or turn limits are reached.
 
 ## Authoritative candidate record
 
-Each row in `candidates.csv` and `candidate_url_records.json` includes these decision groups:
+Each row in `candidates.csv` and `candidate_url_records.json` includes:
 
 | Group | Examples |
 |---|---|
 | Canonical identity | `candidate_id`, `canonical_url`, `final_url`, `domain` |
 | SERP support | `search_stages`, `appearance_count`, `best_position`, `serp_title` |
+| Source authority | `source_role`, `source_tier`, `source_tier_name`, `manufacturer_match`, `requested_retailer_match` |
 | Admission | `url_type`, `preflight_score`, `admitted_for_scrape`, `admission_reason` |
 | Acquisition | `full_scrape_attempted`, `fetch_success`, `content_extracted`, `scrape_accepted` |
 | Utility | `product_page_likelihood`, `content_utility_score`, `richness` |
@@ -187,8 +229,6 @@ feature_<feature_id>_confidence
 
 ## Final status vocabulary
 
-Every canonical URL has one final status:
-
 ```text
 SERP_REJECTED_URL_TYPE
 SERP_REJECTED_LOW_IDENTITY
@@ -203,14 +243,37 @@ REVIEW_SELECTED
 STRICT_SELECTED
 ```
 
-This provides one precise stopping point for each URL.
+Each canonical URL has one precise stopping state.
+
+## Final source outputs
+
+```text
+primary_url
+primary_url_role
+manufacturer_url
+retailer_url
+source_selection
+```
+
+The primary URL is selected from qualified candidates using:
+
+```text
+identity and variant correctness
+→ rendered-page and scrape usability
+→ requested feature completeness
+→ durability
+→ manufacturer authority
+→ retailer and market preference
+→ richness and confidence
+```
 
 ## Notebook interpretation
 
-The single-product notebook should be read in three layers:
+Read the supported notebook in four layers:
 
-1. **Executive summary** — funnel, chosen URL, final RCA, dominant rejection reason, effective budgets.
-2. **Candidate master** — `results_df`, exactly one row per canonical URL.
-3. **Drill-down** — raw SERP occurrences, feature evidence, browser actions, LLM plans, and visual artifacts.
+1. **Readiness** — exact runtime version and manufacturer-first capability.
+2. **Authority summary** — `source_selection_df`, `primary_url`, `manufacturer_url`, and `retailer_url`.
+3. **Candidate master** — `results_df`, exactly one row per canonical URL.
+4. **Drill-down** — raw SERP occurrences, feature evidence, browser actions, belief updates, and visual artifacts.
 
-Raw JSON and full browser plans remain available as audit artifacts but are not required for the default decision view.
+Raw JSON and complete browser plans remain available as audit artifacts but are not required for the default decision view.
