@@ -98,6 +98,7 @@ def apply_compatibility_patches() -> None:
     from src.product_evidence_harness.belief_runtime import apply_belief_driven_resolution_patch
     from src.product_evidence_harness.belief_compatibility import apply_belief_compatibility_patch
     from src.product_evidence_harness.agentic_fallback_runtime import apply_agentic_browser_fallback_patch
+    from src.product_evidence_harness.manufacturer_primary_runtime import apply_manufacturer_primary_policy
     from src.product_evidence_harness.runtime_contract_runtime import apply_runtime_contract_patch
 
     apply_precision_search_patches()
@@ -137,6 +138,7 @@ def apply_compatibility_patches() -> None:
         "belief_runtime": "src.product_evidence_harness.belief_runtime",
         "belief_compatibility": "src.product_evidence_harness.belief_compatibility",
         "agentic_fallback_runtime": "src.product_evidence_harness.agentic_fallback_runtime",
+        "manufacturer_primary_runtime": "src.product_evidence_harness.manufacturer_primary_runtime",
         "runtime_contract": "src.product_evidence_harness.runtime_contract",
         "runtime_contract_runtime": "src.product_evidence_harness.runtime_contract_runtime",
     }
@@ -145,9 +147,10 @@ def apply_compatibility_patches() -> None:
         if module is not None:
             sys.modules[f"product_evidence_harness.{short_name}"] = module
 
-    # Install legacy source-authority helpers first, then belief-driven market
-    # routing, stable public trace labels, and finally the health/runtime contract.
+    # Install legacy source-authority helpers first, then belief-driven routing,
+    # restore manufacturer-first product truth last, and finally expose health.
     apply_source_authority_compatibility()
     apply_belief_driven_resolution_patch()
     apply_belief_compatibility_patch()
+    apply_manufacturer_primary_policy()
     apply_runtime_contract_patch()
