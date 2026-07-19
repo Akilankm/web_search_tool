@@ -1,8 +1,8 @@
 # Final Product Evidence System Contract
 
-This document is the canonical end-to-end contract for the production workflow.
+This is the canonical end-to-end production contract.
 
-## 1. Business objective
+## Business objective
 
 Given:
 
@@ -14,14 +14,14 @@ optional EAN/GTIN
 optional LANGUAGE_CODE
 ```
 
-return a real, direct, browser-openable product-detail URL that is defensible for product coding and human review.
+return:
 
-The platform separates two needs:
+1. a real direct product-detail `primary_url`;
+2. qualified `manufacturer_url` and `retailer_url` references;
+3. an explicit manufacturer-versus-retailer `source_selection`;
+4. a shareable `business_judgement_review.md` recording the observable sequence of business judgments.
 
-- **product truth** — identity, specifications, warnings, compatibility, dimensions, official product features;
-- **commercial reference** — price, stock, local assortment, market, language, and purchasing context.
-
-## 2. Non-negotiable decision order
+## URL decision policy
 
 ```text
 exact product, model, form, variant, size, quantity and pack
@@ -31,52 +31,99 @@ exact product, model, form, variant, size, quantity and pack
 → durable non-expiring URL
 → official manufacturer authority
 → requested retailer / requested-country retailer
-→ global retailer or other exact product source
+→ global exact-product source
 → marketplace last resort
 ```
 
-Source authority is applied only after mandatory safety and evidence gates pass.
+Manufacturer authority is conditional. A retailer becomes primary when no manufacturer page passes every mandatory gate.
 
-A manufacturer page never wins merely because it is official. It must represent the exact product and contain the evidence required by the requested feature schema.
-
-## 3. Three-credit search route
+## Search policy
 
 ```text
-Credit 1: manufacturer_primary
-Credit 2: requested_retailer_country when retailer_name is supplied
-          otherwise country_alternative
-Credit 3: global_fallback
+manufacturer_primary
+→ requested_retailer_country or country_alternative
+→ global_fallback
 ```
 
-Credit 1 evaluates the official manufacturer or brand product-page opportunity.
+A retailer found during `manufacturer_primary` is retained but cannot stop the search before the manufacturer opportunity is evaluated.
 
-Credit 2 preserves the commercial market route. A real Shopping immersive-product token may be expanded here because it leads directly to merchant pages and is more precise than issuing another generic query.
+## Multimodal evidence policy
 
-Credit 3 removes the country restriction while preserving exact product identity.
+The system uses:
 
-A retailer URL discovered during credit 1 is retained but cannot prematurely stop the search before manufacturer authority has been evaluated.
+- submitted text and identifiers;
+- static and rendered page text;
+- browser screenshots;
+- product and package images;
+- structured page data;
+- vision-derived requested-feature evidence;
+- source authority and URL durability.
 
-## 4. Primary URL rule
-
-A qualified official manufacturer product page becomes `primary_url`.
-
-A retailer becomes `primary_url` when the manufacturer page is:
-
-- not found;
-- inaccessible or blocked;
-- not text-scrapable;
-- a homepage, category, family, collection, campaign, or search page;
-- the wrong model, form, variant, edition, size, quantity, or pack;
-- missing requested feature evidence;
-- transient or expiring.
-
-Retailer fallback is a controlled production decision, not a failure.
-
-## 5. Stable result schema
-
-Every `COMPLETED` or `REVIEW_REQUIRED` result exposes:
+Vision evidence is explicit and auditable:
 
 ```text
+extraction_method=vision_llm
+evidence_location=visual_asset:<asset_id>
+```
+
+Images may materially complete the selected URL's feature gate. The system reports `UNKNOWN_NOT_COUNTERFACTUALLY_TESTED` for whether text alone would have passed unless a real text-only counterfactual is executed.
+
+## Business judgment artifact contract
+
+Every `COMPLETED` or `REVIEW_REQUIRED` run writes:
+
+```text
+data/artifacts/<row_id>/business_judgement_review.md
+```
+
+The artifact contains:
+
+```text
+submitted input
+final URL summary
+chronological business questions
+observable evidence considered
+evidence sources
+visual evidence use and impact
+agent judgment
+judgment status
+alternatives considered and rejected
+rejection reason
+business rule applied
+effect on next action
+confidence
+final outcome
+human coder comparison form
+```
+
+Each step follows:
+
+```text
+observable evidence
+→ explicit business rule
+→ business judgment
+→ resulting action
+```
+
+It does not expose hidden chain-of-thought.
+
+## Human validation policy
+
+The human coder receives the original input and `business_judgement_review.md`, reviews independently, and classifies:
+
+- `IDENTICAL`;
+- `PARTIALLY IDENTICAL`; or
+- `NOT IDENTICAL`.
+
+The reviewer records the first divergent step, human judgment, missed or overweighted evidence, image interpretation and proposed system change.
+
+Behavioral validation requires sequence equivalence, not merely the same final URL.
+
+## Stable response schema
+
+```text
+product_identification
+search.market_decision_path
 primary_url
 primary_url_role
 manufacturer_url
@@ -84,80 +131,58 @@ retailer_url
 source_selection
 primary_url_acceptance
 url_delivery
-product_identification
-search.market_decision_path
+business_judgement_review
 ```
 
-### `primary_url`
+## Runtime contract
 
-The strongest product-truth URL after all gates and authority ranking.
-
-### `primary_url_role`
-
-One of:
+Current:
 
 ```text
-OFFICIAL_MANUFACTURER
-RETAILER
-MARKETPLACE
-OTHER_PRODUCT_SOURCE
+belief-url-resolution-v6-business-judgement-review
 ```
 
-### `manufacturer_url`
-
-The strongest strictly qualified official manufacturer page, or `null` when none qualified.
-
-### `retailer_url`
-
-The strongest strictly qualified retailer or commerce page, or `null` when none qualified.
-
-### `source_selection`
-
-The explicit authority decision, including the policy, selected source tier and role, manufacturer and retailer URLs, reason, mandatory gates, and fallback rule.
-
-## 6. Terminal outcomes
-
-| Job status | Meaning |
-|---|---|
-| `COMPLETED` | `primary_url` passed strict identity, browser, feature, scrapability, durability, and authority selection |
-| `REVIEW_REQUIRED` | A real direct URL was delivered, but one or more strict gates require human confirmation |
-| `FAILED` | No safe direct product-page URL could be delivered, or execution failed |
-
-The workflow never reports success with an empty URL.
-
-When no direct external product-page candidate exists after the bounded search, execution terminates with:
-
-```text
-MANDATORY_PRODUCT_URL_NOT_FOUND
-```
-
-## 7. Runtime contract
-
-The final agent/notebook compatibility version is:
+Previous migration version:
 
 ```text
 belief-url-resolution-v5-manufacturer-primary
 ```
 
-The `/health` response must include:
+Required capabilities:
 
 ```text
-status=healthy
-runtime_contract_version=belief-url-resolution-v5-manufacturer-primary
-manufacturer_first_primary_url=true
 belief_driven_product_resolution=true
+manufacturer_first_primary_url=true
+business_judgement_review_artifact=true
 mandatory_review_url_delivery=true
 deterministic_browser_fallback_on_llm_error=true
 notebook_self_healing_runtime=true
 compatibility_patches_applied=true
 ```
 
-The notebook refuses to submit a paid search against an incompatible agent.
+## Notebook contract
 
-## 8. Core artifacts
+Only:
+
+```text
+notebooks/01_run_product_evidence.ipynb
+```
+
+The first post-run view must expose:
+
+```text
+business_judgement_steps_df
+visual_evidence_summary_df
+business_judgement_review.md path
+```
+
+Engineering diagnostics follow below the human comparison view.
+
+## Artifact contract
 
 ```text
 data/artifacts/<row_id>/
+├── business_judgement_review.md
 ├── product_belief.json
 ├── product_understanding.md
 ├── market_decision_path.md
@@ -170,28 +195,31 @@ data/artifacts/<row_id>/
 ├── mandatory_url_delivery.json
 ├── source_selection.json
 ├── orchestrated_result.json
-├── review.md
 └── single_product_diagnostics.xlsx
 ```
 
-`source_selection.json` is the authoritative audit record for the manufacturer-versus-retailer decision.
+## Terminal outcomes
 
-## 9. Supported execution surface
+| Outcome | Contract |
+|---|---|
+| `COMPLETED` | Strict URL gates passed and the business judgment artifact was written |
+| `REVIEW_REQUIRED` | A real direct review URL and business judgment artifact were delivered |
+| `FAILED` | No safe direct product URL was found or execution failed |
 
-Use only:
+The workflow never reports success with an empty product URL.
 
-```text
-notebooks/01_run_product_evidence.ipynb
-```
+## Operational acceptance
 
-The notebook is a thin API client. Search, scraping, browser investigation, belief updates, selection, and artifact writing run inside the local Docker agent/browser stack.
+A release is acceptable only when CI validates:
 
-## 10. Reviewer interpretation
+- Python source compilation;
+- notebook JSON and every code cell;
+- Docker Compose and Azure ML bootstrap;
+- runtime capabilities and result schema;
+- manufacturer-primary and retailer-fallback behavior;
+- multimodal evidence reporting;
+- business judgment Markdown generation;
+- human comparison form and notebook visibility;
+- full historical unit suite on Python 3.10 and 3.11.
 
-Review both URL roles:
-
-1. Open `primary_url` and verify exact identity and official product evidence.
-2. Open `retailer_url`, when present, for price, availability, local market, and purchase context.
-3. Confirm that a manufacturer page became primary only after every mandatory gate passed.
-4. Confirm that retailer fallback occurred when manufacturer evidence was inadequate.
-5. Treat `REVIEW_REQUIRED` as a delivered review candidate, not an automated exact-match claim.
+See [Business judgment review](BUSINESS_JUDGEMENT_REVIEW.md), [Notebook usage](NOTEBOOK_USAGE.md), and [Azure ML operations](AZUREML_OPERATIONS.md).
