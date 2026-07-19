@@ -90,6 +90,32 @@ def _credit_action(
         )
 
     if credit_number == 2:
+        # A real Shopping immersive token expands directly to merchant product
+        # URLs. It is therefore the preferred implementation of the retailer
+        # stage, not a deviation from manufacturer-first routing.
+        if (
+            original.engine == SearchEngine.GOOGLE_IMMERSIVE_PRODUCT.value
+            and original.page_token
+            and SearchEngine.GOOGLE_IMMERSIVE_PRODUCT.value in available
+        ):
+            return replace(
+                original,
+                purpose="expand_retailer_product_token_after_manufacturer",
+                scope="country",
+                country_code=product.country_code,
+                language_code=product.language_code or original.language_code or "en",
+                expected_signals=(
+                    "SOURCE_TIER:MAJOR_COUNTRY_RETAILER",
+                    "DIRECT_EXACT_PRODUCT_URL",
+                    "RETAILER_REFERENCE_URL",
+                ),
+                reason=(
+                    "Credit 2 expands a real immersive product token into direct "
+                    "merchant URLs after manufacturer product truth was evaluated."
+                ),
+                planner_source=f"manufacturer_primary:{original.planner_source}",
+            )
+
         native = _native_retailer_engine(product, available)
         if product.retailer_name:
             engine = native or _first_available(
