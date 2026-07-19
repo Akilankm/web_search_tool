@@ -111,7 +111,7 @@ def main() -> int:
                         return 3
                     write_json(status_path, payload)
                     print(json.dumps(payload, indent=2, sort_keys=True))
-                    print("Stack is healthy, contract-compatible, and notebook-ready.")
+                    print("Stack is healthy and notebook-ready. Runtime contract is compatible.")
                     return 0
                 last_error = f"HTTP {response.status}: {body[:1000]}"
         except urllib.error.HTTPError as exc:
