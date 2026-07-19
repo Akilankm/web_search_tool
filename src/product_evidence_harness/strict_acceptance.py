@@ -1,13 +1,27 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Sequence
 
 from src.product_evidence_harness.browser_contracts import BrowserEvidenceBundle
 from src.product_evidence_harness.contracts import CandidateScorecard
 from src.product_evidence_harness.feature_schema import FeatureSchema, URLFeatureAssessment
+from src.product_evidence_harness.source_authority import (
+    SourceTier,
+    source_role,
+    source_tier,
+    source_tier_name,
+)
 from src.product_evidence_harness.url_durability import ProductURLDurabilityGate
 from src.product_evidence_harness.url_utils import normalize_url
+
+
+_RETAILER_ROLES = {
+    "REQUESTED_RETAILER",
+    "MAJOR_COUNTRY_RETAILER",
+    "GLOBAL_RETAILER",
+    "MARKETPLACE",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,15 +36,22 @@ class PrimaryURLAcceptance:
     full_feature_coverage: bool
     durable_url: bool
     reasons: tuple[str, ...]
+    source_tier: int = int(SourceTier.UNKNOWN)
+    source_tier_name: str = SourceTier.UNKNOWN.name
+    source_role: str = "UNKNOWN"
+    manufacturer_url: str | None = None
+    retailer_url: str | None = None
+    selection_reason: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
 
 
 class StrictPrimaryURLSelector:
-    """Select only a browser-verified exact product URL with complete feature evidence."""
+    """Select a qualified product URL, preferring official manufacturer truth."""
 
     scope_priority = {
+        "manufacturer_primary": 4,
         "requested_retailer_country": 3,
         "country_primary": 2,
         "country_alternative": 2,
@@ -58,6 +79,7 @@ class StrictPrimaryURLSelector:
     ) -> PrimaryURLAcceptance:
         bundles = self._bundle_index(browser_bundles)
         scopes = self._scope_index(scorecards)
+        authorities = self._authority_index(scorecards)
         accepted: list[tuple[tuple[float, ...], PrimaryURLAcceptance]] = []
         rejection_reasons: list[str] = []
 
@@ -65,7 +87,9 @@ class StrictPrimaryURLSelector:
             normalized = normalize_url(assessment.url)
             bundle = bundles.get(normalized)
             if bundle is None:
-                rejection_reasons.append(f"{assessment.url}:BROWSER_EVIDENCE_MISSING")
+                rejection_reasons.append(
+                    f"{assessment.url}:BROWSER_EVIDENCE_MISSING"
+                )
                 continue
 
             opened_url = bundle.final_url or bundle.requested_url
@@ -96,6 +120,14 @@ class StrictPrimaryURLSelector:
                 reasons.extend(durability.reasons or ("PRIMARY_URL_NOT_DURABLE",))
 
             scope = scopes.get(normalized, "unresolved")
+            tier, tier_name, role = authorities.get(
+                normalized,
+                (
+                    int(SourceTier.UNKNOWN),
+                    SourceTier.UNKNOWN.name,
+                    "UNKNOWN",
+                ),
+            )
             decision = PrimaryURLAcceptance(
                 accepted=not reasons,
                 primary_url=opened_url if not reasons else None,
@@ -107,9 +139,17 @@ class StrictPrimaryURLSelector:
                 full_feature_coverage=full_features,
                 durable_url=durable,
                 reasons=tuple(dict.fromkeys(reasons)),
+                source_tier=tier,
+                source_tier_name=tier_name,
+                source_role=role,
             )
             if decision.accepted:
+                # Every candidate in this list has already passed all mandatory
+                # identity, rendered-browser, feature, scrapability, and
+                # durability gates. Authority is therefore the first selection
+                # discriminator: manufacturer beats retailer, never vice versa.
                 score = (
+                    float(100 - tier),
                     float(self.scope_priority.get(scope, 0)),
                     assessment.required_coverage,
                     assessment.critical_coverage,
@@ -123,7 +163,22 @@ class StrictPrimaryURLSelector:
                 )
 
         if accepted:
-            return max(accepted, key=lambda item: item[0])[1]
+            selected = max(accepted, key=lambda item: item[0])[1]
+            manufacturer_url = self._best_role_url(
+                accepted, roles={"MANUFACTURER"}
+            )
+            retailer_url = self._best_role_url(accepted, roles=_RETAILER_ROLES)
+            reason = (
+                "OFFICIAL_MANUFACTURER_PRIMARY_AFTER_STRICT_GATES"
+                if selected.source_role == "MANUFACTURER"
+                else "RETAILER_PRIMARY_BECAUSE_NO_QUALIFIED_MANUFACTURER_PAGE"
+            )
+            return replace(
+                selected,
+                manufacturer_url=manufacturer_url,
+                retailer_url=retailer_url,
+                selection_reason=reason,
+            )
 
         return PrimaryURLAcceptance(
             accepted=False,
@@ -137,6 +192,7 @@ class StrictPrimaryURLSelector:
             durable_url=False,
             reasons=tuple(dict.fromkeys(rejection_reasons))
             or ("NO_URL_PASSED_STRICT_PRIMARY_ACCEPTANCE",),
+            selection_reason="NO_URL_PASSED_STRICT_PRIMARY_ACCEPTANCE",
         )
 
     def _full_feature_coverage(
@@ -148,7 +204,8 @@ class StrictPrimaryURLSelector:
             return bool(
                 not assessment.missing_features
                 and not assessment.conflicting_features
-                and assessment.required_coverage >= schema.required_coverage_threshold
+                and assessment.required_coverage
+                >= schema.required_coverage_threshold
                 and assessment.critical_coverage == 1.0
             )
         requested_ids = {feature.feature_id for feature in schema.features}
@@ -180,6 +237,7 @@ class StrictPrimaryURLSelector:
     ) -> dict[str, str]:
         index: dict[str, str] = {}
         ordered = (
+            "manufacturer_primary",
             "requested_retailer_country",
             "country_primary",
             "country_alternative",
@@ -204,6 +262,36 @@ class StrictPrimaryURLSelector:
             ) > StrictPrimaryURLSelector.scope_priority.get(existing, 0):
                 index[normalized] = scope
         return index
+
+    @staticmethod
+    def _authority_index(
+        scorecards: Sequence[CandidateScorecard],
+    ) -> dict[str, tuple[int, str, str]]:
+        index: dict[str, tuple[int, str, str]] = {}
+        for card in scorecards:
+            normalized = normalize_url(card.candidate.url)
+            if not normalized:
+                continue
+            authority = (
+                source_tier(card.candidate),
+                source_tier_name(card.candidate),
+                source_role(card.candidate),
+            )
+            existing = index.get(normalized)
+            if existing is None or authority[0] < existing[0]:
+                index[normalized] = authority
+        return index
+
+    @staticmethod
+    def _best_role_url(
+        accepted: Sequence[tuple[tuple[float, ...], PrimaryURLAcceptance]],
+        *,
+        roles: set[str],
+    ) -> str | None:
+        matching = [item for item in accepted if item[1].source_role in roles]
+        if not matching:
+            return None
+        return max(matching, key=lambda item: item[0])[1].primary_url
 
     @staticmethod
     def _scorecard_confidence(
