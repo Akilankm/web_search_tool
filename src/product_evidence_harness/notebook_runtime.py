@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 from src.product_evidence_harness.runtime_contract import (
     REQUIRED_RESULT_FIELDS,
+    REQUIRED_RESULT_KEYS,
     REQUIRED_RUNTIME_CAPABILITIES,
     RUNTIME_CONTRACT_VERSION,
 )
@@ -257,6 +258,8 @@ def ensure_platform_ready(
 
 def validate_result_contract(result: dict) -> dict:
     missing = [path for path in REQUIRED_RESULT_FIELDS if _nested_value(result, path) is None]
+    missing_keys = [key for key in REQUIRED_RESULT_KEYS if key not in result]
+    missing.extend(missing_keys)
     if missing:
         raise RuntimeError(
             "RESULT_CONTRACT_MISMATCH: agent response is missing required fields: "
@@ -275,7 +278,8 @@ def validate_result_contract(result: dict) -> dict:
             f"match_reason={product_match.get('match_reason')}\n"
             f"best_available_url={product_match.get('best_available_url')}\n"
             f"artifact_dir={result.get('artifact_dir')}\n"
-            "Inspect mandatory_url_delivery.json and candidates.csv in the artifact directory."
+            "Inspect mandatory_url_delivery.json, source_selection.json, and candidates.csv "
+            "in the artifact directory."
         )
     return result
 
