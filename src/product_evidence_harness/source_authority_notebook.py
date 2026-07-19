@@ -30,35 +30,68 @@ def apply_source_authority_notebook_patch() -> None:
         diagnostics = original_build(result)
         actions = diagnostics.search_actions_df
         if "target_source_tier" not in actions:
-            actions["target_source_tier"] = actions.get("expected_signals", pd.Series(dtype=object)).map(_tier)
+            actions["target_source_tier"] = actions.get(
+                "expected_signals", pd.Series(dtype=object)
+            ).map(_tier)
         search = dict(result.get("search") or {})
-        hierarchy = (
-            [
-                "REQUESTED_RETAILER_LOCAL",
-                "REQUESTED_RETAILER_GLOBAL",
-                "LOCAL_MANUFACTURER",
-                "GLOBAL_MANUFACTURER",
-                "MAJOR_COUNTRY_RETAILER",
-                "OTHER_LOCAL_WEBSITE",
-                "OTHER_GLOBAL_WEBSITE",
-                "MARKETPLACE_LAST_RESORT",
-            ]
-            if (result.get("product") or {}).get("retailer_name")
-            else [
-                "LOCAL_MANUFACTURER",
-                "GLOBAL_MANUFACTURER",
-                "MAJOR_COUNTRY_RETAILER",
-                "OTHER_LOCAL_WEBSITE",
-                "OTHER_GLOBAL_WEBSITE",
-                "MARKETPLACE_LAST_RESORT",
-            ]
+        hierarchy = list(
+            search.get("source_authority_path")
+            or (
+                [
+                    "LOCAL_MANUFACTURER",
+                    "GLOBAL_MANUFACTURER",
+                    "REQUESTED_RETAILER_LOCAL",
+                    "REQUESTED_RETAILER_GLOBAL",
+                    "MAJOR_COUNTRY_RETAILER",
+                    "OTHER_LOCAL_WEBSITE",
+                    "OTHER_GLOBAL_WEBSITE",
+                    "MARKETPLACE_LAST_RESORT",
+                ]
+                if (result.get("product") or {}).get("retailer_name")
+                else [
+                    "LOCAL_MANUFACTURER",
+                    "GLOBAL_MANUFACTURER",
+                    "MAJOR_COUNTRY_RETAILER",
+                    "OTHER_LOCAL_WEBSITE",
+                    "OTHER_GLOBAL_WEBSITE",
+                    "MARKETPLACE_LAST_RESORT",
+                ]
+            )
         )
         extra = pd.DataFrame(
             [
                 {"metric": "Source hierarchy", "value": " → ".join(hierarchy)},
+                {
+                    "metric": "Primary URL role",
+                    "value": result.get("primary_url_role") or "UNKNOWN",
+                },
+                {
+                    "metric": "Manufacturer URL",
+                    "value": result.get("manufacturer_url") or "NOT_AVAILABLE",
+                },
+                {
+                    "metric": "Retailer URL",
+                    "value": result.get("retailer_url") or "NOT_AVAILABLE",
+                },
+                {
+                    "metric": "Manufacturer-first policy",
+                    "value": bool(search.get("manufacturer_first_primary_url")),
+                },
                 {"metric": "Amazon/eBay last resort", "value": True},
-                {"metric": "Source-tier targets", "value": " → ".join(actions.get("target_source_tier", pd.Series(dtype=str)).astype(str))},
-                {"metric": "Hierarchy selection enforced", "value": bool(search.get("source_authority_hierarchy_enforced", True))},
+                {
+                    "metric": "Source-tier targets",
+                    "value": " → ".join(
+                        actions.get(
+                            "target_source_tier", pd.Series(dtype=str)
+                        ).astype(str)
+                    ),
+                },
+                {
+                    "metric": "Hierarchy selection enforced",
+                    "value": bool(
+                        search.get("source_authority_hierarchy_enforced", True)
+                    ),
+                },
             ]
         )
         diagnostics.search_decision_rca_df = pd.concat(
@@ -70,7 +103,7 @@ def apply_source_authority_notebook_patch() -> None:
         original_display(diagnostics, console=console)
         console = console or module.Console()
         frame = diagnostics.search_actions_df
-        table = Table(title="Standardized source-authority route", show_lines=True)
+        table = Table(title="Manufacturer-first source-authority route", show_lines=True)
         table.add_column("Credit")
         table.add_column("Target source tier")
         table.add_column("Engine")
@@ -88,13 +121,26 @@ def apply_source_authority_notebook_patch() -> None:
         path = original_export(diagnostics, workbook_path)
         actions = diagnostics.search_actions_df
         hierarchy = actions[
-            [column for column in (
-                "serp_credit", "target_source_tier", "engine", "purpose",
-                "results_returned", "new_candidate_urls", "candidates_qualified",
-                "candidates_scraped", "working_url_found", "reason",
-            ) if column in actions]
+            [
+                column
+                for column in (
+                    "serp_credit",
+                    "target_source_tier",
+                    "engine",
+                    "purpose",
+                    "results_returned",
+                    "new_candidate_urls",
+                    "candidates_qualified",
+                    "candidates_scraped",
+                    "working_url_found",
+                    "reason",
+                )
+                if column in actions
+            ]
         ]
-        with pd.ExcelWriter(path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+        with pd.ExcelWriter(
+            path, engine="openpyxl", mode="a", if_sheet_exists="replace"
+        ) as writer:
             hierarchy.to_excel(writer, sheet_name="source_hierarchy", index=False)
         return path
 
@@ -110,7 +156,14 @@ def apply_source_authority_notebook_patch() -> None:
         axis.set_ylabel("Target")
         axis.set_yticks([])
         for index, row in frame.reset_index(drop=True).iterrows():
-            axis.text(index, 0.5, str(row["target_source_tier"]), ha="center", va="center", rotation=20)
+            axis.text(
+                index,
+                0.5,
+                str(row["target_source_tier"]),
+                ha="center",
+                va="center",
+                rotation=20,
+            )
         figure.tight_layout()
         plt.show()
 
