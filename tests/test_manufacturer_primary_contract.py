@@ -105,9 +105,10 @@ def test_result_marks_retailer_fallback_when_no_manufacturer_passes() -> None:
     )
 
 
-def test_runtime_health_advertises_manufacturer_first_contract() -> None:
+def test_runtime_health_advertises_manufacturer_and_judgement_contracts() -> None:
     capabilities = runtime_capabilities()
     assert RUNTIME_CONTRACT_VERSION == (
-        "belief-url-resolution-v5-manufacturer-primary"
+        "belief-url-resolution-v6-business-judgement-review"
     )
     assert capabilities["manufacturer_first_primary_url"] is True
+    assert capabilities["business_judgement_review_artifact"] is True
