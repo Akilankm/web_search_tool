@@ -22,6 +22,12 @@ def runtime_source() -> str:
     )
 
 
+def runtime_contract_source() -> str:
+    return (ROOT / "src" / "product_evidence_harness" / "runtime_contract.py").read_text(
+        encoding="utf-8"
+    )
+
+
 def test_notebook_uses_current_orchestrated_result_schema() -> None:
     source = notebook_source()
 
@@ -31,6 +37,10 @@ def test_notebook_uses_current_orchestrated_result_schema() -> None:
     assert "result.get('primary_url_acceptance')" in source
     assert "result.get('url_delivery')" in source
     assert "result.get('search')" in source
+    assert "result.get('primary_url_role')" in source
+    assert "result.get('manufacturer_url')" in source
+    assert "result.get('retailer_url')" in source
+    assert "result.get('source_selection')" in source
     assert "build_single_product_diagnostics" in source
     assert "build_adaptive_search_diagnostics" in source
     assert "result.get('row_id')" not in source
@@ -62,6 +72,7 @@ def test_notebook_defaults_to_committed_toy_feature_schema() -> None:
 def test_notebook_self_heals_stale_azureml_runtime_before_serp() -> None:
     source = notebook_source()
     runtime = runtime_source()
+    contract = runtime_contract_source()
     startup = (ROOT / "scripts" / "azureml_startup.sh").read_text(encoding="utf-8")
 
     for token in (
@@ -72,6 +83,7 @@ def test_notebook_self_heals_stale_azureml_runtime_before_serp() -> None:
         "platform_readiness_df",
         "auto_recovery_attempted",
         "clean_build_used",
+        "manufacturer_first_primary_url",
     ):
         assert token in source
 
@@ -80,6 +92,8 @@ def test_notebook_self_heals_stale_azureml_runtime_before_serp() -> None:
     assert "--clean-build" in runtime
     assert "PRODUCT_HARNESS_NOTEBOOK_AUTO_RECOVER_PLATFORM" in runtime
     assert "PRODUCT_HARNESS_NOTEBOOK_CLEAN_BUILD_ON_RECOVERY" in runtime
+    assert '"manufacturer_first_primary_url"' in contract
+    assert "belief-url-resolution-v5-manufacturer-primary" in contract
     assert "--clean-build" in startup
     assert "docker compose build --no-cache agent browser" in startup
 
@@ -89,6 +103,7 @@ def test_notebook_builds_complete_single_product_eda_tables() -> None:
 
     for name in (
         "platform_readiness_df",
+        "source_selection_df",
         "url_delivery_df",
         "results_df",
         "search_stages_df",
@@ -110,6 +125,7 @@ def test_notebook_builds_complete_single_product_eda_tables() -> None:
     ):
         assert name in source
 
+    assert "Manufacturer-first source selection" in source
     assert "Mandatory product URL delivery" in source
     assert "Source hierarchy by SerpAPI credit" in source
     assert "Final URL selection RCA" in source
@@ -123,16 +139,22 @@ def test_notebook_exposes_centralized_mandatory_url_contract() -> None:
 
     for field in (
         "primary_url",
+        "primary_url_role",
+        "manufacturer_url",
+        "retailer_url",
+        "source_selection",
         "url_delivery_status",
         "strictly_verified",
         "strict_primary_accepted",
         "delivered",
         "mandatory_url_delivery.json",
+        "source_selection.json",
     ):
         assert field in source
 
     assert "run_product(product, FEATURE_SET)" in source
     assert "validate_result_contract" in runtime
+    assert "REQUIRED_RESULT_KEYS" in runtime
     assert "MANDATORY_PRODUCT_URL_NOT_DELIVERED" in runtime
     assert "REVIEW_REQUIRED" in source
     assert "MANDATORY_PRODUCT_URL_NOT_FOUND" in source
@@ -150,6 +172,10 @@ def test_notebook_exposes_adaptive_search_contract() -> None:
         "search_stop_reason",
         "planner_source",
         "working_url_found",
+        "manufacturer_primary",
+        "requested_retailer_country",
+        "country_alternative",
+        "global_fallback",
     ):
         assert field in source
     assert "adaptive_search_contract_enforced" in runtime
@@ -218,23 +244,42 @@ def test_notebook_uses_repository_local_artifact_paths_and_exports_rca() -> None
     assert "export_adaptive_search_tables" in source
     assert "adaptive_search_trace.json" in source
     assert "mandatory_url_delivery.json" in source
+    assert "source_selection.json" in source
+    assert "source_selection_df" in source
     assert "source_tier_summary" in source
     assert "url_delivery" in source
 
 
-def test_notebook_docs_match_mandatory_url_contract() -> None:
-    notebook_doc = (ROOT / "docs" / "NOTEBOOK_USAGE.md").read_text(encoding="utf-8")
-    mandatory_doc = (ROOT / "docs" / "MANDATORY_PRODUCT_URL.md").read_text(encoding="utf-8")
-    adaptive_doc = (ROOT / "docs" / "ADAPTIVE_SERPAPI_SEARCH.md").read_text(encoding="utf-8")
-    hierarchy_doc = (ROOT / "docs" / "SOURCE_AUTHORITY_HIERARCHY.md").read_text(encoding="utf-8")
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+def test_notebook_docs_match_final_manufacturer_first_contract() -> None:
+    documentation = {
+        "final": (ROOT / "docs" / "FINAL_SYSTEM_CONTRACT.md").read_text(encoding="utf-8"),
+        "notebook": (ROOT / "docs" / "NOTEBOOK_USAGE.md").read_text(encoding="utf-8"),
+        "mandatory": (ROOT / "docs" / "MANDATORY_PRODUCT_URL.md").read_text(encoding="utf-8"),
+        "adaptive": (ROOT / "docs" / "ADAPTIVE_SERPAPI_SEARCH.md").read_text(encoding="utf-8"),
+        "belief": (ROOT / "docs" / "BELIEF_DRIVEN_PRODUCT_RESOLUTION.md").read_text(encoding="utf-8"),
+        "precision": (ROOT / "docs" / "CANDIDATE_PRECISION_AND_CONTEXT.md").read_text(encoding="utf-8"),
+        "hierarchy": (ROOT / "docs" / "SOURCE_AUTHORITY_HIERARCHY.md").read_text(encoding="utf-8"),
+        "azureml": (ROOT / "docs" / "AZUREML_OPERATIONS.md").read_text(encoding="utf-8"),
+        "readme": (ROOT / "README.md").read_text(encoding="utf-8"),
+    }
 
-    for text in (notebook_doc, mandatory_doc, adaptive_doc, hierarchy_doc, readme):
+    for text in documentation.values():
         assert "product" in text.lower()
         assert "url" in text.lower()
+        assert "manufacturer" in text.lower()
 
-    assert "url_delivery_df" in notebook_doc
-    assert "MANDATORY_PRODUCT_URL_NOT_FOUND" in notebook_doc
-    assert "empty product URL" in mandatory_doc
-    assert "Amazon/eBay" in hierarchy_doc
-    assert "search_actions_df" in adaptive_doc
+    for key in ("final", "notebook", "mandatory", "adaptive", "belief", "precision", "azureml", "readme"):
+        text = documentation[key]
+        assert "manufacturer_primary" in text
+        assert "manufacturer_url" in text
+        assert "retailer_url" in text
+        assert "source_selection" in text
+
+    assert "url_delivery_df" in documentation["notebook"]
+    assert "source_selection_df" in documentation["notebook"]
+    assert "MANDATORY_PRODUCT_URL_NOT_FOUND" in documentation["notebook"]
+    assert "empty product URL" in documentation["mandatory"]
+    assert "Amazon/eBay" in documentation["hierarchy"]
+    assert "search_actions_df" in documentation["adaptive"]
+    assert "belief-url-resolution-v5-manufacturer-primary" in documentation["azureml"]
+    assert "FINAL_SYSTEM_CONTRACT.md" in documentation["readme"]
