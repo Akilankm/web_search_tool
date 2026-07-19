@@ -7,6 +7,8 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from src.product_evidence_harness.runtime_contract import RUNTIME_CONTRACT_VERSION
+
 AGENT_URL = os.getenv("PRODUCT_AGENT_URL", "http://127.0.0.1:8788").rstrip("/")
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 30
@@ -49,6 +51,33 @@ def check_health() -> dict:
     health = api_json("GET", "/health", timeout=15)
     if health.get("status") != "healthy":
         raise RuntimeError(f"Platform is not healthy: {json.dumps(health, indent=2)}")
+
+    running_contract = str(health.get("runtime_contract_version") or "").strip()
+    if running_contract != RUNTIME_CONTRACT_VERSION:
+        raise RuntimeError(
+            "STALE_AGENT_IMAGE: the notebook code and running Docker agent are from different repository versions.\n"
+            f"Notebook expects runtime contract: {RUNTIME_CONTRACT_VERSION}\n"
+            f"Running agent reports: {running_contract or 'missing/legacy'}\n\n"
+            "From the repository terminal run:\n"
+            "  git checkout master\n"
+            "  git pull origin master\n"
+            "  ./scripts/azureml_startup.sh\n\n"
+            "Do not use --no-build for this recovery. Restart the notebook kernel after the rebuild."
+        )
+
+    runtime_required = {
+        "belief_driven_product_resolution": "belief-driven product resolution",
+        "mandatory_review_url_delivery": "mandatory review URL delivery",
+        "deterministic_browser_fallback_on_llm_error": "deterministic browser fallback",
+    }
+    runtime_missing = [
+        label for key, label in runtime_required.items() if not health.get(key)
+    ]
+    if runtime_missing:
+        raise RuntimeError(
+            "Agent runtime capabilities missing: " + ", ".join(runtime_missing)
+        )
+
     configuration = health.get("configuration") or {}
     required = {
         "three_stage_contract_enforced": "three-credit contract",
@@ -101,6 +130,7 @@ def wait_for_job(
 
 
 def run_product(product: dict, feature_set: str = DEFAULT_FEATURE_SET) -> dict:
+    check_health()
     job_id = submit_product(product, feature_set)
     wait_for_job(job_id)
     return api_json("GET", f"/v1/jobs/{job_id}/result", timeout=60)
