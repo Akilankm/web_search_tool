@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from src.product_evidence_harness.runtime_contract import RUNTIME_CONTRACT_VERSION
+from src.product_evidence_harness.runtime_contract import runtime_capabilities
 
 
 _PATCHED = False
 
 
 def apply_runtime_contract_patch() -> None:
-    """Expose the agent image contract so notebooks reject stale containers."""
+    """Expose the agent image contract so notebooks can verify or recover it."""
 
     global _PATCHED
     if _PATCHED:
@@ -21,11 +21,6 @@ def apply_runtime_contract_patch() -> None:
     original_health = ProductEvidenceOrchestrator.health
 
     def health(self):
-        result = dict(original_health(self))
-        result["runtime_contract_version"] = RUNTIME_CONTRACT_VERSION
-        result["belief_driven_product_resolution"] = True
-        result["mandatory_review_url_delivery"] = True
-        result["deterministic_browser_fallback_on_llm_error"] = True
-        return result
+        return {**dict(original_health(self)), **runtime_capabilities()}
 
     ProductEvidenceOrchestrator.health = health

@@ -5,6 +5,7 @@ INVOKING_PWD="${PWD:-}"
 PROJECT_DIR="${PRODUCT_EVIDENCE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ENV_PERMISSION_MODE="${PRODUCT_EVIDENCE_ENV_PERMISSION_MODE:-auto}"
 BUILD_IMAGES=true
+CLEAN_BUILD=false
 STARTUP_SUCCEEDED=false
 
 usage() {
@@ -18,6 +19,8 @@ Fresh Azure ML workflow:
   4. open notebooks/01_run_product_evidence.ipynb
 
 Options:
+  --clean-build              Rebuild agent/browser images with --no-cache, then recreate containers.
+                             Use this for STALE_AGENT_IMAGE recovery.
   --no-build                 Reuse existing local images.
   --strict-env-permissions   Require .env mode 0600; disable Azure ML fallback.
   --allow-insecure-env-permissions
@@ -64,7 +67,16 @@ trap show_failure_diagnostics EXIT
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --clean-build)
+      CLEAN_BUILD=true
+      BUILD_IMAGES=true
+      shift
+      ;;
     --no-build)
+      if [[ "$CLEAN_BUILD" == "true" ]]; then
+        echo "--clean-build and --no-build cannot be used together." >&2
+        exit 2
+      fi
       BUILD_IMAGES=false
       shift
       ;;
@@ -171,14 +183,23 @@ python scripts/preflight_azureml.py \
   --env-permission-mode "$ENV_PERMISSION_MODE" \
   --skip-docker
 
+if [[ "$CLEAN_BUILD" == "true" ]]; then
+  phase "Rebuilding agent and browser images without Docker cache"
+  docker compose build --no-cache agent browser
+fi
+
 phase "Building and starting the agent and browser services"
 compose_args=(up -d --force-recreate --remove-orphans)
-if [[ "$BUILD_IMAGES" == "true" ]]; then
+if [[ "$CLEAN_BUILD" == "true" ]]; then
+  compose_args+=(--no-build)
+elif [[ "$BUILD_IMAGES" == "true" ]]; then
   compose_args+=(--build)
+else
+  compose_args+=(--no-build)
 fi
 docker compose "${compose_args[@]}"
 
-phase "Waiting for strict agent, browser, SerpAPI, and LLM readiness"
+phase "Waiting for strict agent, browser, SerpAPI, LLM, and runtime-contract readiness"
 python scripts/wait_for_stack.py \
   --env-file "$PROJECT_DIR/.env" \
   --write-status "$PROJECT_DIR/data/runtime/stack_health.json"
@@ -190,9 +211,16 @@ HOST_PORT="$(docker compose port agent 8000 2>/dev/null | tail -n 1 | awk -F: '{
 HOST_PORT="${HOST_PORT:-8788}"
 mapfile -t FEATURE_SETS < <(find inputs/private -maxdepth 1 -type f -name '*.json' -printf '%f\n' | sort)
 
+RUNTIME_CONTRACT="$(python - <<'PY'
+from src.product_evidence_harness.runtime_contract import RUNTIME_CONTRACT_VERSION
+print(RUNTIME_CONTRACT_VERSION)
+PY
+)"
+
 echo
 echo "Product evidence platform is ready."
 echo "Agent API: http://127.0.0.1:${HOST_PORT}"
+echo "Runtime contract: ${RUNTIME_CONTRACT}"
 echo "Health snapshot: $PROJECT_DIR/data/runtime/stack_health.json"
 echo "Artifacts: $PROJECT_DIR/data/artifacts/<row_id>/"
 echo "Notebook: $PROJECT_DIR/notebooks/01_run_product_evidence.ipynb"
@@ -202,5 +230,5 @@ for feature_file in "${FEATURE_SETS[@]}"; do
 done
 
 echo
-echo "Open the notebook, restart its kernel if it was already open, run the health/setup cell, select FEATURE_SET, and run the product cell."
+echo "Open the notebook, run the readiness cell, select FEATURE_SET, and run the product cell."
 STARTUP_SUCCEEDED=true

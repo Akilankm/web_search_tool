@@ -61,6 +61,17 @@ def test_startup_detects_resolved_azureml_mount_path() -> None:
     assert 'env_permission_mode="allow"' in source
 
 
+def test_startup_supports_deterministic_clean_build_recovery() -> None:
+    source = (ROOT / "scripts" / "azureml_startup.sh").read_text(encoding="utf-8")
+
+    assert "--clean-build" in source
+    assert "CLEAN_BUILD=true" in source
+    assert "docker compose build --no-cache agent browser" in source
+    assert "--force-recreate" in source
+    assert "Runtime contract:" in source
+    assert "--clean-build and --no-build cannot be used together" in source
+
+
 def test_preflight_accepts_azure_openai_aliases() -> None:
     values = {
         "SERPAPI_API_KEY": "serpapi_key_with_more_than_twenty_chars",
@@ -102,6 +113,22 @@ def test_waiter_extracts_nested_agent_configuration_error() -> None:
     assert waiter.extract_configuration_error(payload) == "ValueError: Missing LLM configuration"
 
 
+def test_waiter_rejects_legacy_runtime_contract() -> None:
+    payload = {
+        "status": "healthy",
+        "runtime_contract_version": "missing/legacy",
+    }
+    error = waiter.runtime_contract_error(payload)
+    assert error is not None
+    assert "runtime contract mismatch" in error.lower()
+
+
+def test_waiter_accepts_current_runtime_contract() -> None:
+    from src.product_evidence_harness.runtime_contract import runtime_capabilities
+
+    assert waiter.runtime_contract_error({"status": "healthy", **runtime_capabilities()}) is None
+
+
 def test_waiter_parses_env_without_exposing_values(tmp_path: Path) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text('AGENT_HOST_PORT="9999"\nSECRET=hidden\n', encoding="utf-8")
@@ -130,3 +157,5 @@ def test_notebook_and_runtime_contain_bootstrap_and_feature_discovery_contract()
     assert "Available feature sets" in source
     assert "Default feature set" in source
     assert "adaptive_search_contract_enforced" in runtime
+    assert "ensure_platform_ready" in source
+    assert "AUTO_RECOVER_PLATFORM = True" in source

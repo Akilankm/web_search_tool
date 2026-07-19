@@ -2,8 +2,6 @@
 
 ## Supported fresh-clone flow
 
-The supported setup requires only credential entry and one startup command:
-
 ```bash
 git clone https://github.com/Akilankm/web_search_tool.git
 cd web_search_tool
@@ -12,64 +10,17 @@ cp .env.example .env
 ./scripts/azureml_startup.sh
 ```
 
-The repository already contains:
-
-```text
-inputs/private/toy_features.json
-```
-
-No feature-file copy or creation step is required. After the script reports `Product evidence platform is ready`, open:
+After the script reports `Product evidence platform is ready`, open:
 
 ```text
 notebooks/01_run_product_evidence.ipynb
 ```
 
-The notebook is an API client. It does not build containers or install browser dependencies itself.
+The committed default feature schema is:
 
-## What the startup script automates
-
-`./scripts/azureml_startup.sh` is the single bootstrap and restart entry point. It:
-
-1. locates the repository root;
-2. creates `data/artifacts`, `data/runtime`, `inputs/private`, and `secrets`;
-3. validates the committed `inputs/private/toy_features.json` schema;
-4. creates the internal browser API token when missing;
-5. selects the invoking Azure ML user UID/GID for both non-root containers;
-6. attempts to set `.env` to mode `0600`;
-7. automatically detects Azure ML `cloudfiles` mounts that cannot preserve `0600` and continues with the trusted-workspace fallback;
-8. validates credentials, strict search controls, agentic-browser controls, feature files, Docker, Compose, and the host port;
-9. stops stale containers belonging to this Compose project;
-10. builds and recreates both services;
-11. waits for a healthy browser and strict agent configuration;
-12. fails immediately with the actual agent `configuration_error` instead of polling a hidden 503 until timeout;
-13. writes `data/runtime/stack_health.json`;
-14. prints the agent URL, notebook path, artifact root, and available `FEATURE_SET` values.
-
-The same command is safe to rerun after changing `.env` or pulling new code:
-
-```bash
-./scripts/azureml_startup.sh
+```text
+inputs/private/toy_features.json
 ```
-
-Use `--no-build` only when intentionally reusing existing images.
-
-## `.env` permission behavior
-
-The default permission mode is `auto`:
-
-- on normal Linux filesystems, the script enforces mode `0600`;
-- on Azure ML paths under `/cloudfiles/`, it first attempts `chmod 600`;
-- when the mount reports broader permissions despite that attempt, startup continues automatically with a warning because the mode cannot be represented by the mount;
-- credential placeholders, malformed values, disabled safety controls, and invalid endpoints are still rejected;
-- `.env` contents are never printed.
-
-For an explicit stricter run:
-
-```bash
-./scripts/azureml_startup.sh --strict-env-permissions
-```
-
-The old `--allow-insecure-env-permissions` option remains only for compatibility and should not be needed on Azure ML.
 
 ## Runtime topology
 
@@ -78,17 +29,122 @@ Azure ML Compute Instance
 ├── Docker Compose
 │   ├── agent:8000   -> host 127.0.0.1:8788
 │   └── browser:9000 -> internal Compose network only
-├── inputs/private/toy_features.json -> committed default schema
-├── data/runtime/    -> bootstrap health snapshot
-├── data/artifacts/  -> shared evidence and traces
+├── inputs/private/toy_features.json
+├── data/runtime/stack_health.json
+├── data/artifacts/<row_id>/
 └── notebooks/01_run_product_evidence.ipynb
 ```
 
-The agent owns all three SerpAPI searches, candidate admission, LLM planning, deterministic evidence validation, final selection, and outputs. The browser owns isolated Chromium sessions and safe action execution.
+The notebook is an API client. Search, scraping, browser evidence, belief updates, URL selection, and artifact writing run inside the local agent/browser stack.
+
+## Startup modes
+
+### Standard build and restart
+
+```bash
+./scripts/azureml_startup.sh
+```
+
+Use after pulling normal code changes or modifying `.env`.
+
+### Clean stale-image recovery
+
+```bash
+./scripts/azureml_startup.sh --clean-build
+```
+
+This mode:
+
+1. validates credentials and production controls;
+2. removes stale containers from the Compose project;
+3. verifies that the agent port is free;
+4. runs `docker compose build --no-cache agent browser`;
+5. recreates both services;
+6. waits for healthy SerpAPI, LLM, browser, and agent configuration;
+7. verifies the exact notebook/agent runtime contract;
+8. writes `data/runtime/stack_health.json`.
+
+Use this mode for `STALE_AGENT_IMAGE`, a missing runtime contract, or when the notebook was updated but Docker still serves older code.
+
+### Reuse known-current images
+
+```bash
+./scripts/azureml_startup.sh --no-build
+```
+
+Do not use `--no-build` for stale-image recovery. `--clean-build` and `--no-build` are mutually exclusive.
+
+## Self-healing notebook behavior
+
+The notebook defaults to:
+
+```python
+AUTO_RECOVER_PLATFORM = True
+CLEAN_BUILD_ON_RECOVERY = True
+```
+
+The first cell calls `ensure_platform_ready`. When port `8788` is unavailable, unhealthy, legacy, or missing required browser capabilities, the cell invokes the startup script from the same repository checkout with `--clean-build`, streams startup logs, and rechecks health.
+
+This happens before `submit_product`, so no paid SerpAPI request is consumed during recovery.
+
+Disable automatic recovery only for manual operations:
+
+```python
+AUTO_RECOVER_PLATFORM = False
+```
+
+or:
+
+```env
+PRODUCT_HARNESS_NOTEBOOK_AUTO_RECOVER_PLATFORM=false
+```
+
+## What startup validates
+
+The startup contract covers:
+
+- `.env` existence and permission policy;
+- real SerpAPI and enterprise LLM values;
+- committed feature schemas;
+- Docker and Compose availability;
+- non-root container UID/GID;
+- host-port availability;
+- three-credit adaptive search controls;
+- belief-driven product resolution;
+- mandatory review URL delivery;
+- deterministic browser fallback when the agentic LLM fails;
+- browser service agentic tools;
+- exact runtime-contract version.
+
+The current health response must include:
+
+```text
+status=healthy
+runtime_contract_version=belief-url-resolution-v3-self-healing
+belief_driven_product_resolution=true
+mandatory_review_url_delivery=true
+deterministic_browser_fallback_on_llm_error=true
+notebook_self_healing_runtime=true
+three_stage_contract_enforced=true
+serpapi_request_limit=3
+agentic_browser_contract_enforced=true
+llm_configured=true
+browser_service.agentic_tools=true
+```
+
+## Manual readiness verification
+
+```bash
+docker compose ps
+cat data/runtime/stack_health.json
+curl -sS http://127.0.0.1:8788/health | python -m json.tool
+```
+
+The startup waiter rejects a healthy-looking but stale agent immediately instead of allowing the notebook to submit against an incompatible runtime.
 
 ## Required configuration
 
-At minimum, replace these `.env` values:
+At minimum, replace:
 
 ```env
 SERPAPI_API_KEY=<real-key>
@@ -98,98 +154,61 @@ LLM_ENDPOINT=<approved-https-endpoint>
 LLM_DEPLOYMENT=<vision-capable-deployment>
 ```
 
-The equivalent `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_ENDPOINT`, and `AZURE_OPENAI_DEPLOYMENT` names are accepted. All other production controls are already supplied in `.env.example` and should remain unchanged.
+Equivalent `AZURE_OPENAI_*` variables are accepted.
 
-## Included feature schema
+Recommended production controls are already supplied in `.env.example`:
 
-The committed default schema is:
+```env
+PRODUCT_HARNESS_NOTEBOOK_AUTO_RECOVER_PLATFORM=true
+PRODUCT_HARNESS_NOTEBOOK_CLEAN_BUILD_ON_RECOVERY=true
+PRODUCT_HARNESS_ALLOW_DETERMINISTIC_BROWSER_FALLBACK_ON_LLM_ERROR=true
+PRODUCT_HARNESS_MAX_SERPAPI_CREDITS=3
+PRODUCT_HARNESS_MAX_FULL_SCRAPES=6
+```
+
+## Product workflow
 
 ```text
-inputs/private/toy_features.json
+MAIN_TEXT + COUNTRY_CODE
+→ offline product interpretation
+→ competing hypotheses
+→ requested retailer, when provided
+→ alternative retailer within requested country
+→ global fallback
+→ bounded scraping and browser evidence
+→ belief update
+→ mandatory browser-openable product URL
 ```
 
-It requests:
-
-- brand;
-- manufacturer;
-- minimum recommended age.
-
-The corresponding notebook/API value is:
-
-```python
-FEATURE_SET = "toy_features"
-```
-
-Additional organization-specific schemas may be placed under `inputs/private/`. They are ignored by Git unless explicitly approved; the committed `toy_features.json` remains the default runnable schema.
-
-## Readiness verification
-
-The bootstrap performs this automatically. Manual verification is:
-
-```bash
-docker compose ps
-cat data/runtime/stack_health.json
-curl -sS http://127.0.0.1:8788/health | python -m json.tool
-```
-
-The health response must include:
-
-```text
-status=healthy
-three_stage_contract_enforced=true
-serpapi_request_limit=3
-agentic_browser_contract_enforced=true
-llm_configured=true
-browser_service.agentic_tools=true
-```
-
-## Search and browser flow
-
-Every product uses exactly three searches:
-
-1. requested retailer in the requested country;
-2. alternative retailers in the requested country;
-3. global fallback.
-
-Every retained deduplicated candidate then receives an isolated agentic browser session:
-
-```text
-observe page + screenshot
-  -> LLM plans one safe action
-  -> browser validates and executes it
-  -> observe changed state
-  -> repeat
-```
-
-The deterministic selector still controls `primary_url`.
+A browser-planning LLM error, including `403 Forbidden`, falls back to deterministic rendered-page acquisition. The strict identity, feature, openability, scrapability, and durability gates remain authoritative.
 
 ## Failure behavior
 
-| Failure | Bootstrap behavior |
+| Failure | Behavior |
 |---|---|
-| `.env` missing | Creates it from `.env.example`, stops, and instructs you to edit credentials and rerun |
-| Placeholder SerpAPI/LLM value | Fails before Docker build with the exact missing field |
-| Default toy schema missing or malformed | Fails before Docker build with the exact file error |
-| `cloudfiles` cannot preserve `0600` | Automatically continues with a security notice |
-| Invalid production control | Fails preflight before containers start |
-| Stale project containers | Removes and recreates them automatically |
-| Unrelated process owns the agent port | Stops with the occupied-port error |
-| Agent returns configuration 503 | Health waiter prints the exact `configuration_error` and exits immediately |
+| `.env` missing | Creates it from `.env.example`, stops, and asks for credentials |
+| Placeholder credential | Fails before Docker build with the exact field |
+| Feature schema missing or malformed | Fails before Docker build |
+| Stale Compose containers | Removes and recreates them |
+| Stale agent image | Notebook or startup performs a no-cache rebuild |
+| Runtime contract mismatch after startup | Startup fails immediately with expected/running versions |
+| Agentic browser LLM returns 403 | Deterministic browser acquisition continues; strict gates still decide URL status |
+| No safe direct product URL | Run fails with `MANDATORY_PRODUCT_URL_NOT_FOUND` |
 | Browser/agent never becomes healthy | Prints Compose state and the final 200 log lines |
 
 ## Notebook workflow
 
-After successful startup:
-
 1. open `notebooks/01_run_product_evidence.ipynb`;
-2. restart the kernel if the notebook was already open before rebuild;
-3. run the setup/health cell;
-4. the included `toy_features` schema is discovered automatically;
+2. run the readiness cell;
+3. allow self-healing recovery when required;
+4. verify `platform_readiness_df`;
 5. replace the product input;
 6. set `RUN_SINGLE_PRODUCT = True`;
-7. run the product cell.
+7. run the product cell;
+8. open `result['primary_url']` in a browser;
+9. inspect the workbook and artifacts when the result is `REVIEW_REQUIRED`.
 
-The notebook reads `data/runtime/stack_health.json`, checks live `/health`, discovers feature sets, submits jobs, displays candidate-level progress, and inspects evidence artifacts.
+Kernel restart is not normally required after a container-only recovery because the readiness cell already evicts stale repository modules. Restart the kernel only when Azure ML itself retains an older notebook state.
 
 ## Logs and shutdown
 
@@ -200,14 +219,14 @@ docker compose down
 
 Stopping containers does not delete `data/artifacts` or `data/runtime`.
 
-## Validation for development
+## Development validation
 
 ```bash
-python scripts/validate_environment.py --env-file .env
-python scripts/preflight_azureml.py --skip-docker --skip-port
+bash -n scripts/azureml_startup.sh
+python scripts/wait_for_stack.py --help
 python -m compileall -q src scripts
 python -m json.tool inputs/private/toy_features.json >/dev/null
 python -m json.tool notebooks/01_run_product_evidence.ipynb >/dev/null
-python -m pytest -q
+PYTHONPATH=src pytest -q
 docker compose config --quiet
 ```

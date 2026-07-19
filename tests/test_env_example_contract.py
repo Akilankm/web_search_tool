@@ -36,11 +36,17 @@ def test_env_example_exists_and_enforces_adaptive_three_credit_contract() -> Non
     assert values["PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE"] == "true"
     assert values["PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER"] == "true"
     assert values["PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER"] == "true"
+    assert (
+        values["PRODUCT_HARNESS_ALLOW_DETERMINISTIC_BROWSER_FALLBACK_ON_LLM_ERROR"]
+        == "true"
+    )
     assert values["PRODUCT_HARNESS_ENABLE_VISION_REASONING"] == "true"
     assert values["PRODUCT_HARNESS_COUNTRY_FIRST"] == "true"
     assert values["PRODUCT_HARNESS_ALLOW_GLOBAL_FALLBACK"] == "true"
     assert values["PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY"] == "true"
     assert values["PRODUCT_HARNESS_REJECT_EXPIRING_URLS"] == "true"
+    assert values["PRODUCT_HARNESS_NOTEBOOK_AUTO_RECOVER_PLATFORM"] == "true"
+    assert values["PRODUCT_HARNESS_NOTEBOOK_CLEAN_BUILD_ON_RECOVERY"] == "true"
     assert int(values["PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT"]) >= 1
     assert 1 <= int(values["PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES"]) <= 90
     assert 1 <= int(values["PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE"]) <= 30

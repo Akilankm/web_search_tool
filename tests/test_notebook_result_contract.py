@@ -59,10 +59,36 @@ def test_notebook_defaults_to_committed_toy_feature_schema() -> None:
     assert "feature_set: str = DEFAULT_FEATURE_SET" in runtime
 
 
+def test_notebook_self_heals_stale_azureml_runtime_before_serp() -> None:
+    source = notebook_source()
+    runtime = runtime_source()
+    startup = (ROOT / "scripts" / "azureml_startup.sh").read_text(encoding="utf-8")
+
+    for token in (
+        "AUTO_RECOVER_PLATFORM = True",
+        "CLEAN_BUILD_ON_RECOVERY = True",
+        "ensure_platform_ready",
+        "platform_recovery",
+        "platform_readiness_df",
+        "auto_recovery_attempted",
+        "clean_build_used",
+    ):
+        assert token in source
+
+    assert "recover_platform" in runtime
+    assert "subprocess.Popen" in runtime
+    assert "--clean-build" in runtime
+    assert "PRODUCT_HARNESS_NOTEBOOK_AUTO_RECOVER_PLATFORM" in runtime
+    assert "PRODUCT_HARNESS_NOTEBOOK_CLEAN_BUILD_ON_RECOVERY" in runtime
+    assert "--clean-build" in startup
+    assert "docker compose build --no-cache agent browser" in startup
+
+
 def test_notebook_builds_complete_single_product_eda_tables() -> None:
     source = notebook_source()
 
     for name in (
+        "platform_readiness_df",
         "url_delivery_df",
         "results_df",
         "search_stages_df",
@@ -91,8 +117,9 @@ def test_notebook_builds_complete_single_product_eda_tables() -> None:
     assert "One canonical product URL candidate per row" in source
 
 
-def test_notebook_exposes_mandatory_url_contract() -> None:
+def test_notebook_exposes_centralized_mandatory_url_contract() -> None:
     source = notebook_source()
+    runtime = runtime_source()
 
     for field in (
         "primary_url",
@@ -104,10 +131,12 @@ def test_notebook_exposes_mandatory_url_contract() -> None:
     ):
         assert field in source
 
-    assert "Mandatory URL contract violated" in source
-    assert "if not result.get('primary_url') or not delivery.get('delivered')" in source
+    assert "run_product(product, FEATURE_SET)" in source
+    assert "validate_result_contract" in runtime
+    assert "MANDATORY_PRODUCT_URL_NOT_DELIVERED" in runtime
     assert "REVIEW_REQUIRED" in source
     assert "MANDATORY_PRODUCT_URL_NOT_FOUND" in source
+    assert "json.dumps(result" not in source
 
 
 def test_notebook_exposes_adaptive_search_contract() -> None:
@@ -181,7 +210,7 @@ def test_notebook_uses_repository_local_artifact_paths_and_exports_rca() -> None
     ).read_text(encoding="utf-8")
 
     assert 'project_root / "data" / "artifacts"' in runtime
-    assert "host_artifact_dir(PROJECT_ROOT, result)" in source
+    assert "host_artifact_dir(PROJECT_ROOT,result)" in source
     assert "candidates.csv" in diagnostics_source
     assert "feature_evidence.csv" in diagnostics_source
     assert "single_product_diagnostics.xlsx" in source
