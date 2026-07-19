@@ -5,6 +5,17 @@ from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import FastAPI, HTTPException
 
+from src.product_evidence_harness.compat_patches import (
+    apply_compatibility_patches,
+    compatibility_patches_applied,
+)
+from src.product_evidence_harness.runtime_contract import runtime_capabilities
+
+# The Uvicorn entrypoint must initialize the complete production runtime itself.
+# Package import side effects are retained for compatibility but are no longer
+# the only mechanism that installs the belief/search/browser patches.
+apply_compatibility_patches()
+
 from src.product_evidence_harness.agent_service.jobs import InMemoryJobStore, JobStatus
 from src.product_evidence_harness.progress_context import browser_progress_callback
 from src.product_evidence_harness.agent_service.strict_orchestrator import (
@@ -14,7 +25,7 @@ from src.product_evidence_harness.three_stage_environment import validate_runtim
 from src.product_evidence_harness.llm.service import LLMConfig
 
 
-app = FastAPI(title="Product Evidence Agent", version="0.8.0")
+app = FastAPI(title="Product Evidence Agent", version="0.9.0")
 store = InMemoryJobStore()
 executor = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("AGENT_WORKERS", "2"))))
 orchestrator = StrictProductEvidenceOrchestrator()
@@ -45,10 +56,29 @@ def _validate_runtime() -> tuple[dict | None, str | None]:
         return None, f"{type(exc).__name__}: {exc}"
 
 
+def _service_health() -> dict:
+    return {
+        **dict(orchestrator.health()),
+        **runtime_capabilities(),
+        "compatibility_patches_applied": compatibility_patches_applied(),
+        "agent_entrypoint": "src.product_evidence_harness.agent_service.app:app",
+    }
+
+
 @app.get("/health")
 def health() -> dict:
     configuration, configuration_error = _validate_runtime()
-    service = orchestrator.health()
+    service = _service_health()
+    if not service.get("compatibility_patches_applied"):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "unhealthy",
+                "configuration_error": "Agent compatibility patches were not initialized",
+                "browser_service": service.get("browser_service"),
+                **runtime_capabilities(),
+            },
+        )
     if configuration_error:
         raise HTTPException(
             status_code=503,
@@ -56,6 +86,8 @@ def health() -> dict:
                 "status": "unhealthy",
                 "configuration_error": configuration_error,
                 "browser_service": service.get("browser_service"),
+                **runtime_capabilities(),
+                "compatibility_patches_applied": True,
             },
         )
     if service.get("status") != "healthy":
