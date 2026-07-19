@@ -1,18 +1,16 @@
 # Product Evidence Platform
 
-A production-oriented product-identification and URL-resolution system for vendor product text.
+A production-oriented, multimodal product-identification and URL-resolution system for vendor product text.
 
-> Given `MAIN_TEXT`, `COUNTRY_CODE`, and optional `RETAILER_NAME` / `EAN`, return the strongest real product-detail URL that a reviewer can open in a normal browser and inspect.
+> Given `MAIN_TEXT`, `COUNTRY_CODE`, and optional `RETAILER_NAME` / `EAN`, return the strongest real product-detail URL and a human-comparable record of the business judgments that produced it.
+
+## Core business contract
 
 The platform separates **product truth** from **commercial reference**:
 
-- the official manufacturer or brand page is preferred for identity, specifications, warnings, compatibility, dimensions, and official feature definitions;
-- a retailer page is retained for price, availability, local assortment, language, market, and purchase context;
-- a retailer becomes primary whenever the manufacturer page fails any mandatory production gate.
-
-The URL is the final deliverable. Product understanding, hypotheses, search decisions, scrapes, browser checks, feature evidence, and belief updates exist to make that URL defensible.
-
-## Final decision contract
+- an exact, complete and durable official manufacturer page is preferred for product truth;
+- a qualified retailer page is preserved for price, availability, local assortment, language and purchasing context;
+- a retailer becomes `primary_url` when no manufacturer page passes every mandatory gate.
 
 ```text
 exact product, model, form, variant, size, quantity and pack
@@ -22,13 +20,11 @@ exact product, model, form, variant, size, quantity and pack
 → durable non-expiring URL
 → official manufacturer authority
 → requested retailer / requested-country retailer
-→ global retailer or other exact product source
+→ global exact-product source
 → marketplace last resort
 ```
 
-Source authority is applied only after identity and evidence safety.
-
-A manufacturer page never wins merely because it is official. It must be the exact product, pass rendered-page and scrape validation, contain the requested feature evidence, and expose a durable URL.
+Source authority never bypasses identity, browser, feature, scrapability or durability safety.
 
 ## Three-credit search route
 
@@ -39,33 +35,49 @@ Credit 2: requested_retailer_country when retailer_name is supplied
 Credit 3: global_fallback
 ```
 
-A retailer discovered during credit 1 is retained, but it cannot stop the search before the manufacturer opportunity has been evaluated.
+A retailer discovered during credit 1 is retained but cannot stop the search before the manufacturer opportunity is evaluated.
 
-Credit 2 may expand a real Shopping immersive-product token because this is a direct merchant-resolution action and is more precise than repeating a generic retailer query.
+## Human-comparable business judgment artifact
 
-Credit 3 removes the country restriction while retaining exact-product requirements.
-
-## Product-identification trajectory
+Every completed or review-required run writes:
 
 ```text
-MAIN_TEXT + COUNTRY_CODE
-→ deterministic offline parsing
-→ structured no-web LLM interpretation
-→ competing hypotheses and uncertainty metrics
-→ manufacturer-first paid search
-→ bounded candidate scraping and browser validation
-→ atomic evidence ledger
-→ posterior belief update and path correction
-→ strict feature and URL gates
-→ authority-ranked primary URL
-→ manufacturer and retailer reference URLs
+data/artifacts/<row_id>/business_judgement_review.md
 ```
 
-Model knowledge remains a prior until page evidence supports it. Search results are candidates, not facts.
+This is the primary artifact to share with a human coder. It contains:
+
+- the submitted input;
+- the chronological business questions considered;
+- observable text, identifier, rendered-page and visual evidence;
+- the agent judgment at each step;
+- the explicit business rule applied;
+- alternatives considered and rejected;
+- the effect on the next action;
+- the strict URL gates;
+- the manufacturer-versus-retailer `source_selection`;
+- the final `primary_url`, `manufacturer_url` and `retailer_url`;
+- a human response form for `IDENTICAL`, `PARTIALLY IDENTICAL` or `NOT IDENTICAL`;
+- the first divergent step and recommended system change.
+
+The artifact records evidence and decisions, not hidden chain-of-thought.
+
+See [Business judgment review](docs/BUSINESS_JUDGEMENT_REVIEW.md).
+
+## Multimodal evidence
+
+The agentic browser receives rendered screenshots, discovers product galleries, downloads product/package images and may explicitly inspect images. Vision-derived evidence is recorded as:
+
+```text
+extraction_method=vision_llm
+evidence_location=visual_asset:<asset_id>
+```
+
+Images can materially complete the selected URL's requested-feature gate. The review artifact distinguishes whether images were decisive, merely used during investigation, or not recorded. It does not claim that text alone would have failed unless an explicit counterfactual was run.
 
 ## Stable result schema
 
-Every `COMPLETED` or `REVIEW_REQUIRED` response contains:
+Every `COMPLETED` or `REVIEW_REQUIRED` result contains:
 
 ```text
 primary_url
@@ -77,59 +89,20 @@ primary_url_acceptance
 url_delivery
 product_identification
 search.market_decision_path
+business_judgement_review
 ```
 
-### URL roles
+`manufacturer_url` and `retailer_url` are stable keys and may be `null` only when no qualified page exists for that role.
 
-| Field | Purpose |
-|---|---|
-| `primary_url` | Strongest product-truth page after strict gates and authority ranking |
-| `primary_url_role` | `OFFICIAL_MANUFACTURER`, `RETAILER`, `MARKETPLACE`, or `OTHER_PRODUCT_SOURCE` |
-| `manufacturer_url` | Strongest strictly qualified official manufacturer page, when available |
-| `retailer_url` | Strongest strictly qualified commercial reference page, when available |
-| `source_selection` | Explicit manufacturer-versus-retailer decision and reason |
-
-## Manufacturer fallback rule
-
-A retailer becomes `primary_url` when the manufacturer page is:
-
-- missing;
-- inaccessible or blocked;
-- not text-scrapable;
-- a homepage, category, family, collection, campaign, or search page;
-- the wrong model, product form, variant, edition, size, quantity, or pack;
-- missing requested feature evidence;
-- transient or expiring.
-
-Retailer fallback is a controlled production decision, not a lower-quality failure.
-
-## Terminal outcomes
+## Outcomes
 
 | Outcome | Meaning |
 |---|---|
-| `COMPLETED` | `primary_url` passed strict browser, identity, feature, scrapability, durability, and authority selection |
-| `REVIEW_REQUIRED` | A real direct product URL was delivered, but one or more gates need human confirmation |
-| `FAILED` | No safe direct product-page URL could be delivered, or execution failed |
+| `COMPLETED` | Primary URL passed strict browser, identity, feature, scrapability, durability and authority selection |
+| `REVIEW_REQUIRED` | A real direct product URL was delivered but requires human confirmation |
+| `FAILED` | No safe direct product URL could be delivered or execution failed |
 
-The system never reports success with an empty URL.
-
-If no direct product URL exists after the bounded search, the run ends with:
-
-```text
-MANDATORY_PRODUCT_URL_NOT_FOUND
-```
-
-## Search and scrape budget
-
-```env
-PRODUCT_HARNESS_MAX_SERPAPI_CREDITS=3
-PRODUCT_HARNESS_MAX_FULL_SCRAPES=6
-PRODUCT_HARNESS_MAX_SCRAPES_PER_DOMAIN=2
-PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE=2
-PRODUCT_HARNESS_EARLY_STOP_ON_WORKING_URL=true
-```
-
-Maximums are safety limits, not targets. The runtime preserves unused scrape capacity for later credits.
+The system never reports success with an empty product URL. When no safe direct page exists it returns `MANDATORY_PRODUCT_URL_NOT_FOUND`.
 
 ## Azure ML setup
 
@@ -147,82 +120,63 @@ Open only:
 notebooks/01_run_product_evidence.ipynb
 ```
 
-The committed default schema is:
+The committed feature schema is:
 
 ```text
 inputs/private/toy_features.json
 ```
 
-## Self-healing notebook runtime
+## Runtime compatibility
 
-The first notebook cell verifies that its code and the local Docker agent expose the same runtime contract before any paid search.
+Current contract:
 
-The final compatibility version is:
+```text
+belief-url-resolution-v6-business-judgement-review
+```
+
+Previous contract retained for migration documentation:
 
 ```text
 belief-url-resolution-v5-manufacturer-primary
 ```
 
-The health response must include:
+Required health capabilities include:
 
 ```text
 manufacturer_first_primary_url=true
+business_judgement_review_artifact=true
 ```
 
-Default notebook behavior:
-
-```python
-AUTO_RECOVER_PLATFORM = True
-CLEAN_BUILD_ON_RECOVERY = True
-```
-
-When the agent is missing, stale, or incompatible, the notebook runs the equivalent of:
+The notebook validates these capabilities before product submission and before any paid SerpAPI request. A stale agent is rebuilt using:
 
 ```bash
 ./scripts/azureml_startup.sh --clean-build
 ```
 
-This removes stale Compose containers, rebuilds agent and browser images without cache, recreates both services, and validates the complete runtime contract before product submission.
+## Supported notebook workflow
 
-For manual recovery:
-
-```bash
-git checkout master
-git pull origin master
-./scripts/azureml_startup.sh --clean-build
+```text
+run product
+→ review business_judgement_steps_df
+→ review visual_evidence_summary_df
+→ share business_judgement_review.md with the human coder
+→ classify IDENTICAL / PARTIALLY IDENTICAL / NOT IDENTICAL
+→ inspect engineering diagnostics only after a divergence is identified
 ```
 
-Use `--no-build` only when the local images are already known to match the checkout.
+The review workbook adds:
 
-## Browser LLM failure handling
-
-When the agentic browser planner fails, including `403 Forbidden`, the system falls back to deterministic rendered-page acquisition:
-
-```env
-PRODUCT_HARNESS_ALLOW_DETERMINISTIC_BROWSER_FALLBACK_ON_LLM_ERROR=true
+```text
+business_judgments
+visual_evidence_impact
+source_selection
 ```
-
-The fallback does not bypass exact-product, requested-feature, openability, scrapability, or durability gates. It only preserves usable browser evidence when planning LLM access fails.
-
-## Input
-
-```python
-product = {
-    'row_id': 'ROW-001',
-    'main_text': 'Vendor product main text',
-    'country_code': 'CZ',
-    'retailer_name': None,
-    'ean': None,
-    'language_code': None,
-}
-```
-
-`main_text` and `country_code` are mandatory. EAN/GTIN must remain text.
 
 ## Artifact contract
 
 ```text
 data/artifacts/<row_id>/
+├── business_judgement_review.md
 ├── product_belief.json
 ├── product_understanding.md
 ├── market_decision_path.md
@@ -239,21 +193,7 @@ data/artifacts/<row_id>/
 └── single_product_diagnostics.xlsx
 ```
 
-`source_selection.json` is the authoritative audit record for the manufacturer-versus-retailer decision.
-
-Observable summaries are written instead of hidden chain-of-thought.
-
-## Required credentials
-
-```env
-SERPAPI_API_KEY=<organization-provided-value>
-LLM_API_KEY=<organization-provided-value>
-LLM_API_VERSION=<organization-provided-value>
-LLM_ENDPOINT=<organization-provided-value>
-LLM_DEPLOYMENT=<organization-provided-value>
-```
-
-Equivalent `AZURE_OPENAI_*` names are accepted.
+`business_judgement_review.md` is the human validation artifact. `source_selection.json` is the final manufacturer-versus-retailer authority record. The other files are supporting engineering evidence.
 
 ## Important controls
 
@@ -265,6 +205,7 @@ PRODUCT_HARNESS_MAX_SERPAPI_CREDITS=3
 PRODUCT_HARNESS_MAX_FULL_SCRAPES=6
 PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER=true
 PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER=true
+PRODUCT_HARNESS_ENABLE_VISION_REASONING=true
 PRODUCT_HARNESS_ALLOW_DETERMINISTIC_BROWSER_FALLBACK_ON_LLM_ERROR=true
 PRODUCT_HARNESS_ALLOW_EAN_CONFLICT=false
 PRODUCT_HARNESS_REJECT_EXPIRING_URLS=true
@@ -285,13 +226,14 @@ docker compose config --quiet
 ## Documentation
 
 - [Final system contract](docs/FINAL_SYSTEM_CONTRACT.md)
+- [Business judgment review](docs/BUSINESS_JUDGEMENT_REVIEW.md)
+- [Notebook usage](docs/NOTEBOOK_USAGE.md)
+- [Azure ML operations](docs/AZUREML_OPERATIONS.md)
 - [Manufacturer-first source authority](docs/SOURCE_AUTHORITY_HIERARCHY.md)
 - [Belief-driven product resolution](docs/BELIEF_DRIVEN_PRODUCT_RESOLUTION.md)
 - [Adaptive SerpAPI search](docs/ADAPTIVE_SERPAPI_SEARCH.md)
 - [Candidate precision and context control](docs/CANDIDATE_PRECISION_AND_CONTEXT.md)
 - [Mandatory product URL delivery](docs/MANDATORY_PRODUCT_URL.md)
-- [Notebook usage](docs/NOTEBOOK_USAGE.md)
 - [Agentic browser](docs/AGENTIC_BROWSER.md)
-- [Azure ML operations](docs/AZUREML_OPERATIONS.md)
 - [Enterprise LLM configuration](docs/ENTERPRISE_LLM_CONFIGURATION.md)
 - [Security contract](docs/SECURITY.md)
