@@ -93,9 +93,9 @@ deterministic parsing
 → no-web LLM interpretation
 → competing product hypotheses
 → uncertainty metrics
-→ Credit 1: official manufacturer/brand product page
-→ Credit 2: requested retailer or requested-country retailer
-→ Credit 3: global manufacturer-or-retailer fallback
+→ Credit 1: manufacturer_primary — official manufacturer/brand product page
+→ Credit 2: requested_retailer_country or country_alternative
+→ Credit 3: global_fallback — global manufacturer-or-retailer fallback
 → strict identity, browser, feature, scrapability, and durability gates
 → manufacturer-first authority ranking
 → primary_url + manufacturer_url + retailer_url
