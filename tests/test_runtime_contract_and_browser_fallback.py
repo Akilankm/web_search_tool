@@ -75,6 +75,8 @@ def _healthy_payload() -> dict:
         "mandatory_review_url_delivery": True,
         "deterministic_browser_fallback_on_llm_error": True,
         "notebook_self_healing_runtime": True,
+        "compatibility_patches_applied": True,
+        "manufacturer_first_primary_url": True,
         "browser_service": {"agentic_tools": True},
         "configuration": {
             "three_stage_contract_enforced": True,
@@ -142,6 +144,7 @@ def test_health_exposes_runtime_contract(tmp_path: Path) -> None:
     assert health["mandatory_review_url_delivery"] is True
     assert health["deterministic_browser_fallback_on_llm_error"] is True
     assert health["notebook_self_healing_runtime"] is True
+    assert health["manufacturer_first_primary_url"] is True
 
 
 def test_notebook_rejects_legacy_agent_before_submission(monkeypatch) -> None:
@@ -152,6 +155,17 @@ def test_notebook_rejects_legacy_agent_before_submission(monkeypatch) -> None:
     monkeypatch.setattr(runtime, "api_json", lambda *args, **kwargs: legacy)
 
     with pytest.raises(RuntimeError, match="STALE_AGENT_IMAGE"):
+        check_health()
+
+
+def test_notebook_rejects_agent_without_manufacturer_first_capability(monkeypatch) -> None:
+    import src.product_evidence_harness.notebook_runtime as runtime
+
+    incomplete = _healthy_payload()
+    incomplete.pop("manufacturer_first_primary_url")
+    monkeypatch.setattr(runtime, "api_json", lambda *args, **kwargs: incomplete)
+
+    with pytest.raises(RuntimeError, match="manufacturer-first primary URL selection"):
         check_health()
 
 
@@ -185,6 +199,7 @@ def test_notebook_auto_recovers_stale_agent_from_same_checkout(
     )
 
     assert health["runtime_contract_version"] == RUNTIME_CONTRACT_VERSION
+    assert health["manufacturer_first_primary_url"] is True
     assert result.attempted is True
     assert result.recovered is True
     assert result.clean_build is True
@@ -195,20 +210,62 @@ def test_review_required_result_with_real_url_passes_delivery_contract() -> None
     result = {
         "job_status": "REVIEW_REQUIRED",
         "primary_url": "https://shop.example/product",
+        "primary_url_role": "RETAILER",
+        "manufacturer_url": None,
+        "retailer_url": "https://shop.example/product",
+        "source_selection": {
+            "policy": "MANUFACTURER_FIRST_AFTER_PRODUCTION_GATES",
+            "selection_reason": "RETAILER_REVIEW_URL_AFTER_MANUFACTURER_GATE_FAILURE",
+        },
         "product_identification": {"resolution_status": "PROBABLE"},
-        "search": {"market_decision_path": ["country_alternative", "global_fallback"]},
+        "search": {
+            "market_decision_path": [
+                "manufacturer_primary",
+                "country_alternative",
+                "global_fallback",
+            ]
+        },
         "url_delivery": {"delivered": True, "strictly_verified": False},
         "product_match": {"match_reason": "BEST_AVAILABLE_REVIEW_URL"},
     }
     assert validate_result_contract(result) is result
 
 
+def test_missing_source_authority_fields_raise_schema_error() -> None:
+    result = {
+        "job_status": "REVIEW_REQUIRED",
+        "primary_url": "https://shop.example/product",
+        "product_identification": {"resolution_status": "PROBABLE"},
+        "search": {"market_decision_path": ["manufacturer_primary"]},
+        "url_delivery": {"delivered": True, "strictly_verified": False},
+    }
+    with pytest.raises(RuntimeError, match="RESULT_CONTRACT_MISMATCH") as exc:
+        validate_result_contract(result)
+    assert "primary_url_role" in str(exc.value)
+    assert "source_selection" in str(exc.value)
+    assert "manufacturer_url" in str(exc.value)
+    assert "retailer_url" in str(exc.value)
+
+
 def test_missing_url_raises_concise_delivery_error() -> None:
     result = {
         "job_status": "REVIEW_REQUIRED",
         "primary_url": None,
+        "primary_url_role": "RETAILER",
+        "manufacturer_url": None,
+        "retailer_url": None,
+        "source_selection": {
+            "policy": "MANUFACTURER_FIRST_AFTER_PRODUCTION_GATES",
+            "selection_reason": "NO_SAFE_DIRECT_PRODUCT_URL",
+        },
         "product_identification": {"resolution_status": "AMBIGUOUS"},
-        "search": {"market_decision_path": ["country_alternative", "global_fallback"]},
+        "search": {
+            "market_decision_path": [
+                "manufacturer_primary",
+                "country_alternative",
+                "global_fallback",
+            ]
+        },
         "url_delivery": {"delivered": False, "status": "NOT_DELIVERED"},
         "product_match": {
             "match_reason": "MANDATORY_PRODUCT_URL_NOT_FOUND",
@@ -219,4 +276,5 @@ def test_missing_url_raises_concise_delivery_error() -> None:
     with pytest.raises(RuntimeError, match="MANDATORY_PRODUCT_URL_NOT_DELIVERED") as exc:
         validate_result_contract(result)
     assert "artifact_dir=/data/artifacts/ROW-1" in str(exc.value)
+    assert "source_selection.json" in str(exc.value)
     assert len(str(exc.value)) < 1000
