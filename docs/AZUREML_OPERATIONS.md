@@ -201,9 +201,9 @@ PRODUCT_HARNESS_REJECT_EXPIRING_URLS=true
 MAIN_TEXT + COUNTRY_CODE
 → offline product interpretation
 → competing hypotheses and uncertainty metrics
-→ Credit 1: official manufacturer/brand product page
-→ Credit 2: requested retailer or requested-country retailer
-→ Credit 3: global manufacturer-or-retailer fallback
+→ Credit 1: manufacturer_primary — official manufacturer/brand product page
+→ Credit 2: requested_retailer_country when retailer_name exists, otherwise country_alternative
+→ Credit 3: global_fallback — global manufacturer-or-retailer fallback
 → bounded scrape and browser evidence
 → belief update
 → strict identity, feature, openability, scrapability, and durability gates
