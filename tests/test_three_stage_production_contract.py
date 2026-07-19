@@ -5,7 +5,14 @@ from src.product_evidence_harness.browser_contracts import (
     BrowserEvidenceStatus,
 )
 from src.product_evidence_harness.config import HarnessConfig, SerpAPIConfig
-from src.product_evidence_harness.contracts import OrganicSearchResponse, ProductQuery
+from src.product_evidence_harness.contracts import (
+    CandidateScorecard,
+    MatchVerification,
+    OrganicSearchResponse,
+    ProductQuery,
+    ScrapeResult,
+    URLCandidate,
+)
 from src.product_evidence_harness.feature_schema import (
     FeatureCriticality,
     FeatureDefinition,
@@ -35,7 +42,7 @@ class RecordingOrganicClient:
         )
 
 
-def test_three_stage_campaign_uses_exactly_three_credits_and_escapes_retailer() -> None:
+def test_three_stage_campaign_searches_manufacturer_before_requested_retailer() -> None:
     client = RecordingOrganicClient()
     harness = ThreeStageProductEvidenceHarness(
         serp_config=SerpAPIConfig(api_key="x" * 24),
@@ -63,12 +70,13 @@ def test_three_stage_campaign_uses_exactly_three_credits_and_escapes_retailer() 
 
     assert result.state.budget.organic_used == 3
     assert [call["scope"] for call in client.calls] == ["country", "country", "global"]
-    assert "mercado libre" in client.calls[0]["query"].lower()
-    assert "mercado libre" not in client.calls[1]["query"].lower()
+    assert "official manufacturer" in client.calls[0]["query"].lower()
+    assert "mercado libre" not in client.calls[0]["query"].lower()
+    assert "mercado libre" in client.calls[1]["query"].lower()
     assert "mercado libre" not in client.calls[2]["query"].lower()
     assert [stage["name"] for stage in result.state.search_stage_trace] == [
+        "manufacturer_primary",
         "requested_retailer_country",
-        "country_alternative",
         "global_fallback",
     ]
 
@@ -98,7 +106,7 @@ def test_three_stage_campaign_supports_optional_retailer_and_ean() -> None:
     assert result.state.budget.organic_used == 3
     assert result.state.task.country_code == "IN"
     assert [stage["name"] for stage in result.state.search_stage_trace] == [
-        "country_primary",
+        "manufacturer_primary",
         "country_alternative",
         "global_fallback",
     ]
@@ -160,11 +168,11 @@ def _assessment(url: str, *, complete: bool = True) -> URLFeatureAssessment:
     )
 
 
-def _bundle(url: str) -> BrowserEvidenceBundle:
+def _bundle(url: str, candidate_id: str = "CAND-001") -> BrowserEvidenceBundle:
     return BrowserEvidenceBundle(
         status=BrowserEvidenceStatus.COMPLETED,
         job_id="ROW-1",
-        candidate_id="CAND-001",
+        candidate_id=candidate_id,
         requested_url=url,
         final_url=url,
         browser_openable=True,
@@ -174,6 +182,74 @@ def _bundle(url: str) -> BrowserEvidenceBundle:
         direct_images_downloaded=1,
         screenshots_captured=1,
         multimodal_scrapable=True,
+    )
+
+
+def _verification(url: str) -> MatchVerification:
+    return MatchVerification(
+        url=url,
+        identity_status="VERIFIED",
+        ean_check="MATCHED",
+        title_check="STRONG",
+        quantity_check="MATCHED",
+        brand_check="MATCHED",
+        page_type_check="PRODUCT_DETAIL",
+        title_match_score=1.0,
+        exact_product_check="EXACT_MATCH",
+        variant_check="MATCHED",
+    )
+
+
+def _scorecard(
+    url: str,
+    *,
+    source_tier_marker: str,
+    source_role_marker: str,
+    scope_marker: str,
+    confidence: float,
+) -> CandidateScorecard:
+    scrape = ScrapeResult(
+        url=url,
+        scraped=True,
+        success=True,
+        reachable=True,
+        is_scrapable=True,
+        status_code=200,
+        final_url=url,
+        title="Exact product",
+        page_product_name="Exact product",
+        looks_like_product_page=True,
+        richness_score=0.9,
+        word_count=500,
+    )
+    return CandidateScorecard(
+        candidate=URLCandidate(
+            url=url,
+            title="Exact product",
+            source_types=(
+                source_tier_marker,
+                source_role_marker,
+                scope_marker,
+            ),
+        ),
+        organic_score=1.0,
+        ai_score=0.0,
+        retailer_score=0.0,
+        country_score=1.0,
+        ean_score=1.0,
+        title_score=1.0,
+        product_page_score=1.0,
+        scrape_score=1.0,
+        identity_score=1.0,
+        richness_score=0.9,
+        weighted_confidence=confidence,
+        confidence_cap=1.0,
+        final_confidence=confidence,
+        validation_status="VERIFIED",
+        scrape=scrape,
+        verification=_verification(url),
+        retailer_check="NOT_PROVIDED",
+        country_check="MATCHED",
     )
 
 
@@ -193,6 +269,81 @@ def test_strict_primary_acceptance_requires_browser_exact_features_and_durable_u
     assert decision.exact_product_verified is True
     assert decision.full_feature_coverage is True
     assert decision.durable_url is True
+
+
+def test_strict_selector_prefers_qualified_manufacturer_and_retains_retailer() -> None:
+    manufacturer = "https://www.hotwheels.com/product/bmw-m3-wagon"
+    retailer = "https://retailer.example.co/product/bmw-m3-wagon"
+    decision = StrictPrimaryURLSelector().select(
+        schema=_schema(),
+        assessments=[_assessment(manufacturer), _assessment(retailer)],
+        browser_bundles=[
+            _bundle(manufacturer, "CAND-001"),
+            _bundle(retailer, "CAND-002"),
+        ],
+        scorecards=[
+            _scorecard(
+                manufacturer,
+                source_tier_marker="source_tier_01_GLOBAL_MANUFACTURER",
+                source_role_marker="source_role_MANUFACTURER",
+                scope_marker="scope_manufacturer_primary",
+                confidence=0.82,
+            ),
+            _scorecard(
+                retailer,
+                source_tier_marker="source_tier_04_MAJOR_COUNTRY_RETAILER",
+                source_role_marker="source_role_MAJOR_COUNTRY_RETAILER",
+                scope_marker="scope_country_alternative",
+                confidence=0.99,
+            ),
+        ],
+    )
+
+    assert decision.accepted is True
+    assert decision.primary_url == manufacturer
+    assert decision.source_role == "MANUFACTURER"
+    assert decision.manufacturer_url == manufacturer
+    assert decision.retailer_url == retailer
+    assert decision.selection_reason == "OFFICIAL_MANUFACTURER_PRIMARY_AFTER_STRICT_GATES"
+
+
+def test_strict_selector_falls_back_to_retailer_when_manufacturer_is_incomplete() -> None:
+    manufacturer = "https://www.hotwheels.com/product/bmw-m3-wagon"
+    retailer = "https://retailer.example.co/product/bmw-m3-wagon"
+    decision = StrictPrimaryURLSelector().select(
+        schema=_schema(),
+        assessments=[
+            _assessment(manufacturer, complete=False),
+            _assessment(retailer, complete=True),
+        ],
+        browser_bundles=[
+            _bundle(manufacturer, "CAND-001"),
+            _bundle(retailer, "CAND-002"),
+        ],
+        scorecards=[
+            _scorecard(
+                manufacturer,
+                source_tier_marker="source_tier_01_GLOBAL_MANUFACTURER",
+                source_role_marker="source_role_MANUFACTURER",
+                scope_marker="scope_manufacturer_primary",
+                confidence=0.99,
+            ),
+            _scorecard(
+                retailer,
+                source_tier_marker="source_tier_04_MAJOR_COUNTRY_RETAILER",
+                source_role_marker="source_role_MAJOR_COUNTRY_RETAILER",
+                scope_marker="scope_country_alternative",
+                confidence=0.90,
+            ),
+        ],
+    )
+
+    assert decision.accepted is True
+    assert decision.primary_url == retailer
+    assert decision.source_role == "MAJOR_COUNTRY_RETAILER"
+    assert decision.manufacturer_url is None
+    assert decision.retailer_url == retailer
+    assert decision.selection_reason == "RETAILER_PRIMARY_BECAUSE_NO_QUALIFIED_MANUFACTURER_PAGE"
 
 
 def test_strict_primary_acceptance_rejects_missing_features() -> None:

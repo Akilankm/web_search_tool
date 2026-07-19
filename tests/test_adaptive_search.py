@@ -191,7 +191,7 @@ def test_deterministic_planner_expands_immersive_token() -> None:
     assert action.page_token == "TOKEN-123"
 
 
-def test_deterministic_planner_prefers_requested_native_retailer() -> None:
+def test_deterministic_planner_targets_manufacturer_before_native_retailer() -> None:
     planner = BudgetAwareSearchPlanner(require_llm=False)
 
     action = planner.deterministic_fallback(
@@ -203,7 +203,10 @@ def test_deterministic_planner_prefers_requested_native_retailer() -> None:
         available_engines=("amazon", "google", "google_shopping"),
     )
 
-    assert action.engine == "amazon"
+    assert action.engine == "google"
+    assert "manufacturer" in action.query.lower()
+    assert "Amazon UK" not in action.query
+    assert "SOURCE_TIER:LOCAL_MANUFACTURER" in action.expected_signals
 
 
 def test_planner_prompt_is_compact_and_does_not_include_raw_payload() -> None:

@@ -197,8 +197,10 @@ def test_adaptive_search_and_multi_url_diagnostic_coverage(tmp_path, monkeypatch
 
     assert len(organic.calls) == 3
     assert [call["scope"] for call in organic.calls] == ["country", "country", "global"]
-    assert "shop.ch" in organic.calls[0]["query"]
-    assert "shop.ch" not in organic.calls[1]["query"]
+    assert "official manufacturer" in organic.calls[0]["query"].lower()
+    assert "shop.ch" not in organic.calls[0]["query"]
+    assert "shop.ch" in organic.calls[1]["query"]
+    assert "shop.ch" not in organic.calls[2]["query"]
     assert result.best_match.organic_calls_used == 3
     assert result.evidence_set is not None
     assert result.evidence_set.primary_url == "https://shop.ch/acme-rocket-18-pieces"

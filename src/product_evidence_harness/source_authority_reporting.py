@@ -30,8 +30,14 @@ def apply_source_authority_reporting_patch() -> None:
         by_tier = defaultdict(list)
         for record in records:
             tier, tier_name = _tier(record.get("source_types") or "")
-            role = _marker(record.get("source_types") or "", "source_role_") or "UNKNOWN"
-            alignment = _marker(record.get("source_types") or "", "country_alignment_") or "UNKNOWN"
+            role = (
+                _marker(record.get("source_types") or "", "source_role_")
+                or "UNKNOWN"
+            )
+            alignment = (
+                _marker(record.get("source_types") or "", "country_alignment_")
+                or "UNKNOWN"
+            )
             market = _marker(record.get("source_types") or "", "marketplace_")
             record.update(
                 {
@@ -87,12 +93,12 @@ def apply_source_authority_reporting_patch() -> None:
 
 
 def _reason(tier_name: str, marketplace: str) -> str:
-    if tier_name.startswith("REQUESTED_RETAILER"):
-        return "Explicit retailer input has first priority"
     if tier_name == "LOCAL_MANUFACTURER":
-        return "Local/regional manufacturer website"
+        return "Local/regional official manufacturer product truth"
     if tier_name == "GLOBAL_MANUFACTURER":
-        return "Global manufacturer website"
+        return "Global official manufacturer product truth"
+    if tier_name.startswith("REQUESTED_RETAILER"):
+        return "Requested retailer retained after manufacturer authority"
     if tier_name == "MAJOR_COUNTRY_RETAILER":
         return "Major retailer in requested country"
     if tier_name == "OTHER_LOCAL_WEBSITE":
