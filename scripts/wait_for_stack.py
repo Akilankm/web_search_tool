@@ -10,7 +10,11 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from src.product_evidence_harness.runtime_contract import (
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from src.product_evidence_harness.runtime_contract import (  # noqa: E402
     REQUIRED_RUNTIME_CAPABILITIES,
     RUNTIME_CONTRACT_VERSION,
 )
