@@ -37,6 +37,14 @@ Azure ML Compute Instance
 
 The notebook is an API client. Search, scraping, browser evidence, belief updates, URL selection, and artifact writing run inside the local agent/browser stack.
 
+The agent starts through the exact Uvicorn entrypoint:
+
+```text
+src.product_evidence_harness.agent_service.app:app
+```
+
+That entrypoint explicitly initializes the compatibility patches before creating the orchestrator and emits the runtime contract directly from `/health`. Runtime readiness therefore no longer depends only on package-import side effects.
+
 ## Startup modes
 
 ### Standard build and restart
@@ -113,6 +121,7 @@ The startup contract covers:
 - belief-driven product resolution;
 - mandatory review URL delivery;
 - deterministic browser fallback when the agentic LLM fails;
+- explicit compatibility-patch bootstrap in the agent entrypoint;
 - browser service agentic tools;
 - exact runtime-contract version.
 
@@ -120,11 +129,13 @@ The current health response must include:
 
 ```text
 status=healthy
-runtime_contract_version=belief-url-resolution-v3-self-healing
+runtime_contract_version=belief-url-resolution-v4-direct-agent-health
 belief_driven_product_resolution=true
 mandatory_review_url_delivery=true
 deterministic_browser_fallback_on_llm_error=true
 notebook_self_healing_runtime=true
+compatibility_patches_applied=true
+agent_entrypoint=src.product_evidence_harness.agent_service.app:app
 three_stage_contract_enforced=true
 serpapi_request_limit=3
 agentic_browser_contract_enforced=true
@@ -140,7 +151,7 @@ cat data/runtime/stack_health.json
 curl -sS http://127.0.0.1:8788/health | python -m json.tool
 ```
 
-The startup waiter rejects a healthy-looking but stale agent immediately instead of allowing the notebook to submit against an incompatible runtime.
+The startup waiter rejects a healthy-looking but stale or incompletely initialized agent immediately instead of allowing the notebook to submit against an incompatible runtime.
 
 ## Required configuration
 
@@ -192,6 +203,7 @@ A browser-planning LLM error, including `403 Forbidden`, falls back to determini
 | Stale Compose containers | Removes and recreates them |
 | Stale agent image | Notebook or startup performs a no-cache rebuild |
 | Runtime contract mismatch after startup | Startup fails immediately with expected/running versions |
+| Compatibility patch bootstrap missing | Agent `/health` returns 503 before product submission |
 | Agentic browser LLM returns 403 | Deterministic browser acquisition continues; strict gates still decide URL status |
 | No safe direct product URL | Run fails with `MANDATORY_PRODUCT_URL_NOT_FOUND` |
 | Browser/agent never becomes healthy | Prints Compose state and the final 200 log lines |
