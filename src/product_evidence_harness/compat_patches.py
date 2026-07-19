@@ -85,6 +85,8 @@ def apply_compatibility_patches() -> None:
     from src.product_evidence_harness.mandatory_url_identity_safety import apply_mandatory_url_identity_safety
     from src.product_evidence_harness.belief_runtime import apply_belief_driven_resolution_patch
     from src.product_evidence_harness.belief_compatibility import apply_belief_compatibility_patch
+    from src.product_evidence_harness.agentic_fallback_runtime import apply_agentic_browser_fallback_patch
+    from src.product_evidence_harness.runtime_contract_runtime import apply_runtime_contract_patch
 
     apply_precision_search_patches()
     apply_precision_browser_patches()
@@ -99,6 +101,7 @@ def apply_compatibility_patches() -> None:
     install_injected_client_compatibility()
     apply_mandatory_product_url_policy()
     apply_mandatory_url_identity_safety()
+    apply_agentic_browser_fallback_patch()
 
     aliases = {
         "query_builder": "src.product_evidence_harness.query_builder",
@@ -121,6 +124,9 @@ def apply_compatibility_patches() -> None:
         "belief": "src.product_evidence_harness.belief",
         "belief_runtime": "src.product_evidence_harness.belief_runtime",
         "belief_compatibility": "src.product_evidence_harness.belief_compatibility",
+        "agentic_fallback_runtime": "src.product_evidence_harness.agentic_fallback_runtime",
+        "runtime_contract": "src.product_evidence_harness.runtime_contract",
+        "runtime_contract_runtime": "src.product_evidence_harness.runtime_contract_runtime",
     }
     for short_name, source_name in aliases.items():
         module = sys.modules.get(source_name)
@@ -128,7 +134,8 @@ def apply_compatibility_patches() -> None:
             sys.modules[f"product_evidence_harness.{short_name}"] = module
 
     # Install legacy source-authority helpers first, then belief-driven market
-    # routing, and finally stable public trace labels.
+    # routing, stable public trace labels, and finally the health/runtime contract.
     apply_source_authority_compatibility()
     apply_belief_driven_resolution_patch()
     apply_belief_compatibility_patch()
+    apply_runtime_contract_patch()
