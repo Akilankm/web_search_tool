@@ -1,4 +1,4 @@
-# Notebook Usage and Diagnostic Contract
+# Notebook Usage and Human Validation Contract
 
 Use only:
 
@@ -6,7 +6,7 @@ Use only:
 notebooks/01_run_product_evidence.ipynb
 ```
 
-The notebook runs one product and exposes product interpretation, belief state, the manufacturer-first search route, paid search decisions, candidate evidence, browser investigation, requested feature coverage, mandatory URL delivery, and the final manufacturer-versus-retailer authority decision.
+The notebook runs one product and presents the human-comparable business judgment sequence before engineering diagnostics.
 
 ## Azure ML setup
 
@@ -15,65 +15,37 @@ git checkout master
 git pull origin master
 cp .env.example .env
 # Add real SerpAPI and enterprise LLM values.
-./scripts/azureml_startup.sh
+./scripts/azureml_startup.sh --clean-build
 ```
 
-Open the notebook after the script reports that the platform is ready.
+## Runtime readiness
 
-## Self-healing readiness cell
+Current contract:
 
-The first cell:
+```text
+belief-url-resolution-v6-business-judgement-review
+```
 
-1. forces the repository-local package;
-2. evicts stale Python modules retained by Jupyter/Azure ML;
-3. discovers committed feature sets;
-4. compares the notebook runtime contract with the running Docker agent;
-5. verifies belief resolution, manufacturer-first selection, mandatory URL delivery, browser fallback, search, LLM, and browser capabilities;
-6. rebuilds and restarts a missing or stale local stack before any paid SerpAPI call;
-7. displays `platform_readiness_df` with the runtime version, manufacturer-first capability, recovery status, clean-build status, and elapsed time.
-
-The final runtime contract is:
+Previous contract for migration reference:
 
 ```text
 belief-url-resolution-v5-manufacturer-primary
 ```
 
-The health response must include:
+Required health capabilities:
 
 ```text
 manufacturer_first_primary_url=true
+business_judgement_review_artifact=true
 ```
 
-Notebook defaults:
-
-```python
-AUTO_RECOVER_PLATFORM = True
-CLEAN_BUILD_ON_RECOVERY = True
-```
-
-Equivalent `.env` controls:
-
-```env
-PRODUCT_HARNESS_NOTEBOOK_AUTO_RECOVER_PLATFORM=true
-PRODUCT_HARNESS_NOTEBOOK_CLEAN_BUILD_ON_RECOVERY=true
-```
-
-A clean recovery executes:
-
-```bash
-./scripts/azureml_startup.sh --clean-build
-```
-
-Recovery occurs before product submission and therefore consumes no SerpAPI credit.
-
-Set `AUTO_RECOVER_PLATFORM = False` only when you intentionally want the readiness cell to fail and leave recovery to the terminal.
+The readiness cell validates these before any paid SerpAPI call and self-heals stale Docker images when enabled.
 
 ## Input
 
 ```python
 FEATURE_SET = 'toy_features'
 RUN_SINGLE_PRODUCT = False
-
 product = {
     'row_id': 'TEST-001',
     'main_text': 'Vendor product main text',
@@ -84,28 +56,69 @@ product = {
 }
 ```
 
-`main_text` and `country_code` are mandatory. EAN/GTIN remains text. Set `RUN_SINGLE_PRODUCT = True` only after replacing the sample input.
+`main_text` and `country_code` are mandatory. EAN/GTIN remains text.
 
-## Final product-resolution path
+## Resolution route
 
 ```text
 deterministic parsing
-→ no-web LLM interpretation
-→ competing product hypotheses
-→ uncertainty metrics
-→ Credit 1: manufacturer_primary — official manufacturer/brand product page
-→ Credit 2: requested_retailer_country or country_alternative
-→ Credit 3: global_fallback — global manufacturer-or-retailer fallback
-→ strict identity, browser, feature, scrapability, and durability gates
+→ no-web product interpretation
+→ competing hypotheses and uncertainties
+→ manufacturer_primary
+→ requested_retailer_country or country_alternative
+→ global_fallback
+→ rendered browser and multimodal evidence
+→ strict identity, feature, scrapability and durability gates
 → manufacturer-first authority ranking
-→ primary_url + manufacturer_url + retailer_url
+→ primary_url + manufacturer_url + retailer_url + source_selection
+→ business_judgement_review.md
 ```
 
-A retailer found during the manufacturer-targeted first credit is retained but cannot prematurely stop the search before the official source opportunity is evaluated.
+## Primary human review view
+
+After the run, review these first:
+
+| DataFrame / artifact | Purpose |
+|---|---|
+| `business_judgement_steps_df` | Chronological business questions, evidence, judgments, rules and next actions |
+| `visual_evidence_summary_df` | Whether screenshots/images were available, inspected and materially supported the selected URL |
+| `business_judgement_review.md` | Shareable document containing the sequence and human comparison form |
+
+The Markdown file is stored at:
+
+```text
+data/artifacts/<row_id>/business_judgement_review.md
+```
+
+Give the human coder the submitted input and this Markdown file. Ask for:
+
+- `IDENTICAL`;
+- `PARTIALLY IDENTICAL`; or
+- `NOT IDENTICAL`.
+
+The reviewer records the first divergent step, their preferred judgment, missed or overweighted evidence, image interpretation and recommended system change.
+
+## Visual evidence
+
+The workflow uses rendered screenshots and product/gallery images. Vision-derived feature evidence is identified by:
+
+```text
+extraction_method=vision_llm
+evidence_location=visual_asset:<asset_id>
+```
+
+The artifact reports:
+
+```text
+image_influenced_final_decision
+text_alone_would_have_passed
+features_resolved_visually
+selected_url_features_resolved_visually
+```
+
+`text_alone_would_have_passed` remains `UNKNOWN_NOT_COUNTERFACTUALLY_TESTED` unless an explicit text-only comparison is run.
 
 ## Stable result schema
-
-The result exposes:
 
 ```text
 product_identification
@@ -117,61 +130,41 @@ retailer_url
 source_selection
 primary_url_acceptance
 url_delivery
+business_judgement_review
 ```
 
-### Interpretation
+## Engineering diagnostics
 
-- `primary_url` is the strongest product-truth page.
-- `primary_url_role` identifies whether the selected page is an official manufacturer, retailer, marketplace, or other product source.
-- `manufacturer_url` retains the strongest strictly qualified official manufacturer page.
-- `retailer_url` retains the strongest strictly qualified commercial reference page.
-- `source_selection` records why the manufacturer or retailer became primary.
-
-A retailer becomes primary when the manufacturer page is absent, inaccessible, incomplete, non-product, transient, wrong-model, wrong-variant, wrong-pack, or missing requested feature evidence.
-
-## Mandatory URL contract
-
-Every `COMPLETED` or `REVIEW_REQUIRED` run must deliver a real direct URL in `primary_url` and the URL-delivery fields.
-
-- `COMPLETED`: strict URL acceptance passed.
-- `REVIEW_REQUIRED`: a real direct review URL was delivered, but one or more strict gates require confirmation.
-- `FAILED`: execution failed, including `MANDATORY_PRODUCT_URL_NOT_FOUND` when no safe direct product-page URL exists.
-
-`validate_result_contract` verifies the final schema before the notebook returns a result. It requires the manufacturer-first authority fields and permits `manufacturer_url` or `retailer_url` to be `null` only when that qualified source role was not found.
-
-## Main DataFrames
-
-| DataFrame | Purpose |
-|---|---|
-| `platform_readiness_df` | Runtime contract, manufacturer-first capability, recovery attempt, clean-build status, elapsed time |
-| `product_identification_df` | Leading hypothesis, probability, margin, readiness, resolution |
-| `hypotheses_df` | Competing product hypotheses |
-| `uncertainties_df` | Decision-critical unresolved fields |
-| `belief_updates_df` | Probability snapshots after evidence |
-| `evidence_ledger_df` | Atomic page evidence |
-| `source_selection_df` | Primary role, manufacturer URL, retailer URL, authority tier, and selection reason |
-| `url_delivery_df` | Mandatory delivery and strict-verification status |
-| `source_hierarchy_df` | Source target, engine, query, and outcome by SerpAPI credit |
-| `search_actions_df` | Paid-credit decision trace |
-| `search_engine_summary_df` | Search-engine yield and conversion |
-| `search_handles_df` | Product tokens, IDs, image handles, and immersive-product tokens |
-| `search_decision_rca_df` | Budget, planner, fallback, and stopping RCA |
-| `results_df` | One authoritative row per canonical candidate URL |
-| `agentic_df` | Browser investigations and deterministic LLM-error fallback |
-| `feature_evidence_df` | URL-feature evidence |
-| `selection_rca_df` | Final strict-selection RCA |
-
-## Workbook and artifacts
-
-The notebook exports:
+Use these only after reviewing the business judgment sequence:
 
 ```text
-single_product_diagnostics.xlsx
+product_identification_df
+hypotheses_df
+uncertainties_df
+belief_updates_df
+evidence_ledger_df
+source_selection_df
+url_delivery_df
+source_hierarchy_df
+search_actions_df
+search_engine_summary_df
+search_handles_df
+search_decision_rca_df
+results_df
+agentic_df
+feature_evidence_df
+selection_rca_df
 ```
 
-The workbook includes:
+The notebook still exposes `url_delivery_df`, `source_selection_df`, `search_actions_df`, `manufacturer_primary`, `manufacturer_url`, `retailer_url`, `source_selection`, and `MANDATORY_PRODUCT_URL_NOT_FOUND` for contract validation.
+
+## Workbook
+
+`single_product_diagnostics.xlsx` includes:
 
 ```text
+business_judgments
+visual_evidence_impact
 platform_readiness
 product_identification
 product_hypotheses
@@ -187,9 +180,10 @@ feature evidence
 final selection RCA
 ```
 
-Core artifact files:
+## Artifact set
 
 ```text
+business_judgement_review.md
 product_belief.json
 product_understanding.md
 market_decision_path.md
@@ -205,13 +199,4 @@ orchestrated_result.json
 single_product_diagnostics.xlsx
 ```
 
-`source_selection.json` is the authoritative manufacturer-versus-retailer audit record.
-
-## Reviewer checklist
-
-1. Open `primary_url` and verify exact product, model, form, variant, size, quantity, and pack.
-2. Verify requested feature completeness and official product details.
-3. Open `retailer_url`, when present, for price, stock, local market, and purchase context.
-4. Confirm that a manufacturer page became primary only after all mandatory gates passed.
-5. Confirm that retailer fallback was used when manufacturer evidence was inadequate.
-6. Treat `REVIEW_REQUIRED` as a delivered review candidate, not an automated exact-match claim.
+The behavioral acceptance criterion is sequence equivalence, not only final URL equality.
