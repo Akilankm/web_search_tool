@@ -1,69 +1,145 @@
-# Market Decision Hierarchy
+# Manufacturer-First Source Authority
 
-## Business rule
+## Core business rule
 
-The product URL workflow follows one immutable trajectory:
-
-```text
-1. Requested retailer in the requested country, when retailer_name is supplied
-2. Alternative retailer within the requested country
-3. Global fallback
-```
-
-Without `retailer_name`, the path starts with the requested-country market and then moves to global fallback.
-
-These are different commercial markets. The selected scope must remain explicit in search traces and final output.
-
-## Why this hierarchy exists
-
-The team will open the returned URL in a browser and eyeball the product. Therefore a preferred page must satisfy all three conditions:
-
-1. exact product identity;
-2. browser-openable, information-rich product-detail page;
-3. best available market position.
-
-A retailer-domain match cannot rescue a wrong variant, model, pack, refill/accessory, or non-product page.
-
-## Stage 1 — Requested retailer
-
-Executed only when a retailer is provided. The search preserves the leading product hypothesis, user-provided identifier, critical variant/size/pack attributes, retailer, and country.
-
-Advance when no direct candidate exists, pages are inaccessible, pages are listings/homepages, the result is a sibling product, or the page is too weak for review.
-
-## Stage 2 — Alternative retailer in country
-
-The requested-retailer constraint is removed while country and exact identity constraints remain. Any browser-openable, information-rich retailer product page in the requested country may be selected.
-
-## Stage 3 — Global fallback
-
-Executed only after the requested-country market failed to yield a usable exact URL. Country restrictions are relaxed, but product identity is not. The selected result is labelled `global_fallback`.
-
-Amazon/eBay may appear as requested-retailer or global candidates, but they do not bypass exact identity, browser usability, or the market path.
-
-## Final selection
+The final URL is selected for **product truth**, not merely for commercial availability.
 
 ```text
-exact product identity
-→ browser-openable individual product page
-→ information richness and scrapability
-→ requested retailer / country alternative / global fallback
-→ confidence and secondary quality signals
+1. Official manufacturer/brand product page
+2. Requested retailer product page
+3. Alternative retailer in the requested country
+4. Global retailer or other exact product page
+5. Marketplace as last resort
 ```
 
-A global manufacturer page cannot outrank a valid country retailer merely because the source brand is stronger. A country page cannot outrank a requested-retailer page when both pass the same exact-product and usability gates.
+This hierarchy applies only after a page passes the production gates. Manufacturer authority never rescues a wrong model, sibling product, wrong pack, category page, inaccessible page, or incomplete feature source.
 
-## Output fields
+## Mandatory gates before authority
+
+Every primary candidate must satisfy:
+
+1. exact product, model, variant, size and pack identity;
+2. browser-openable rendered page;
+3. text-scrapable individual product-detail page;
+4. rendered product verification;
+5. all requested feature evidence on the primary page;
+6. durable, non-expiring URL.
+
+Only candidates that pass these gates are compared by source authority.
+
+## Search trajectory
+
+The three SerpAPI credits are used in this order:
 
 ```text
-selection_scope
-selected_domain
-selected_retailer_name
-selected_from_requested_retailer
-selected_from_other_country_retailer
-selected_from_global_fallback
-url_decision_status
+Credit 1: manufacturer_primary
+Credit 2: requested_retailer_country, when retailer_name exists
+          otherwise country_alternative
+Credit 3: global_fallback
 ```
 
-## Early stopping
+A retailer page discovered during the manufacturer search is retained, but it does not stop the search before the manufacturer opportunity has been evaluated. An exact, qualified manufacturer page may stop the workflow early.
 
-A stage stops the search only after a production-ready URL passes browser, rendered-page, scrape, exact identity, critical evidence, and durability gates. A SERP snippet or unvalidated URL never qualifies.
+## Authority tiers
+
+```text
+LOCAL_MANUFACTURER
+→ GLOBAL_MANUFACTURER
+→ REQUESTED_RETAILER_LOCAL
+→ REQUESTED_RETAILER_GLOBAL
+→ MAJOR_COUNTRY_RETAILER
+→ OTHER_LOCAL_WEBSITE
+→ OTHER_GLOBAL_WEBSITE
+→ MARKETPLACE_LAST_RESORT
+```
+
+Local manufacturer pages outrank global manufacturer pages when both represent the same exact product and pass the same gates. Manufacturer pages outrank requested retailers because the manufacturer is the authoritative source for product identity, specifications, warnings, compatibility, dimensions and official feature definitions.
+
+## Manufacturer fallback rule
+
+Manufacturer priority is conditional.
+
+A retailer page becomes `primary_url` when:
+
+- no official manufacturer product page exists;
+- the manufacturer page is a category, family or marketing page;
+- the manufacturer page is inaccessible or not scrapable;
+- the manufacturer page represents a different model, edition, variant or pack;
+- the manufacturer page does not contain all requested feature evidence;
+- the manufacturer URL is transient or expiring.
+
+The retailer is therefore a controlled fallback, not a lower-quality failure.
+
+## Dual URL output
+
+The result preserves both product truth and commercial reference:
+
+```text
+primary_url
+primary_url_role
+manufacturer_url
+retailer_url
+source_selection
+```
+
+### `primary_url`
+
+The strongest page after strict gates and authority ranking.
+
+### `primary_url_role`
+
+One of:
+
+```text
+OFFICIAL_MANUFACTURER
+RETAILER
+MARKETPLACE
+OTHER_PRODUCT_SOURCE
+```
+
+### `manufacturer_url`
+
+The strongest strictly qualified official manufacturer page, when available.
+
+### `retailer_url`
+
+The strongest strictly qualified retailer or commerce page, when available. This remains useful for price, availability, local language, assortment and purchase verification even when the manufacturer is primary.
+
+### `source_selection`
+
+A compact decision artifact containing:
+
+- applied policy;
+- selected authority tier and role;
+- manufacturer and retailer URLs;
+- selection reason;
+- mandatory gates;
+- fallback rule.
+
+The same object is written to:
+
+```text
+data/artifacts/<row_id>/source_selection.json
+```
+
+## Examples
+
+| Manufacturer page | Retailer page | Primary result |
+|---|---|---|
+| Exact, complete and accessible | Exact and complete | Manufacturer |
+| Exact but missing requested feature | Exact and complete | Retailer |
+| Category/family page | Exact product page | Retailer |
+| Wrong regional variant | Exact requested variant | Retailer |
+| Exact product page only | Not found | Manufacturer |
+| Not found | Exact product page only | Retailer |
+
+## Non-negotiable principle
+
+```text
+identity and evidence safety
+→ manufacturer authority
+→ retailer and market preference
+→ richness and confidence tie-breakers
+```
+
+Authority is applied after safety, never instead of safety.
