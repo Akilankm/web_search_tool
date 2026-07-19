@@ -12,10 +12,12 @@ from src.product_evidence_harness.retailer_strategy import candidate_matches_req
 
 
 class SourceTier(IntEnum):
-    REQUESTED_RETAILER_LOCAL = 0
-    REQUESTED_RETAILER_GLOBAL = 1
-    LOCAL_MANUFACTURER = 2
-    GLOBAL_MANUFACTURER = 3
+    """Authority order after identity, access, feature, and durability gates pass."""
+
+    LOCAL_MANUFACTURER = 0
+    GLOBAL_MANUFACTURER = 1
+    REQUESTED_RETAILER_LOCAL = 2
+    REQUESTED_RETAILER_GLOBAL = 3
     MAJOR_COUNTRY_RETAILER = 4
     OTHER_LOCAL_WEBSITE = 5
     OTHER_GLOBAL_WEBSITE = 6
@@ -23,7 +25,16 @@ class SourceTier(IntEnum):
     UNKNOWN = 8
 
 
-WITH_RETAILER = tuple(item.name for item in SourceTier if item is not SourceTier.UNKNOWN)
+WITH_RETAILER = (
+    "LOCAL_MANUFACTURER",
+    "GLOBAL_MANUFACTURER",
+    "REQUESTED_RETAILER_LOCAL",
+    "REQUESTED_RETAILER_GLOBAL",
+    "MAJOR_COUNTRY_RETAILER",
+    "OTHER_LOCAL_WEBSITE",
+    "OTHER_GLOBAL_WEBSITE",
+    "MARKETPLACE_LAST_RESORT",
+)
 WITHOUT_RETAILER = (
     "LOCAL_MANUFACTURER",
     "GLOBAL_MANUFACTURER",
@@ -66,31 +77,52 @@ class SourceAuthorityPolicy:
         local = self._local(candidate.url, product.country_code)
         alignment = "LOCAL_OR_REGIONAL" if local else "GLOBAL_OR_UNKNOWN"
         market = marketplace_name(candidate.url)
+
+        # Manufacturer authority is evaluated before an explicitly requested
+        # retailer. This prevents a brand-owned product page from being
+        # downgraded when the retailer input happens to resemble the brand.
+        manufacturer, reason = self._manufacturer(candidate, product, scrape)
+        if manufacturer:
+            tier = SourceTier.LOCAL_MANUFACTURER if local else SourceTier.GLOBAL_MANUFACTURER
+            return SourceAuthorityDecision(
+                int(tier),
+                tier.name,
+                "MANUFACTURER",
+                alignment,
+                manufacturer_match=True,
+                marketplace=market,
+                source_priority_reason=reason,
+            )
+
         requested = bool(
             product.retailer_name
             and candidate_matches_requested_retailer(candidate, product.retailer_name)
         )
         if requested:
-            tier = SourceTier.REQUESTED_RETAILER_LOCAL if local else SourceTier.REQUESTED_RETAILER_GLOBAL
-            return SourceAuthorityDecision(
-                int(tier), tier.name, "REQUESTED_RETAILER", alignment,
-                requested_retailer_match=True, marketplace=market,
-                source_priority_reason="Explicit retailer input overrides the default hierarchy",
+            tier = (
+                SourceTier.REQUESTED_RETAILER_LOCAL
+                if local
+                else SourceTier.REQUESTED_RETAILER_GLOBAL
             )
-
-        manufacturer, reason = self._manufacturer(candidate, product, scrape)
-        if manufacturer:
-            tier = SourceTier.LOCAL_MANUFACTURER if local else SourceTier.GLOBAL_MANUFACTURER
             return SourceAuthorityDecision(
-                int(tier), tier.name, "MANUFACTURER", alignment,
-                manufacturer_match=True, marketplace=market,
-                source_priority_reason=reason,
+                int(tier),
+                tier.name,
+                "REQUESTED_RETAILER",
+                alignment,
+                requested_retailer_match=True,
+                marketplace=market,
+                source_priority_reason=(
+                    "Exact requested-retailer page retained after manufacturer authority"
+                ),
             )
 
         if market:
             tier = SourceTier.MARKETPLACE_LAST_RESORT
             return SourceAuthorityDecision(
-                int(tier), tier.name, "MARKETPLACE", alignment,
+                int(tier),
+                tier.name,
+                "MARKETPLACE",
+                alignment,
                 marketplace=market,
                 source_priority_reason=f"{market} is last resort unless explicitly requested",
             )
@@ -102,18 +134,49 @@ class SourceAuthorityPolicy:
                 "engine_google_immersive_product",
                 "engine_walmart",
                 "engine_home_depot",
+                "engine_amazon",
+                "engine_ebay",
             )
         )
-        if local and product_surface:
-            tier = SourceTier.MAJOR_COUNTRY_RETAILER
-            return SourceAuthorityDecision(
-                int(tier), tier.name, "MAJOR_COUNTRY_RETAILER", alignment,
-                major_country_retailer=True,
-                source_priority_reason="Country-aligned merchant from a product-oriented search surface",
+        commerce_evidence = bool(
+            scrape
+            and (
+                scrape.has_price
+                or bool(scrape.availability)
+                or any(
+                    token in (scrape.verification_text or "").lower()
+                    for token in ("add to cart", "buy now", "in stock", "out of stock")
+                )
             )
+        )
+        if product_surface or commerce_evidence:
+            if local:
+                tier = SourceTier.MAJOR_COUNTRY_RETAILER
+                return SourceAuthorityDecision(
+                    int(tier),
+                    tier.name,
+                    "MAJOR_COUNTRY_RETAILER",
+                    alignment,
+                    major_country_retailer=True,
+                    source_priority_reason=(
+                        "Country-aligned commerce page retained as the strongest retailer reference"
+                    ),
+                )
+            tier = SourceTier.OTHER_GLOBAL_WEBSITE
+            return SourceAuthorityDecision(
+                int(tier),
+                tier.name,
+                "GLOBAL_RETAILER",
+                alignment,
+                source_priority_reason=(
+                    "Global commerce page retained as a retailer fallback"
+                ),
+            )
+
         tier = SourceTier.OTHER_LOCAL_WEBSITE if local else SourceTier.OTHER_GLOBAL_WEBSITE
         return SourceAuthorityDecision(
-            int(tier), tier.name,
+            int(tier),
+            tier.name,
             "OTHER_LOCAL_WEBSITE" if local else "OTHER_GLOBAL_WEBSITE",
             alignment,
             source_priority_reason="Valid product website outside stronger authority tiers",
@@ -130,8 +193,16 @@ class SourceAuthorityPolicy:
         for candidate in candidates:
             decision = self.classify(product, candidate, scrapes.get(candidate.url))
             retained = {
-                item for item in candidate.source_types
-                if not str(item).startswith(("source_tier_", "source_role_", "country_alignment_", "marketplace_"))
+                item
+                for item in candidate.source_types
+                if not str(item).startswith(
+                    (
+                        "source_tier_",
+                        "source_role_",
+                        "country_alignment_",
+                        "marketplace_",
+                    )
+                )
             }
             markers = {
                 f"source_tier_{decision.source_tier:02d}_{decision.source_tier_name}",
@@ -140,12 +211,16 @@ class SourceAuthorityPolicy:
             }
             if decision.marketplace:
                 markers.add(f"marketplace_{decision.marketplace}")
-            output.append(replace(candidate, source_types=tuple(sorted(retained | markers))))
+            output.append(
+                replace(candidate, source_types=tuple(sorted(retained | markers)))
+            )
         return output
 
     def next_target(self, product: ProductQuery, observations: Sequence[Any]) -> str:
         attempted = {
-            tier_from_signals(getattr(getattr(item, "action", None), "expected_signals", ()))
+            tier_from_signals(
+                getattr(getattr(item, "action", None), "expected_signals", ())
+            )
             for item in observations
         }
         for tier in self.hierarchy(product):
@@ -158,7 +233,9 @@ class SourceAuthorityPolicy:
             return True
         cc = (country or "").lower()
         folded = (url or "").lower()
-        return bool(cc and any(mark in folded for mark in (f"/{cc}/", f"/{cc}-", f"-{cc}/")))
+        return bool(
+            cc and any(mark in folded for mark in (f"/{cc}/", f"/{cc}-", f"-{cc}/"))
+        )
 
     def _manufacturer(
         self,
@@ -169,15 +246,45 @@ class SourceAuthorityPolicy:
         host = compact(urlparse(candidate.url).netloc)
         names = [scrape.brand, scrape.manufacturer] if scrape else []
         names.extend(likely_brand_names(product.main_text))
-        matched = [name for name in names if len(compact(name)) >= 3 and compact(name) in host]
+        matched = [
+            name
+            for name in names
+            if len(compact(name)) >= 3 and compact(name) in host
+        ]
         if not matched:
             return False, ""
-        evidence = " ".join((candidate.title, candidate.snippet, scrape.brand if scrape else "", scrape.manufacturer if scrape else "")).lower()
-        structured = bool(scrape and any(compact(value) == compact(name) for value in (scrape.brand, scrape.manufacturer) if value for name in matched))
-        official = any(word in evidence for word in ("official", "manufacturer", "brand site"))
-        input_brand = compact(likely_brand_names(product.main_text)[0]) if likely_brand_names(product.main_text) else ""
+        evidence = " ".join(
+            (
+                candidate.title,
+                candidate.snippet,
+                scrape.brand if scrape else "",
+                scrape.manufacturer if scrape else "",
+            )
+        ).lower()
+        structured = bool(
+            scrape
+            and any(
+                compact(value) == compact(name)
+                for value in (scrape.brand, scrape.manufacturer)
+                if value
+                for name in matched
+            )
+        )
+        official = any(
+            word in evidence for word in ("official", "manufacturer", "brand site")
+        )
+        input_brands = likely_brand_names(product.main_text)
+        input_brand = compact(input_brands[0]) if input_brands else ""
         accepted = structured or official or bool(input_brand and input_brand in host)
-        return accepted, f"Domain matches manufacturer/brand token '{matched[0]}'" if accepted else ""
+        return (
+            accepted,
+            (
+                f"Official brand/manufacturer domain matches '{matched[0]}'; "
+                "manufacturer product truth outranks retailer presentation"
+            )
+            if accepted
+            else "",
+        )
 
 
 def source_tier(candidate: URLCandidate) -> int:
@@ -224,8 +331,28 @@ def compact(value: str) -> str:
 
 
 def likely_brand_names(text: str) -> list[str]:
-    generic = {"the", "and", "with", "for", "product", "item", "toy", "set", "pack", "new"}
-    tokens = [t for t in re.findall(r"[A-Za-z0-9À-ž&+.-]+", text or "") if len(compact(t)) >= 3 and t.lower() not in generic and not t.isdigit()]
+    generic = {
+        "the",
+        "and",
+        "with",
+        "for",
+        "product",
+        "item",
+        "toy",
+        "set",
+        "pack",
+        "new",
+    }
+    tokens = [
+        token
+        for token in re.findall(r"[A-Za-z0-9À-ž&+.-]+", text or "")
+        if len(compact(token)) >= 3
+        and token.lower() not in generic
+        and not token.isdigit()
+    ]
     if not tokens:
         return []
-    return [tokens[0], f"{tokens[0]} {tokens[1]}"] if len(tokens) > 1 else [tokens[0]]
+    candidates = [tokens[0]]
+    if len(tokens) > 1:
+        candidates.append(f"{tokens[0]} {tokens[1]}")
+    return candidates
