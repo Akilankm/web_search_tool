@@ -1,20 +1,49 @@
 # Product Evidence Platform
 
-A production-oriented product identification and URL-resolution workflow for vendor product text.
+A production-oriented product-identification and URL-resolution system for vendor product text.
 
 > Given `MAIN_TEXT`, `COUNTRY_CODE`, and optional `RETAILER_NAME` / `EAN`, return the strongest real product-detail URL that a reviewer can open in a normal browser and inspect.
 
-The URL is the final deliverable. Product understanding, hypotheses, search decisions, scrapes, browser checks, and belief updates exist to make that URL defensible.
+The platform separates **product truth** from **commercial reference**:
 
-## Market decision contract
+- the official manufacturer or brand page is preferred for identity, specifications, warnings, compatibility, dimensions, and official feature definitions;
+- a retailer page is retained for price, availability, local assortment, language, market, and purchase context;
+- a retailer becomes primary whenever the manufacturer page fails any mandatory production gate.
+
+The URL is the final deliverable. Product understanding, hypotheses, search decisions, scrapes, browser checks, feature evidence, and belief updates exist to make that URL defensible.
+
+## Final decision contract
 
 ```text
-1. Requested retailer in the requested country, when retailer_name is provided
-2. Alternative retailer within the requested country
-3. Global fallback
+exact product, model, form, variant, size, quantity and pack
+→ browser-openable rendered individual product page
+→ text scrapability and information richness
+→ requested feature completeness
+→ durable non-expiring URL
+→ official manufacturer authority
+→ requested retailer / requested-country retailer
+→ global retailer or other exact product source
+→ marketplace last resort
 ```
 
-Without a retailer, search starts in the requested-country market and then moves to global fallback. Each selected URL records its market scope.
+Source authority is applied only after identity and evidence safety.
+
+A manufacturer page never wins merely because it is official. It must be the exact product, pass rendered-page and scrape validation, contain the requested feature evidence, and expose a durable URL.
+
+## Three-credit search route
+
+```text
+Credit 1: manufacturer_primary
+Credit 2: requested_retailer_country when retailer_name is supplied
+          otherwise country_alternative
+Credit 3: global_fallback
+```
+
+A retailer discovered during credit 1 is retained, but it cannot stop the search before the manufacturer opportunity has been evaluated.
+
+Credit 2 may expand a real Shopping immersive-product token because this is a direct merchant-resolution action and is more precise than repeating a generic retailer query.
+
+Credit 3 removes the country restriction while retaining exact-product requirements.
 
 ## Product-identification trajectory
 
@@ -22,36 +51,73 @@ Without a retailer, search starts in the requested-country market and then moves
 MAIN_TEXT + COUNTRY_CODE
 → deterministic offline parsing
 → structured no-web LLM interpretation
-→ competing product hypotheses and uncertainty metrics
-→ targeted SerpAPI action for the current market
+→ competing hypotheses and uncertainty metrics
+→ manufacturer-first paid search
 → bounded candidate scraping and browser validation
 → atomic evidence ledger
 → posterior belief update and path correction
-→ production URL gate
-→ final browser-openable information-rich URL
+→ strict feature and URL gates
+→ authority-ranked primary URL
+→ manufacturer and retailer reference URLs
 ```
 
 Model knowledge remains a prior until page evidence supports it. Search results are candidates, not facts.
 
-## Production URL contract
+## Stable result schema
 
-A promoted URL must be:
+Every `COMPLETED` or `REVIEW_REQUIRED` response contains:
 
-- real and external, never fabricated;
-- directly browser-openable;
-- an individual product-detail page;
-- text-scrapable and information-rich;
-- related to the intended exact product and variant;
-- free of blocking EAN, model, size, pack, product-form, or variant conflicts;
-- durable enough for team review.
+```text
+primary_url
+primary_url_role
+manufacturer_url
+retailer_url
+source_selection
+primary_url_acceptance
+url_delivery
+product_identification
+search.market_decision_path
+```
+
+### URL roles
+
+| Field | Purpose |
+|---|---|
+| `primary_url` | Strongest product-truth page after strict gates and authority ranking |
+| `primary_url_role` | `OFFICIAL_MANUFACTURER`, `RETAILER`, `MARKETPLACE`, or `OTHER_PRODUCT_SOURCE` |
+| `manufacturer_url` | Strongest strictly qualified official manufacturer page, when available |
+| `retailer_url` | Strongest strictly qualified commercial reference page, when available |
+| `source_selection` | Explicit manufacturer-versus-retailer decision and reason |
+
+## Manufacturer fallback rule
+
+A retailer becomes `primary_url` when the manufacturer page is:
+
+- missing;
+- inaccessible or blocked;
+- not text-scrapable;
+- a homepage, category, family, collection, campaign, or search page;
+- the wrong model, product form, variant, edition, size, quantity, or pack;
+- missing requested feature evidence;
+- transient or expiring.
+
+Retailer fallback is a controlled production decision, not a lower-quality failure.
+
+## Terminal outcomes
 
 | Outcome | Meaning |
 |---|---|
-| `COMPLETED` | Exact product URL passed strict browser, identity, richness, scrapability, and durability gates |
-| `REVIEW_REQUIRED` | A real direct product URL was delivered, but one or more gates need a reviewer |
-| `FAILED` | No safe direct product-page URL could be delivered or execution failed |
+| `COMPLETED` | `primary_url` passed strict browser, identity, feature, scrapability, durability, and authority selection |
+| `REVIEW_REQUIRED` | A real direct product URL was delivered, but one or more gates need human confirmation |
+| `FAILED` | No safe direct product-page URL could be delivered, or execution failed |
 
-If no direct product URL exists after bounded search, the run ends with `MANDATORY_PRODUCT_URL_NOT_FOUND` rather than an empty successful output.
+The system never reports success with an empty URL.
+
+If no direct product URL exists after the bounded search, the run ends with:
+
+```text
+MANDATORY_PRODUCT_URL_NOT_FOUND
+```
 
 ## Search and scrape budget
 
@@ -63,7 +129,7 @@ PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE=2
 PRODUCT_HARNESS_EARLY_STOP_ON_WORKING_URL=true
 ```
 
-Business planning should expect approximately one to two SerpAPI calls and four to seven scrape attempts per product; maximums are safety limits.
+Maximums are safety limits, not targets. The runtime preserves unused scrape capacity for later credits.
 
 ## Azure ML setup
 
@@ -81,13 +147,29 @@ Open only:
 notebooks/01_run_product_evidence.ipynb
 ```
 
-The committed default schema is `inputs/private/toy_features.json`.
+The committed default schema is:
+
+```text
+inputs/private/toy_features.json
+```
 
 ## Self-healing notebook runtime
 
-The first notebook cell verifies that its code and the local Docker agent expose the same runtime contract. It performs this check before product submission and therefore before any paid SerpAPI call.
+The first notebook cell verifies that its code and the local Docker agent expose the same runtime contract before any paid search.
 
-Default behavior:
+The final compatibility version is:
+
+```text
+belief-url-resolution-v5-manufacturer-primary
+```
+
+The health response must include:
+
+```text
+manufacturer_first_primary_url=true
+```
+
+Default notebook behavior:
 
 ```python
 AUTO_RECOVER_PLATFORM = True
@@ -100,7 +182,7 @@ When the agent is missing, stale, or incompatible, the notebook runs the equival
 ./scripts/azureml_startup.sh --clean-build
 ```
 
-This removes stale Compose containers, rebuilds agent and browser images without cache, recreates them, and verifies the runtime contract. The resulting `platform_readiness_df` records whether recovery happened, why, whether a clean build was used, and how long it took.
+This removes stale Compose containers, rebuilds agent and browser images without cache, recreates both services, and validates the complete runtime contract before product submission.
 
 For manual recovery:
 
@@ -114,13 +196,13 @@ Use `--no-build` only when the local images are already known to match the check
 
 ## Browser LLM failure handling
 
-When the agentic browser planner fails, including `403 Forbidden`, the platform falls back to deterministic rendered-page acquisition:
+When the agentic browser planner fails, including `403 Forbidden`, the system falls back to deterministic rendered-page acquisition:
 
 ```env
 PRODUCT_HARNESS_ALLOW_DETERMINISTIC_BROWSER_FALLBACK_ON_LLM_ERROR=true
 ```
 
-The fallback does not bypass exact-product, feature, openability, scrapability, or durability gates. It only prevents an LLM permission error from destroying usable browser evidence.
+The fallback does not bypass exact-product, requested-feature, openability, scrapability, or durability gates. It only preserves usable browser evidence when planning LLM access fails.
 
 ## Input
 
@@ -137,7 +219,7 @@ product = {
 
 `main_text` and `country_code` are mandatory. EAN/GTIN must remain text.
 
-## Belief-state artifacts
+## Artifact contract
 
 ```text
 data/artifacts/<row_id>/
@@ -151,10 +233,13 @@ data/artifacts/<row_id>/
 ├── candidates.csv
 ├── primary_url_acceptance.json
 ├── mandatory_url_delivery.json
+├── source_selection.json
 ├── orchestrated_result.json
 ├── review.md
 └── single_product_diagnostics.xlsx
 ```
+
+`source_selection.json` is the authoritative audit record for the manufacturer-versus-retailer decision.
 
 Observable summaries are written instead of hidden chain-of-thought.
 
@@ -199,9 +284,11 @@ docker compose config --quiet
 
 ## Documentation
 
+- [Final system contract](docs/FINAL_SYSTEM_CONTRACT.md)
+- [Manufacturer-first source authority](docs/SOURCE_AUTHORITY_HIERARCHY.md)
 - [Belief-driven product resolution](docs/BELIEF_DRIVEN_PRODUCT_RESOLUTION.md)
-- [Market decision hierarchy](docs/SOURCE_AUTHORITY_HIERARCHY.md)
 - [Adaptive SerpAPI search](docs/ADAPTIVE_SERPAPI_SEARCH.md)
+- [Candidate precision and context control](docs/CANDIDATE_PRECISION_AND_CONTEXT.md)
 - [Mandatory product URL delivery](docs/MANDATORY_PRODUCT_URL.md)
 - [Notebook usage](docs/NOTEBOOK_USAGE.md)
 - [Agentic browser](docs/AGENTIC_BROWSER.md)
