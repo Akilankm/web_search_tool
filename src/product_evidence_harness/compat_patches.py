@@ -10,6 +10,13 @@ from src.product_evidence_harness.offline_capture import LivePageOfflineArtifact
 from src.product_evidence_harness.query_builder import QueryBuilder
 
 
+_PATCHED = False
+
+
+def compatibility_patches_applied() -> bool:
+    return _PATCHED
+
+
 def _searchable_ean(self: QueryBuilder, task) -> str | None:
     normalized = normalize_gtin(task.ean)
     if normalized:
@@ -65,6 +72,11 @@ def _role_directory(self: LivePageOfflineArtifactBuilder, role: str) -> str:
 
 
 def apply_compatibility_patches() -> None:
+    global _PATCHED
+    if _PATCHED:
+        return
+    _PATCHED = True
+
     QueryBuilder._valid_ean = _searchable_ean  # type: ignore[method-assign]
     QueryBuilder.requested_retailer_search = _strict_requested_retailer_search  # type: ignore[method-assign]
     LivePageOfflineArtifactBuilder._remove_network_primitives = _remove_network_primitives  # type: ignore[method-assign]

@@ -62,6 +62,7 @@ jobs:
             tests/test_clone_runtime_contract.py \
             tests/test_automated_bootstrap.py \
             tests/test_runtime_contract_and_browser_fallback.py \
+            tests/test_agent_entrypoint_runtime_contract.py \
             tests/test_preflight_azureml.py \
             tests/test_serp_harvester.py \
             tests/test_adaptive_search.py \

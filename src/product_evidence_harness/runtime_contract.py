@@ -2,13 +2,14 @@ from __future__ import annotations
 
 # Increment this whenever notebook/agent/bootstrap compatibility changes in a
 # way that requires rebuilding the Docker agent image.
-RUNTIME_CONTRACT_VERSION = "belief-url-resolution-v3-self-healing"
+RUNTIME_CONTRACT_VERSION = "belief-url-resolution-v4-direct-agent-health"
 
 REQUIRED_RUNTIME_CAPABILITIES = {
     "belief_driven_product_resolution": "belief-driven product resolution",
     "mandatory_review_url_delivery": "mandatory review URL delivery",
     "deterministic_browser_fallback_on_llm_error": "deterministic browser fallback",
     "notebook_self_healing_runtime": "notebook self-healing runtime",
+    "compatibility_patches_applied": "agent compatibility-patch bootstrap",
 }
 
 REQUIRED_RESULT_FIELDS = (
