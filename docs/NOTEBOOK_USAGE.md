@@ -6,9 +6,9 @@ Use only:
 notebooks/01_run_product_evidence.ipynb
 ```
 
-The notebook runs one product and exposes product interpretation, belief state, immutable market route, paid search decisions, candidate evidence, browser investigation, and mandatory URL delivery.
+The notebook runs one product and exposes product interpretation, belief state, market route, paid search decisions, candidate evidence, browser investigation, and mandatory URL delivery.
 
-## Setup
+## Azure ML setup
 
 ```bash
 git checkout master
@@ -18,7 +18,43 @@ cp .env.example .env
 ./scripts/azureml_startup.sh
 ```
 
-Restart the kernel after pulling code. The bootstrap cell forces the repository-local package, removes stale modules, discovers available feature sets, checks the live agent, and defaults to the committed `inputs/private/toy_features.json`.
+Open the notebook after the script reports that the platform is ready.
+
+## Self-healing readiness cell
+
+The first cell:
+
+1. forces the repository-local package;
+2. evicts stale Python modules;
+3. discovers feature sets;
+4. compares the notebook runtime contract with the running Docker agent;
+5. verifies belief resolution, mandatory URL delivery, browser fallback, search, LLM, and browser capabilities;
+6. rebuilds and restarts a missing or stale local stack before any paid SerpAPI call;
+7. displays `platform_readiness_df` with recovery status and elapsed time.
+
+The committed notebook defaults are:
+
+```python
+AUTO_RECOVER_PLATFORM = True
+CLEAN_BUILD_ON_RECOVERY = True
+```
+
+Equivalent `.env` controls are:
+
+```env
+PRODUCT_HARNESS_NOTEBOOK_AUTO_RECOVER_PLATFORM=true
+PRODUCT_HARNESS_NOTEBOOK_CLEAN_BUILD_ON_RECOVERY=true
+```
+
+A clean recovery executes:
+
+```bash
+./scripts/azureml_startup.sh --clean-build
+```
+
+This removes stale Compose containers, rebuilds agent and browser images without cache, recreates them, and verifies the exact runtime contract. Recovery happens before product submission, so it does not consume a SerpAPI credit.
+
+Set `AUTO_RECOVER_PLATFORM = False` only when you want the readiness cell to fail and leave recovery to the terminal.
 
 ## Input
 
@@ -38,52 +74,36 @@ product = {
 
 `main_text` and `country_code` are mandatory. EAN/GTIN remains text. Set `RUN_SINGLE_PRODUCT = True` only after replacing the sample input.
 
-## Before search
+## Product-identification path
 
 ```text
 deterministic parsing
 → no-web LLM interpretation
 → competing product hypotheses
 → uncertainty metrics
-→ first market evidence plan
-```
-
-The result exposes `product_identification.leading_hypothesis`, resolution status, posterior margin, readiness metrics, critical uncertainties, evidence count, and `search.market_decision_path`.
-
-## Market path
-
-```text
-requested retailer, when provided
+→ requested retailer, when provided
 → alternative retailer within country
 → global fallback
+→ final browser-openable product URL
 ```
 
-A stage is skipped only when it does not apply. Search may stop early when a production-ready URL is validated.
+The result exposes `product_identification`, `search.market_decision_path`, and `url_delivery`.
 
 ## Mandatory URL contract
 
-Every `COMPLETED` or `REVIEW_REQUIRED` run must deliver a real direct product URL in `primary_url`, `product_match.product_url`, and the URL-delivery fields. The notebook immediately asserts the contract.
+Every `COMPLETED` or `REVIEW_REQUIRED` run must deliver a real direct product URL in `primary_url` and the URL-delivery fields.
 
-A review-required URL is still browser-openable and useful, but one or more exactness or strict acceptance gates require manual confirmation. When no safe direct product page exists, the terminal reason is `MANDATORY_PRODUCT_URL_NOT_FOUND`; diagnostics never proceed with an empty product URL.
+- `COMPLETED`: strict URL acceptance passed.
+- `REVIEW_REQUIRED`: a real browser-openable review URL was delivered, but one or more strict gates require confirmation.
+- `FAILED`: execution failed, including `MANDATORY_PRODUCT_URL_NOT_FOUND` when no safe direct product-page URL exists.
 
-The reviewer should eyeball product identity, model, variant, size, pack interpretation, page detail quality, and selection scope.
-
-## Belief artifacts
-
-```text
-product_belief.json
-product_understanding.md
-market_decision_path.md
-belief_updates.md
-evidence_ledger.jsonl
-```
-
-The JSON file is the complete machine-readable belief state. Markdown files are observable decision summaries, not hidden chain-of-thought.
+URL validation is centralized in `validate_result_contract`. The notebook no longer dumps thousands of characters of result JSON. A delivery failure reports the job status, delivery status, match reason, best available URL, and artifact directory.
 
 ## Main tables
 
 | DataFrame | Purpose |
 |---|---|
+| `platform_readiness_df` | Runtime contract, recovery attempt, clean-build status and elapsed time |
 | `product_identification_df` | Leading hypothesis, probability, margin, readiness, resolution |
 | `hypotheses_df` | Competing product hypotheses |
 | `uncertainties_df` | Decision-critical unresolved fields |
@@ -94,22 +114,23 @@ The JSON file is the complete machine-readable belief state. Markdown files are 
 | `search_actions_df` | Paid-credit decision trace |
 | `search_engine_summary_df` | Search-engine yield |
 | `search_handles_df` | Product tokens, IDs, image handles |
-| `search_decision_rca_df` | Budget, planner, fallback, stop RCA |
-| `serp_results_df` | Raw search-result occurrences |
+| `search_decision_rca_df` | Budget, planner, fallback and stopping RCA |
 | `results_df` | One authoritative row per canonical URL |
-| `source_tier_summary_df` | Candidate conversion summary |
-| `agentic_df` | Browser investigations |
+| `agentic_df` | Browser investigations and deterministic fallback |
 | `feature_evidence_df` | URL-feature evidence |
-| `funnel_df` | Candidate conversion funnel |
-| `rejection_reasons_df` | Rejection and review reasons |
 | `selection_rca_df` | Final URL decision RCA |
 
-## Export
+## Artifacts and export
 
-The notebook writes `single_product_diagnostics.xlsx` and includes belief, URL delivery, search, candidate, browser, feature, and selection tables. It also retains `adaptive_search_trace.json` and `mandatory_url_delivery.json`.
+```text
+product_belief.json
+product_understanding.md
+market_decision_path.md
+belief_updates.md
+evidence_ledger.jsonl
+adaptive_search_trace.json
+mandatory_url_delivery.json
+single_product_diagnostics.xlsx
+```
 
-## Terminal outcomes
-
-- `COMPLETED`: exact URL passed strict gates.
-- `REVIEW_REQUIRED`: a real product URL was delivered, but a reviewer must confirm one or more gates.
-- `FAILED`: execution failed, including inability to produce a safe direct product-page URL.
+The workbook includes platform readiness, belief, URL delivery, search, candidate, browser, feature, and selection tables.
