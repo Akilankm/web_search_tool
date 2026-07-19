@@ -100,6 +100,7 @@ def apply_compatibility_patches() -> None:
     from src.product_evidence_harness.agentic_fallback_runtime import apply_agentic_browser_fallback_patch
     from src.product_evidence_harness.manufacturer_primary_runtime import apply_manufacturer_primary_policy
     from src.product_evidence_harness.manufacturer_primary_hardening import apply_manufacturer_primary_hardening
+    from src.product_evidence_harness.manufacturer_search_planner_hardening import apply_manufacturer_search_planner_hardening
     from src.product_evidence_harness.runtime_contract_runtime import apply_runtime_contract_patch
 
     apply_precision_search_patches()
@@ -141,6 +142,7 @@ def apply_compatibility_patches() -> None:
         "agentic_fallback_runtime": "src.product_evidence_harness.agentic_fallback_runtime",
         "manufacturer_primary_runtime": "src.product_evidence_harness.manufacturer_primary_runtime",
         "manufacturer_primary_hardening": "src.product_evidence_harness.manufacturer_primary_hardening",
+        "manufacturer_search_planner_hardening": "src.product_evidence_harness.manufacturer_search_planner_hardening",
         "runtime_contract": "src.product_evidence_harness.runtime_contract",
         "runtime_contract_runtime": "src.product_evidence_harness.runtime_contract_runtime",
     }
@@ -149,12 +151,13 @@ def apply_compatibility_patches() -> None:
         if module is not None:
             sys.modules[f"product_evidence_harness.{short_name}"] = module
 
-    # Install legacy source-authority helpers first, then belief-driven routing,
-    # restore manufacturer-first product truth last, harden legacy production
-    # promotion, and finally expose the health/runtime contract.
+    # Install legacy source-authority helpers first, then belief-driven routing.
+    # The manufacturer planner, selector and production hardening layers run last
+    # so later compatibility patches cannot rewrite credit 1 back to a retailer.
     apply_source_authority_compatibility()
     apply_belief_driven_resolution_patch()
     apply_belief_compatibility_patch()
+    apply_manufacturer_search_planner_hardening()
     apply_manufacturer_primary_policy()
     apply_manufacturer_primary_hardening()
     apply_runtime_contract_patch()
