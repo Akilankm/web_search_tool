@@ -14,6 +14,8 @@ The final URL is selected for **product truth**, not merely for commercial avail
 
 This hierarchy applies only after a page passes the production gates. Manufacturer authority never rescues a wrong model, sibling product, wrong pack, category page, inaccessible page, or incomplete feature source.
 
+Amazon/eBay are marketplace last-resort sources unless one of them is explicitly supplied as the requested retailer. Even then, an exact qualified official manufacturer page remains the primary product-truth source.
+
 ## Mandatory gates before authority
 
 Every primary candidate must satisfy:
