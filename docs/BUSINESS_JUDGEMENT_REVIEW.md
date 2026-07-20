@@ -8,7 +8,7 @@ Each product run writes a shareable human-validation document:
 data/artifacts/<row_id>/business_judgement_review.md
 ```
 
-The artifact lets a human coder answer a stronger question than “did the agent find the same URL?”:
+It lets a human coder answer a stronger question than “did the agent find the same URL?”:
 
 > Did the agent make the same sequence of business judgments, in the same order, from the same observable evidence?
 
@@ -27,8 +27,6 @@ It records observable evidence, explicit business rules, decisions and resulting
 9. Links to supporting engineering artifacts.
 
 ## Judgment record schema
-
-Every recorded step contains:
 
 ```text
 sequence_number
@@ -67,59 +65,70 @@ extraction_method=vision_llm
 evidence_location=visual_asset:<asset_id>
 ```
 
-The artifact distinguishes three cases:
-
 | Value | Meaning |
 |---|---|
-| `YES_VISUAL_EVIDENCE_SUPPORTED_SELECTED_URL_FEATURE_GATE` | Vision evidence was recorded for the selected URL and supported its requested-feature gate |
-| `VISUAL_EVIDENCE_USED_BUT_NOT_RECORDED_AS_DECISIVE_FOR_SELECTED_URL` | Screenshots or images informed investigation, but the record does not prove they changed the final URL |
-| `NO_VISUAL_EVIDENCE_RECORDED` | No visual evidence was recorded in the result |
+| `YES_VISUAL_EVIDENCE_SUPPORTED_SELECTED_URL_FEATURE_GATE` | Vision evidence supported the selected URL's requested-feature gate |
+| `VISUAL_EVIDENCE_USED_BUT_NOT_RECORDED_AS_DECISIVE_FOR_SELECTED_URL` | Images/screenshots informed investigation but were not proven decisive |
+| `NO_VISUAL_EVIDENCE_RECORDED` | No visual evidence was recorded |
 
-The field `text_alone_would_have_passed` remains `UNKNOWN_NOT_COUNTERFACTUALLY_TESTED` unless an explicit text-only counterfactual run is performed. The system must not claim image causality merely because images were available.
+`text_alone_would_have_passed` remains `UNKNOWN_NOT_COUNTERFACTUALLY_TESTED` unless an explicit text-only counterfactual run is performed.
 
 ## Human coder protocol
 
-Give the human coder only:
+Give the human coder:
 
 1. the original submitted input; and
 2. `business_judgement_review.md`.
 
-Ask the coder to review independently and classify the comparison:
+Ask them to classify:
 
-- `IDENTICAL`: same judgments, same order and same final URL role/outcome;
-- `PARTIALLY IDENTICAL`: same final URL but one or more judgments or ordering differ;
+- `IDENTICAL`: same judgments, order and URL outcome;
+- `PARTIALLY IDENTICAL`: same final URL but one or more judgments differ;
 - `NOT IDENTICAL`: materially different sequence or final URL.
 
-The reviewer records:
-
-- first divergent step number;
-- agent judgment;
-- human judgment;
-- missing or overweighted evidence;
-- whether image evidence was interpreted correctly;
-- preferred business-rule or system change.
+The reviewer records the first divergent step, agent judgment, human judgment, missing or overweighted evidence, image interpretation and preferred change.
 
 ## Acceptance criterion
 
-The URL-identification workflow should be considered behaviorally validated only when the human coder confirms the business-judgment sequence, not merely the final URL.
+The URL-identification workflow is behaviorally validated only when the human coder confirms the business-judgment sequence, not merely the final URL.
 
-A different sequence with the same URL is useful feedback and should remain visible rather than being scored as a complete match.
+## Notebook surfaces
 
-## Notebook view
-
-The supported notebook is:
+### Single product
 
 ```text
-notebooks/01_run_product_evidence.ipynb
+notebooks/01_single_product.ipynb
 ```
 
-Its first post-run section displays:
+The first post-run view displays:
 
+- `final_decision_df`;
 - `business_judgement_steps_df`;
 - `visual_evidence_summary_df`;
-- the exact `business_judgement_review.md` path to share.
+- the exact Markdown path to share.
 
-The lower notebook sections retain engineering diagnostics for investigation after the business comparison.
+### Batch products
+
+```text
+notebooks/02_batch_products.ipynb
+```
+
+Every successful or review-required row contains `business_judgement_review_path` and a product-specific artifact directory. Batch execution never replaces the individual judgment artifact with a batch-level opaque explanation.
+
+### Artifact diagnostics
+
+```text
+notebooks/03_artifact_diagnostics.ipynb
+```
+
+This offline notebook accepts an artifact directory or any file inside it. It reconstructs a decision mindmap, chronological judgment timeline, candidate and feature evidence, belief changes and artifact inventory. It writes:
+
+```text
+artifact_diagnostic_report.md
+artifact_diagnostic_workbook.xlsx
+```
+
+The diagnostic view expands the same observable evidence-and-judgment contract; it does not expose hidden chain-of-thought.
 
 ## Runtime contract
 
