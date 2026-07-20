@@ -35,23 +35,36 @@ jobs:
       - name: Validate default toy feature schema
         run: python -m json.tool inputs/private/toy_features.json >/dev/null
 
-      - name: Validate notebook JSON and code cells
+      - name: Validate all notebook JSON and code cells
         run: |
-          python -m json.tool notebooks/01_run_product_evidence.ipynb >/dev/null
           python - <<'PY'
-          import ast, json
+          import ast
+          import json
           from pathlib import Path
-          notebook = json.loads(Path('notebooks/01_run_product_evidence.ipynb').read_text())
-          for index, cell in enumerate(notebook['cells']):
-              if cell.get('cell_type') == 'code':
-                  ast.parse(''.join(cell.get('source', [])), filename=f'notebook-cell-{index}')
+
+          expected = [
+              "01_single_product.ipynb",
+              "02_batch_products.ipynb",
+              "03_artifact_diagnostics.ipynb",
+          ]
+          paths = sorted(Path("notebooks").glob("*.ipynb"))
+          assert [path.name for path in paths] == expected
+          for path in paths:
+              notebook = json.loads(path.read_text(encoding="utf-8"))
+              assert notebook.get("nbformat") == 4
+              for index, cell in enumerate(notebook["cells"]):
+                  if cell.get("cell_type") == "code":
+                      ast.parse(
+                          "".join(cell.get("source", [])),
+                          filename=f"{path.name}:cell-{index}",
+                      )
           PY
 
       - name: Validate Compose contract
         run: |
           cp .env.example .env
           chmod 600 .env
-          mkdir -p data/artifacts data/runtime inputs/private secrets
+          mkdir -p data/artifacts data/runtime data/batch_runs inputs/private secrets
           printf 'ci-browser-token\n' > secrets/browser_api_token.txt
           docker compose config --quiet
 
@@ -69,6 +82,9 @@ jobs:
             tests/test_source_authority_hierarchy.py \
             tests/test_manufacturer_primary_contract.py \
             tests/test_business_judgement_artifact.py \
+            tests/test_three_notebook_workflows.py \
+            tests/test_batch_notebook_runtime.py \
+            tests/test_artifact_diagnostics.py \
             tests/test_management_demo_guide.py \
             tests/test_three_stage_production_contract.py \
             tests/test_belief_driven_resolution.py \
