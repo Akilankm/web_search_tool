@@ -15,6 +15,9 @@ from src.product_evidence_harness.runtime_contract import (
     REQUIRED_RUNTIME_CAPABILITIES,
     RUNTIME_CONTRACT_VERSION,
 )
+from src.product_evidence_harness.structured_no_url_outcome import (
+    is_structured_no_url_outcome,
+)
 
 AGENT_URL = os.getenv("PRODUCT_AGENT_URL", "http://127.0.0.1:8788").rstrip("/")
 POLL_SECONDS = 3
@@ -269,19 +272,22 @@ def validate_result_contract(result: dict) -> dict:
 
     delivery = result.get("url_delivery") or {}
     primary_url = str(result.get("primary_url") or "").strip()
-    if not primary_url or not delivery.get("delivered"):
-        product_match = result.get("product_match") or {}
-        raise RuntimeError(
-            "MANDATORY_PRODUCT_URL_NOT_DELIVERED\n"
-            f"job_status={result.get('job_status')}\n"
-            f"delivery_status={delivery.get('status')}\n"
-            f"match_reason={product_match.get('match_reason')}\n"
-            f"best_available_url={product_match.get('best_available_url')}\n"
-            f"artifact_dir={result.get('artifact_dir')}\n"
-            "Inspect mandatory_url_delivery.json, source_selection.json, and candidates.csv "
-            "in the artifact directory."
-        )
-    return result
+    if primary_url and delivery.get("delivered"):
+        return result
+
+    if is_structured_no_url_outcome(result):
+        return result
+
+    product_match = result.get("product_match") or {}
+    raise RuntimeError(
+        "INCONSISTENT_URL_DELIVERY_RESULT\n"
+        f"job_status={result.get('job_status')}\n"
+        f"delivery_status={delivery.get('status')}\n"
+        f"match_reason={product_match.get('match_reason')}\n"
+        f"best_available_url={product_match.get('best_available_url')}\n"
+        f"artifact_dir={result.get('artifact_dir')}\n"
+        "A no-URL result is valid only when it uses the explicit structured no-safe-URL review contract."
+    )
 
 
 def submit_product(product: dict, feature_set: str = DEFAULT_FEATURE_SET) -> str:
