@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 
@@ -17,9 +18,19 @@ class _EnumeratedRecordsFrame:
         orient = kwargs.get("orient")
         if orient is None and args:
             orient = args[0]
-        if orient == "records":
-            return list(enumerate(records))
-        return records
+        if orient != "records":
+            return records
+
+        if all(
+            isinstance(item, tuple)
+            and len(item) == 2
+            and isinstance(item[0], int)
+            and isinstance(item[1], Mapping)
+            for item in records
+        ):
+            return records
+
+        return list(enumerate(records))
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._frame, name)
