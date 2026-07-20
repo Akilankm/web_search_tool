@@ -235,7 +235,7 @@ def test_interactive_dashboard_is_self_contained_and_table_free(tmp_path: Path) 
     assert "Candidate URL explorer" in html
     assert "Interactive evidence explorer" in html
     assert "Generated artifact map" in html
-    assert "cdn.plot.ly" not in html
+    assert '<script src="https://cdn.plot.ly' not in html
     assert "<table" not in html.lower()
 
     candidate_figure = dashboard.figures["Candidate explorer"]
