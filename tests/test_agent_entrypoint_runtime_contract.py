@@ -45,7 +45,7 @@ agent_app.orchestrator.health = lambda: {
     "artifact_root": "/tmp/artifacts",
 }
 payload = agent_app.health()
-assert payload["runtime_contract_version"] == "belief-url-resolution-v6-business-judgement-review"
+assert payload["runtime_contract_version"] == "belief-url-resolution-v7-structured-no-url-review"
 assert payload["belief_driven_product_resolution"] is True
 assert payload["mandatory_review_url_delivery"] is True
 assert payload["deterministic_browser_fallback_on_llm_error"] is True
@@ -53,6 +53,7 @@ assert payload["notebook_self_healing_runtime"] is True
 assert payload["compatibility_patches_applied"] is True
 assert payload["manufacturer_first_primary_url"] is True
 assert payload["business_judgement_review_artifact"] is True
+assert payload["structured_no_url_review_outcome"] is True
 assert payload["agent_entrypoint"] == "src.product_evidence_harness.agent_service.app:app"
 print(json.dumps(payload, sort_keys=True))
 '''
@@ -80,3 +81,4 @@ print(json.dumps(payload, sort_keys=True))
     assert payload["compatibility_patches_applied"] is True
     assert payload["manufacturer_first_primary_url"] is True
     assert payload["business_judgement_review_artifact"] is True
+    assert payload["structured_no_url_review_outcome"] is True
