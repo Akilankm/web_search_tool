@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import importlib
+import sys
 from pathlib import Path
 
-from src.product_evidence_harness.agent_service import app as agent_app
 from src.product_evidence_harness.agent_service.jobs import InMemoryJobStore, JobStatus
 from src.product_evidence_harness.business_judgement_artifact import (
     write_business_judgement_review,
@@ -60,12 +61,21 @@ def _result(tmp_path: Path) -> dict:
     return result
 
 
+def _load_isolated_agent_app(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("ARTIFACT_ROOT", str(tmp_path / "service-artifacts"))
+    monkeypatch.setenv("PRIVATE_FEATURE_ROOT", str(tmp_path / "private-features"))
+    monkeypatch.setenv("PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE", "false")
+    sys.modules.pop("src.product_evidence_harness.agent_service.app", None)
+    return importlib.import_module("src.product_evidence_harness.agent_service.app")
+
+
 def test_agent_job_preserves_no_url_result_as_review_required(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    agent_app = _load_isolated_agent_app(monkeypatch, tmp_path)
     store = InMemoryJobStore()
-    result = _result(tmp_path)
+    result = _result(tmp_path / "product-artifact")
 
     monkeypatch.setattr(agent_app, "store", store)
     monkeypatch.setattr(agent_app.orchestrator, "run", lambda payload, progress=None: result)
