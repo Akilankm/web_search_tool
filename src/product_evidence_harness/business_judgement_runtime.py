@@ -8,6 +8,9 @@ from src.product_evidence_harness.business_judgement_artifact import (
     ARTIFACT_FILENAME,
     write_business_judgement_review,
 )
+from src.product_evidence_harness.no_url_business_review import (
+    augment_no_url_business_review,
+)
 
 
 _PATCHED = False
@@ -41,6 +44,7 @@ def apply_business_judgement_review_patch() -> None:
         result["business_judgement_review"]["human_review_status"] = (
             review.get("human_review_status") or "PENDING_HUMAN_COMPARISON"
         )
+        augment_no_url_business_review(result, artifact_root)
         (artifact_root / "orchestrated_result.json").write_text(
             json.dumps(result, indent=2, ensure_ascii=False, default=str) + "\n",
             encoding="utf-8",
