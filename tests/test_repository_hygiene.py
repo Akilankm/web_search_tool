@@ -5,21 +5,27 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SUPPORTED_NOTEBOOKS = [
+    "01_single_product.ipynb",
+    "02_batch_products.ipynb",
+    "03_artifact_diagnostics.ipynb",
+]
 
 
-def test_only_supported_notebook_remains() -> None:
+def test_exactly_three_supported_notebooks_remain() -> None:
     notebooks = sorted(path.name for path in (ROOT / "notebooks").glob("*.ipynb"))
-    assert notebooks == ["01_run_product_evidence.ipynb"]
+    assert notebooks == SUPPORTED_NOTEBOOKS
 
 
-def test_supported_notebook_is_clean_and_renderable() -> None:
-    notebook = json.loads((ROOT / "notebooks" / "01_run_product_evidence.ipynb").read_text(encoding="utf-8"))
-    assert notebook["nbformat"] == 4
-    assert notebook["cells"]
-    for cell in notebook["cells"]:
-        if cell["cell_type"] == "code":
-            assert cell.get("execution_count") is None
-            assert cell.get("outputs") == []
+def test_supported_notebooks_are_clean_and_renderable() -> None:
+    for name in SUPPORTED_NOTEBOOKS:
+        notebook = json.loads((ROOT / "notebooks" / name).read_text(encoding="utf-8"))
+        assert notebook["nbformat"] == 4
+        assert notebook["cells"]
+        for cell in notebook["cells"]:
+            if cell["cell_type"] == "code":
+                assert cell.get("execution_count") is None
+                assert cell.get("outputs") == []
 
 
 def test_obsolete_public_entry_points_are_removed() -> None:
@@ -30,6 +36,7 @@ def test_obsolete_public_entry_points_are_removed() -> None:
         "docs/SECURE_ENVIRONMENT.md",
         "examples/toy_feature_schema.json",
         "notebooks/00_notebook_gateway.ipynb",
+        "notebooks/01_run_product_evidence.ipynb",
         "notebooks/01_single_product_harness.ipynb",
         "notebooks/02_batch_product_harness.ipynb",
         "notebooks/03_offline_product_artifact.ipynb",
@@ -52,9 +59,13 @@ def test_final_docs_and_runtime_files_exist() -> None:
         "scripts/preflight_azureml.py",
         "scripts/wait_for_stack.py",
         "docs/AZUREML_OPERATIONS.md",
+        "docs/NOTEBOOK_USAGE.md",
         "docs/SECURITY.md",
         "examples/features_to_code.example.json",
+        "examples/batch_products.example.csv",
         "inputs/private/toy_features.json",
+        "src/product_evidence_harness/batch_notebook_runtime.py",
+        "src/product_evidence_harness/artifact_diagnostics.py",
     ]
     assert [path for path in required if not (ROOT / path).is_file()] == []
 
@@ -94,9 +105,10 @@ def test_compose_exposes_only_the_agent() -> None:
     assert '/var/run/docker.sock' not in text
 
 
-def test_readme_points_to_the_only_supported_paths() -> None:
+def test_readme_points_to_all_supported_paths() -> None:
     text = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "notebooks/01_run_product_evidence.ipynb" in text
+    for notebook in SUPPORTED_NOTEBOOKS:
+        assert f"notebooks/{notebook}" in text
     assert "scripts/azureml_startup.sh" in text
     assert "inputs/private/toy_features.json" in text
     assert "docs/AZUREML_OPERATIONS.md" in text

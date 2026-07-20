@@ -16,39 +16,25 @@ LLM_CONSUMER_ID=
 
 or the equivalent `AZURE_OPENAI_*` aliases.
 
-The bootstrap and agent health checks require only the following four values to be present:
-
-- API key;
-- API version;
-- endpoint;
-- deployment.
-
-`LLM_CONSUMER_ID` remains optional.
+The bootstrap and agent health checks require API key, API version, endpoint and deployment. `LLM_CONSUMER_ID` is optional.
 
 ## Values are not second-guessed
 
-Enterprise gateways differ from public Azure OpenAI conventions. The platform therefore does not reject an LLM configuration because of:
+Enterprise gateways differ from public Azure OpenAI conventions. The platform does not reject a configuration merely because of a short opaque key, internal gateway path, custom endpoint format, organization-specific deployment identifier or different credential length.
 
-- a short opaque API key;
-- a non-HTTPS or non-URL endpoint string;
-- an internal gateway path;
-- spaces or organization-specific characters in a deployment identifier;
-- a value that resembles a local or custom endpoint;
-- different credential lengths or naming conventions.
-
-The actual provider request is the authoritative validation. Authentication, routing, deployment, certificate, and protocol errors are surfaced from the LLM client when the first real request is made.
+The provider request is the authoritative validation. Authentication, routing, deployment, certificate and protocol errors are surfaced from the LLM client.
 
 ## Validation that remains
 
-The platform still validates:
+The platform validates:
 
 - required LLM fields are not empty;
-- numeric controls such as token limits, timeouts, temperature, and retry counts are parseable and within supported runtime bounds;
+- numeric token, timeout, temperature and retry controls are parseable and within bounds;
 - `.env` syntax and duplicate keys;
-- SerpAPI configuration and search-credit controls;
-- agentic browser, feature-schema, identity, evidence, and URL-acceptance contracts.
+- SerpAPI and search-credit controls;
+- agentic browser, feature-schema, identity, evidence and URL-acceptance contracts.
 
-Credential values are never printed in preflight, health, or failure diagnostics.
+Credential values are never printed in preflight, health or failure diagnostics.
 
 ## Azure ML workflow
 
@@ -58,8 +44,17 @@ cp .env.example .env
 ./scripts/azureml_startup.sh
 ```
 
-When startup reports the stack as healthy, open:
+Execution notebooks requiring the LLM and browser stack:
 
 ```text
-notebooks/01_run_product_evidence.ipynb
+notebooks/01_single_product.ipynb
+notebooks/02_batch_products.ipynb
 ```
+
+Offline artifact review does not call the LLM:
+
+```text
+notebooks/03_artifact_diagnostics.ipynb
+```
+
+The batch notebook can submit multiple product jobs concurrently. Product-level parallelism should remain bounded by agent workers, browser contexts and the enterprise provider's rate limits.

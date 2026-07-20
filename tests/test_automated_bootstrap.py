@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
 
 import pytest
@@ -137,15 +136,11 @@ def test_waiter_parses_env_without_exposing_values(tmp_path: Path) -> None:
     assert values["SECRET"] == "hidden"
 
 
-def test_notebook_and_runtime_contain_bootstrap_and_feature_discovery_contract() -> None:
-    notebook = json.loads(
-        (ROOT / "notebooks" / "01_run_product_evidence.ipynb").read_text(
-            encoding="utf-8"
-        )
-    )
-    source = "\n".join(
-        "".join(cell.get("source", [])) for cell in notebook["cells"]
-    )
+def test_notebooks_and_runtime_contain_bootstrap_and_feature_contracts() -> None:
+    sources = {
+        path.name: path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "notebooks").glob("*.ipynb"))
+    }
     runtime = (
         ROOT / "src" / "product_evidence_harness" / "notebook_runtime.py"
     ).read_text(encoding="utf-8")
@@ -153,10 +148,16 @@ def test_notebook_and_runtime_contain_bootstrap_and_feature_discovery_contract()
 
     assert "./scripts/azureml_startup.sh" in readme
     assert 'project_root / "data" / "artifacts"' in runtime
-    assert "RUN_SINGLE_PRODUCT = False" in source
-    assert "available_feature_sets" in source
-    assert "default_feature_set" in source
-    assert "manufacturer_first_primary_url" in source
+    assert set(sources) == {
+        "01_single_product.ipynb",
+        "02_batch_products.ipynb",
+        "03_artifact_diagnostics.ipynb",
+    }
+    assert "RUN_SINGLE_PRODUCT = False" in sources["01_single_product.ipynb"]
+    assert "RUN_BATCH = False" in sources["02_batch_products.ipynb"]
+    assert "RUN_DIAGNOSTICS = False" in sources["03_artifact_diagnostics.ipynb"]
+    assert "manufacturer_first_primary_url" in sources["01_single_product.ipynb"]
+    assert "ensure_platform_ready" in sources["01_single_product.ipynb"]
+    assert "ensure_platform_ready" in sources["02_batch_products.ipynb"]
+    assert "ensure_platform_ready" not in sources["03_artifact_diagnostics.ipynb"]
     assert "adaptive_search_contract_enforced" in runtime
-    assert "ensure_platform_ready" in source
-    assert "AUTO_RECOVER_PLATFORM = True" in source
