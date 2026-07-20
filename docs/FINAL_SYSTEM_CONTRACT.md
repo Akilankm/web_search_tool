@@ -19,7 +19,8 @@ return:
 1. a real direct product-detail `primary_url`;
 2. qualified `manufacturer_url` and `retailer_url` references;
 3. an explicit manufacturer-versus-retailer `source_selection`;
-4. a shareable `business_judgement_review.md` recording the observable sequence of business judgments.
+4. a shareable `business_judgement_review.md` recording the observable sequence of business judgments;
+5. notebook surfaces for single execution, bounded parallel batch execution and offline artifact diagnostics.
 
 ## URL decision policy
 
@@ -27,7 +28,7 @@ return:
 exact product, model, form, variant, size, quantity and pack
 → browser-openable rendered individual product page
 → text scrapability and information richness
-→ requested feature completeness
+→ requested-feature completeness
 → durable non-expiring URL
 → official manufacturer authority
 → requested retailer / requested-country retailer
@@ -45,7 +46,7 @@ manufacturer_primary
 → global_fallback
 ```
 
-A retailer found during `manufacturer_primary` is retained but cannot stop the search before the manufacturer opportunity is evaluated.
+A retailer found during `manufacturer_primary` is retained but cannot stop the search before the official manufacturer opportunity is evaluated.
 
 ## Multimodal evidence policy
 
@@ -70,30 +71,26 @@ Images may materially complete the selected URL's feature gate. The system repor
 
 ## Business judgment artifact contract
 
-Every `COMPLETED` or `REVIEW_REQUIRED` run writes:
+Every `COMPLETED` or `REVIEW_REQUIRED` product run writes:
 
 ```text
 data/artifacts/<row_id>/business_judgement_review.md
 ```
 
-The artifact contains:
+Each judgment step contains:
 
 ```text
-submitted input
-final URL summary
-chronological business questions
+business question
 observable evidence considered
 evidence sources
 visual evidence use and impact
-agent judgment
-judgment status
+agent judgment and status
 alternatives considered and rejected
 rejection reason
 business rule applied
 effect on next action
 confidence
 final outcome
-human coder comparison form
 ```
 
 Each step follows:
@@ -115,11 +112,9 @@ The human coder receives the original input and `business_judgement_review.md`, 
 - `PARTIALLY IDENTICAL`; or
 - `NOT IDENTICAL`.
 
-The reviewer records the first divergent step, human judgment, missed or overweighted evidence, image interpretation and proposed system change.
+The reviewer records the first divergent step, their own judgment, missed or overweighted evidence, image interpretation and proposed system change. Behavioral validation requires sequence equivalence, not merely the same final URL.
 
-Behavioral validation requires sequence equivalence, not merely the same final URL.
-
-## Stable response schema
+## Stable product result schema
 
 ```text
 product_identification
@@ -142,12 +137,6 @@ Current:
 belief-url-resolution-v6-business-judgement-review
 ```
 
-Previous migration version:
-
-```text
-belief-url-resolution-v5-manufacturer-primary
-```
-
 Required capabilities:
 
 ```text
@@ -160,25 +149,68 @@ notebook_self_healing_runtime=true
 compatibility_patches_applied=true
 ```
 
-## Notebook contract
+## Three-notebook contract
 
-Only:
-
-```text
-notebooks/01_run_product_evidence.ipynb
-```
-
-The first post-run view must expose:
+Exactly these notebooks are supported:
 
 ```text
-business_judgement_steps_df
-visual_evidence_summary_df
-business_judgement_review.md path
+notebooks/01_single_product.ipynb
+notebooks/02_batch_products.ipynb
+notebooks/03_artifact_diagnostics.ipynb
 ```
 
-Engineering diagnostics follow below the human comparison view.
+### Single product
 
-## Artifact contract
+`01_single_product.ipynb` must:
+
+- verify the runtime before paid search;
+- accept one product input;
+- expose `final_decision_df` with `primary_url`, `primary_url_role`, `manufacturer_url`, `retailer_url` and `source_selection`;
+- expose `business_judgement_steps_df` and `visual_evidence_summary_df` before engineering diagnostics;
+- link to `business_judgement_review.md`;
+- export `single_product_diagnostics.xlsx`.
+
+### Parallel batch
+
+`02_batch_products.ipynb` must:
+
+- accept a CSV with mandatory `main_text` and `country_code`;
+- preserve EAN/GTIN as text;
+- generate or validate unique `row_id` values;
+- execute products with bounded parallelism;
+- isolate row failures;
+- preserve one complete artifact per product;
+- expose throughput, p50 and p95 product latency;
+- write consolidated batch outputs under `data/batch_runs/<run_id>/`.
+
+Batch outputs:
+
+```text
+batch_input_normalized.csv
+batch_results.csv
+batch_failures.csv
+batch_artifact_index.csv
+batch_run_summary.json
+```
+
+Product-level parallelism is bounded by the safe capacity of agent workers and browser contexts. Configured concurrency is not a throughput guarantee and must be load-tested.
+
+### Artifact diagnostics
+
+`03_artifact_diagnostics.ipynb` must:
+
+- accept an artifact directory or any file inside it;
+- operate offline without the running agent;
+- reconstruct input, identity, uncertainty, search, candidate investigation, visual evidence, acceptance, source choice and final URL;
+- render a high-level decision mindmap;
+- render a chronological observable business-judgment timeline;
+- expose search, candidate, feature, belief and evidence tables;
+- inventory artifact files;
+- write `artifact_diagnostic_report.md` and `artifact_diagnostic_workbook.xlsx`.
+
+The diagnostic surface displays recorded evidence, actions, rules, judgments and conclusions. It must never claim access to hidden chain-of-thought.
+
+## Product artifact contract
 
 ```text
 data/artifacts/<row_id>/
@@ -198,6 +230,26 @@ data/artifacts/<row_id>/
 └── single_product_diagnostics.xlsx
 ```
 
+Optional diagnostic outputs:
+
+```text
+artifact_diagnostic_report.md
+artifact_diagnostic_workbook.xlsx
+```
+
+## Batch artifact contract
+
+```text
+data/batch_runs/<run_id>/
+├── batch_input_normalized.csv
+├── batch_results.csv
+├── batch_failures.csv
+├── batch_artifact_index.csv
+└── batch_run_summary.json
+```
+
+The batch summary must distinguish configured parallelism from observed throughput and latency.
+
 ## Terminal outcomes
 
 | Outcome | Contract |
@@ -213,18 +265,19 @@ The workflow never reports success with an empty product URL.
 A release is acceptable only when CI validates:
 
 - Python source compilation;
-- notebook JSON and every code cell;
+- all three notebook JSON files and every code cell;
 - Docker Compose and Azure ML bootstrap;
 - runtime capabilities and result schema;
 - manufacturer-primary and retailer-fallback behavior;
 - multimodal evidence reporting;
 - business judgment Markdown generation;
-- human comparison form and notebook visibility;
+- bounded batch normalization, concurrency and failure isolation;
+- artifact-path resolution, mindmap and report generation;
 - full historical unit suite on Python 3.10 and 3.11.
 
 ## Leadership communication
 
-The speaker-ready explanation of the business problem, workflow, assumptions, constraints, artifacts, selection policy, performance model, token/cost boundaries, KPI framework and change-impact areas is maintained in:
+The speaker-ready explanation of the business problem, workflow, assumptions, constraints, artifacts, selection policy, notebook choices, performance model, token/cost boundaries, KPI framework and change-impact areas is maintained in:
 
 ```text
 docs/MANAGEMENT_DEMO_GUIDE.md
