@@ -87,6 +87,7 @@ jobs:
             tests/test_batch_notebook_runtime.py \
             tests/test_artifact_diagnostics.py \
             tests/test_artifact_diagnostics_route_hotfix.py \
+            tests/test_interactive_artifact_diagnostics.py \
             tests/test_management_demo_guide.py \
             tests/test_three_stage_production_contract.py \
             tests/test_belief_driven_resolution.py \
