@@ -101,6 +101,7 @@ def apply_compatibility_patches() -> None:
     from src.product_evidence_harness.manufacturer_primary_runtime import apply_manufacturer_primary_policy
     from src.product_evidence_harness.manufacturer_primary_hardening import apply_manufacturer_primary_hardening
     from src.product_evidence_harness.manufacturer_search_planner_hardening import apply_manufacturer_search_planner_hardening
+    from src.product_evidence_harness.structured_no_url_outcome import apply_structured_no_url_outcome_patch
     from src.product_evidence_harness.runtime_contract_runtime import apply_runtime_contract_patch
     from src.product_evidence_harness.business_judgement_runtime import apply_business_judgement_review_patch
     from src.product_evidence_harness.artifact_diagnostics_runtime import apply_artifact_diagnostics_runtime_patch
@@ -146,6 +147,7 @@ def apply_compatibility_patches() -> None:
         "manufacturer_primary_runtime": "src.product_evidence_harness.manufacturer_primary_runtime",
         "manufacturer_primary_hardening": "src.product_evidence_harness.manufacturer_primary_hardening",
         "manufacturer_search_planner_hardening": "src.product_evidence_harness.manufacturer_search_planner_hardening",
+        "structured_no_url_outcome": "src.product_evidence_harness.structured_no_url_outcome",
         "runtime_contract": "src.product_evidence_harness.runtime_contract",
         "runtime_contract_runtime": "src.product_evidence_harness.runtime_contract_runtime",
         "business_judgement_artifact": "src.product_evidence_harness.business_judgement_artifact",
@@ -167,5 +169,8 @@ def apply_compatibility_patches() -> None:
     apply_manufacturer_search_planner_hardening()
     apply_manufacturer_primary_policy()
     apply_manufacturer_primary_hardening()
+    # This patch must wrap the final manufacturer-aware orchestrator but remain
+    # inside the business-judgment artifact writer.
+    apply_structured_no_url_outcome_patch()
     apply_runtime_contract_patch()
     apply_business_judgement_review_patch()
