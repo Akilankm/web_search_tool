@@ -16,7 +16,13 @@ Fresh Azure ML workflow:
   1. cp .env.example .env
   2. edit .env with real SerpAPI and LLM values
   3. ./scripts/azureml_startup.sh
-  4. open notebooks/01_run_product_evidence.ipynb
+  4. open one of:
+       notebooks/01_single_product.ipynb
+       notebooks/02_batch_products.ipynb
+       notebooks/03_artifact_diagnostics.ipynb
+
+The single and batch notebooks execute the runtime. The diagnostics notebook
+works offline from an existing product artifact.
 
 Options:
   --clean-build              Rebuild agent/browser images with --no-cache, then recreate containers.
@@ -115,7 +121,7 @@ EOF
   exit 2
 fi
 
-mkdir -p data/artifacts data/runtime inputs/private secrets
+mkdir -p data/artifacts data/runtime data/batch_runs inputs/private secrets
 
 if [[ ! -s secrets/browser_api_token.txt ]]; then
   python - <<'PY'
@@ -154,7 +160,7 @@ if [[ "$RUNTIME_UID" == "0" ]]; then
   exit 1
 fi
 
-for runtime_path in data/artifacts data/runtime; do
+for runtime_path in data/artifacts data/runtime data/batch_runs; do
   probe="$runtime_path/.write-test-$$"
   if ! : > "$probe"; then
     echo "Runtime directory is not writable by the current user: $PROJECT_DIR/$runtime_path" >&2
@@ -222,13 +228,17 @@ echo "Product evidence platform is ready."
 echo "Agent API: http://127.0.0.1:${HOST_PORT}"
 echo "Runtime contract: ${RUNTIME_CONTRACT}"
 echo "Health snapshot: $PROJECT_DIR/data/runtime/stack_health.json"
-echo "Artifacts: $PROJECT_DIR/data/artifacts/<row_id>/"
-echo "Notebook: $PROJECT_DIR/notebooks/01_run_product_evidence.ipynb"
+echo "Product artifacts: $PROJECT_DIR/data/artifacts/<row_id>/"
+echo "Batch outputs: $PROJECT_DIR/data/batch_runs/<run_id>/"
+echo "Notebooks:"
+echo "  - $PROJECT_DIR/notebooks/01_single_product.ipynb        # one product, final decision and trace"
+echo "  - $PROJECT_DIR/notebooks/02_batch_products.ipynb        # CSV batch with bounded parallelism"
+echo "  - $PROJECT_DIR/notebooks/03_artifact_diagnostics.ipynb  # offline artifact mindmap and diagnostics"
 echo "Available FEATURE_SET values:"
 for feature_file in "${FEATURE_SETS[@]}"; do
   echo "  - ${feature_file%.json}"
 done
 
 echo
-echo "Open the notebook, run the readiness cell, select FEATURE_SET, and run the product cell."
+echo "Choose the notebook for the task. Single and batch require the running stack; artifact diagnostics is offline."
 STARTUP_SUCCEEDED=true
