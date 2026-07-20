@@ -64,21 +64,30 @@ def test_batch_notebook_uses_current_parallel_and_artifact_contract() -> None:
         assert token in source
 
 
-def test_artifact_diagnostics_notebook_is_offline_and_complete() -> None:
+def test_artifact_diagnostics_notebook_is_offline_and_interactive() -> None:
     source = notebook_source(DIAGNOSTICS)
     for token in (
         "ARTIFACT_PATH",
         "build_artifact_diagnostics",
-        "plot_artifact_mindmap",
-        "plot_business_judgement_timeline",
+        "build_interactive_artifact_dashboard",
+        "display_interactive_artifact_dashboard",
+        "artifact_diagnostics_interactive.html",
+        "Decision Map",
+        "Judgment Timeline",
+        "Candidates",
+        "Evidence",
+        "Artifacts",
         "write_artifact_diagnostic_report",
         "artifact_diagnostic_workbook.xlsx",
         "business_judgement_review.md",
-        "first divergent step",
+        "first divergent",
     ):
         assert token in source
     assert "ensure_platform_ready" not in source
     assert "run_product" not in source
+    assert "matplotlib" not in source
+    assert "seaborn" not in source
+    assert "display(diagnostics." not in source
 
 
 def test_notebook_runtime_retains_self_healing_and_mandatory_url_contract() -> None:
