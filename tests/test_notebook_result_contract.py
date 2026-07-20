@@ -133,6 +133,7 @@ def test_notebook_docs_describe_all_three_workflows() -> None:
         "artifact_diagnostic_report.md",
         "artifact_diagnostic_workbook.xlsx",
         "bounded parallel",
-        "observable",
+        "Decision Map",
+        "Judgment Timeline",
     ):
         assert token in notebook_doc
