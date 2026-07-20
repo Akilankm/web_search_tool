@@ -69,18 +69,27 @@ def test_batch_notebook_validates_csv_and_runs_bounded_parallel_products() -> No
         assert token in source
 
 
-def test_artifact_notebook_is_offline_and_renders_complete_decision_maps() -> None:
+def test_artifact_notebook_is_offline_and_interactively_complete() -> None:
     source = _source("03_artifact_diagnostics.ipynb")
     for token in (
         "ARTIFACT_PATH",
         "build_artifact_diagnostics",
-        "plot_artifact_mindmap",
-        "plot_business_judgement_timeline",
+        "build_interactive_artifact_dashboard",
+        "display_interactive_artifact_dashboard",
+        "artifact_diagnostics_interactive.html",
+        "Decision Map",
+        "Judgment Timeline",
+        "Candidates",
+        "Evidence",
+        "Artifacts",
         "artifact_diagnostic_report.md",
         "artifact_diagnostic_workbook.xlsx",
         "business_judgement_review.md",
-        "does not expose hidden chain-of-thought",
+        "not hidden chain-of-thought",
     ):
         assert token in source
     assert "ensure_platform_ready" not in source
     assert "run_product" not in source
+    assert "plot_artifact_mindmap" not in source
+    assert "plot_business_judgement_timeline" not in source
+    assert "display(diagnostics." not in source
