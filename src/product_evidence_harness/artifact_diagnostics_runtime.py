@@ -37,13 +37,23 @@ class _EnumeratedRecordsFrame:
 
 
 def apply_artifact_diagnostics_runtime_patch() -> None:
-    """Repair the merged mindmap route iterator without changing artifact semantics."""
+    """Repair notebook mindmap iteration without making notebook libraries agent dependencies.
+
+    The production agent image intentionally excludes matplotlib because chart rendering belongs
+    to the notebook/diagnostic surface. The global compatibility bootstrap is imported by Uvicorn,
+    so a missing optional notebook dependency must not prevent the agent from binding its API port.
+    """
 
     global _PATCHED
     if _PATCHED:
         return
 
-    from src.product_evidence_harness import artifact_diagnostics as diagnostics
+    try:
+        from src.product_evidence_harness import artifact_diagnostics as diagnostics
+    except ModuleNotFoundError as exc:
+        if exc.name and exc.name.split(".", 1)[0] in {"matplotlib"}:
+            return
+        raise
 
     original = diagnostics._build_mindmap
     if getattr(original, "_artifact_route_enumeration_fixed", False):
