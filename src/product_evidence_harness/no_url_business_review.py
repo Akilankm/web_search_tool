@@ -67,6 +67,28 @@ def augment_no_url_business_review(
         return
 
     existing = path.read_text(encoding="utf-8")
+    replacements = {
+        "The agent selected **NONE** as the primary product-truth source: —.": (
+            "The bounded search did not produce a safe direct product-truth URL. "
+            "The run is preserved as **REVIEW_REQUIRED** for human resolution."
+        ),
+        "Every completed or review-required run must deliver a real direct product URL; no URL means explicit failure.": (
+            "A URL-backed result must deliver a real direct product page. When bounded search finds none, "
+            "return the explicit structured no-safe-URL review outcome and preserve the trace."
+        ),
+        "Strictly verified primary URL, best available review URL, or explicit failure when no safe direct product URL exists.": (
+            "Strictly verified primary URL, best available review URL, or a controlled no-safe-URL review outcome."
+        ),
+        "Deliver the best real review URL or fail when no safe direct URL exists.": (
+            "Deliver the best real review URL or return the structured no-safe-URL review outcome."
+        ),
+        "Human coder compares this recorded judgment sequence with their own sequence and reports the first divergence.": (
+            "Human coder reviews the exhausted search route, identifiers and rejected evidence, then reports the first divergence or supplies a known candidate."
+        ),
+    }
+    for old, new in replacements.items():
+        existing = existing.replace(old, new)
+
     banner = "\n".join(
         [
             "> **CONTROLLED NO-URL REVIEW OUTCOME**",
