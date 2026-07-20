@@ -6,6 +6,8 @@
 
 The platform converts incomplete vendor product text into a defensible direct product URL. It does not accept the first search result. It interprets the product, searches the official manufacturer first, validates exact identity and requested features using text and images, applies deterministic acceptance gates, and writes a human-reviewable business judgment sequence.
 
+When bounded search cannot find any safe direct product page, the platform does not fabricate a URL and does not collapse into an internal exception. It returns a structured `REVIEW_REQUIRED` outcome with the complete search trace, reason, artifacts and next actions.
+
 The operating model has three notebooks:
 
 ```text
@@ -29,8 +31,9 @@ The system converts ambiguity into a bounded evidence process rather than a sear
 | Local context | Retailer/country fallback | Preserves pack, market and availability context |
 | Packaging evidence | Screenshots and image reasoning | Recovers facts absent from text |
 | Governance | `business_judgement_review.md` | Enables human sequence comparison |
+| Safe search exhaustion | Structured no-safe-URL review outcome | Preserves trace without fabricating a URL or crashing |
 | Throughput | Bounded parallel CSV notebook | Scales without removing per-product controls |
-| Comprehension | Artifact mindmap notebook | Makes complex artifacts reviewable |
+| Comprehension | Interactive artifact diagnostic notebook | Makes complex artifacts explorable |
 
 ## Input and feature contract
 
@@ -65,7 +68,13 @@ Azure ML notebook
 Current runtime:
 
 ```text
-belief-url-resolution-v6-business-judgement-review
+belief-url-resolution-v7-structured-no-url-review
+```
+
+Required capability:
+
+```text
+structured_no_url_review_outcome=true
 ```
 
 ## Three notebook workflows
@@ -74,9 +83,19 @@ belief-url-resolution-v6-business-judgement-review
 
 Use for one product. It shows `final_decision_df`, `business_judgement_steps_df`, `visual_evidence_summary_df`, the chronological decision timeline, candidates, feature evidence and `single_product_diagnostics.xlsx`.
 
+For search exhaustion, the notebook shows:
+
+```text
+job_status=REVIEW_REQUIRED
+resolution_outcome.code=NO_SAFE_DIRECT_PRODUCT_URL_FOUND
+url_delivery.delivered=false
+```
+
+It continues into diagnostics instead of raising a notebook traceback.
+
 ### `notebooks/02_batch_products.ipynb`
 
-Use for CSV execution. It validates columns, preserves EAN as text, generates or validates unique row IDs, processes products with bounded parallelism, isolates row failures and writes:
+Use for CSV execution. It validates columns, preserves EAN as text, generates or validates unique row IDs, processes products with bounded parallelism, isolates genuine row failures and writes:
 
 ```text
 data/batch_runs/<run_id>/
@@ -87,9 +106,23 @@ data/batch_runs/<run_id>/
 └── batch_run_summary.json
 ```
 
+A product with no safe URL is a review result, not an infrastructure failure; the batch continues and preserves its product artifact.
+
 ### `notebooks/03_artifact_diagnostics.ipynb`
 
-Provide an artifact directory or any file inside it. It works offline and reconstructs input, identity, uncertainty, search, candidates, browser actions, text/image evidence, acceptance rules, source selection and final URL. It produces a mindmap, chronological trace, `artifact_diagnostic_report.md` and `artifact_diagnostic_workbook.xlsx`.
+Provide an artifact directory or any file inside it. It works offline and reconstructs input, identity, uncertainty, search, candidates, browser actions, text/image evidence, acceptance rules, source selection and final outcome.
+
+It provides one interactive workspace with:
+
+```text
+Decision Map
+Judgment Timeline
+Candidates
+Evidence
+Artifacts
+```
+
+It also produces `artifact_diagnostics_interactive.html`, `artifact_diagnostic_report.md` and `artifact_diagnostic_workbook.xlsx`.
 
 It exposes observable evidence, actions, rules, judgments and conclusions—not hidden chain-of-thought.
 
@@ -106,7 +139,8 @@ It exposes observable evidence, actions, rules, judgments and conclusions—not 
 8. Use rendered text, structured data, screenshots and images
 9. Apply exact identity, feature, browser, scrapability and durability gates
 10. Select manufacturer or controlled retailer fallback
-11. Write the result and human-comparable judgment artifact
+11. If no safe direct URL exists, create a structured no-URL review result
+12. Write the result and human-comparable judgment artifact
 ```
 
 ## URL selection and acceptance
@@ -131,7 +165,21 @@ official manufacturer
 → marketplace last resort
 ```
 
-Outputs include `primary_url`, `primary_url_role`, `manufacturer_url`, `retailer_url` and `source_selection`. When no safe direct page exists, the system returns `MANDATORY_PRODUCT_URL_NOT_FOUND`.
+Outputs include `primary_url`, `primary_url_role`, `manufacturer_url`, `retailer_url` and `source_selection`.
+
+When no safe direct page exists, the explicit result is:
+
+```text
+job_status=REVIEW_REQUIRED
+primary_url=null
+primary_url_role=NONE
+resolution_outcome.code=NO_SAFE_DIRECT_PRODUCT_URL_FOUND
+url_delivery.status=NO_SAFE_DIRECT_PRODUCT_URL_FOUND_AFTER_BOUNDED_SEARCH
+url_delivery.delivered=false
+url_fabricated=false
+```
+
+This is neither a successful URL resolution nor an unhandled software failure.
 
 ## Multimodal evidence
 
@@ -165,6 +213,8 @@ confidence and outcome
 visual-evidence use
 ```
 
+For a no-safe-URL result, the artifact begins with a controlled-outcome banner, states that no URL was fabricated, records all search stages and gives the human reviewer concrete next actions.
+
 The reviewer marks `IDENTICAL`, `PARTIALLY IDENTICAL` or `NOT IDENTICAL` and identifies the first divergent step.
 
 ## Artifacts
@@ -188,7 +238,19 @@ orchestrated_result.json
 single_product_diagnostics.xlsx
 ```
 
-Diagnostic outputs add `artifact_diagnostic_report.md` and `artifact_diagnostic_workbook.xlsx`.
+Search-exhaustion outcomes additionally include:
+
+```text
+no_url_resolution.json
+```
+
+Diagnostic outputs add:
+
+```text
+artifact_diagnostics_interactive.html
+artifact_diagnostic_report.md
+artifact_diagnostic_workbook.xlsx
+```
 
 ## Performance, latency, tokens and cost
 
@@ -214,7 +276,8 @@ Cost per product is the combination of search credits, input/output tokens, brow
 - final URL agreement rate;
 - human judgment-sequence equivalence rate;
 - first-divergent-step distribution;
-- completion, review-required and failure rates;
+- completion, review-required and genuine failure rates;
+- no-safe-direct-URL rate;
 - manufacturer-primary and retailer-fallback rates;
 - image-evidence correctness;
 - products/minute;
@@ -226,7 +289,7 @@ Cost per product is the combination of search credits, input/output tokens, brow
 ## Assumptions
 
 - each row represents one intended product;
-- a direct public product page may exist;
+- a direct public product page may exist, but is not guaranteed;
 - requested features are defined before execution;
 - manufacturer authority is conditional on exactness and completeness;
 - row IDs uniquely identify artifact directories;
@@ -241,19 +304,23 @@ Cost per product is the combination of search credits, input/output tokens, brow
 - the current job store is not an unbounded distributed queue;
 - increasing concurrency without capacity changes can reduce reliability;
 - the platform does not expose hidden chain-of-thought;
-- configured limits are not measured SLA values.
+- configured limits are not measured SLA values;
+- a no-safe-URL review result does not claim that no URL exists anywhere on the internet; it states that none was safely found within the configured bounded policy.
 
 ## Failure handling
 
-| Failure | Response |
+| Condition | Response |
 |---|---|
 | Missing input | Reject before paid search |
 | Stale runtime | Clean rebuild when enabled |
 | Browser-planner LLM failure | Deterministic rendered-page fallback where allowed |
 | Manufacturer incomplete | Controlled retailer fallback |
-| One batch row fails | Record failure and continue remaining rows |
-| No safe URL | `FAILED` / `MANDATORY_PRODUCT_URL_NOT_FOUND` |
+| One batch row has a genuine runtime failure | Record failure and continue remaining rows |
+| No safe URL after bounded search | Structured `REVIEW_REQUIRED` / `NO_SAFE_DIRECT_PRODUCT_URL_FOUND`; preserve trace and do not fabricate |
+| Unstructured `COMPLETED` result without URL | Hard contract failure |
 | Missing artifact evidence | Report absence; do not invent it |
+
+`FAILED` remains reserved for genuine software, configuration, dependency or contract failures. Search exhaustion is a controlled business no-match outcome.
 
 ## Change-impact map
 
@@ -263,9 +330,10 @@ Cost per product is the combination of search credits, input/output tokens, brow
 | Change requested features | Feature schema |
 | Add search engine/credit | Adaptive search and environment validation |
 | Change acceptance rules | Identity and strict URL gate modules |
+| Change no-URL review policy | `structured_no_url_outcome.py`, notebook result contract and review artifact |
 | Increase batch throughput | Agent workers, browser contexts, queue architecture and load tests |
 | Add batch columns | `batch_notebook_runtime.py` |
-| Change mindmap/report | `artifact_diagnostics.py` and diagnostic notebook |
+| Change interactive diagnostics | `interactive_artifact_diagnostics.py` and diagnostic notebook |
 | Persist cost/latency | `execution_metrics.json` and `llm_usage.json` instrumentation |
 | Change human review form | Business judgment artifact builder |
 
@@ -274,15 +342,17 @@ Cost per product is the combination of search credits, input/output tokens, brow
 1. Open `notebooks/01_single_product.ipynb`; show the input and final URL fields.
 2. Show the judgment sequence and `visual_evidence_summary_df`.
 3. Explain manufacturer-first selection and retailer fallback.
-4. Open `notebooks/02_batch_products.ipynb`; show CSV validation, bounded parallel execution and batch throughput.
-5. Open `notebooks/03_artifact_diagnostics.ipynb`; pass an artifact path and show the mindmap and chronological trace.
-6. End with the human review question: “What is the first judgment step where your process differs?”
+4. Show a structured no-safe-URL example and explain why it is review-required, not a crash or fabricated success.
+5. Open `notebooks/02_batch_products.ipynb`; show CSV validation, bounded parallel execution and batch throughput.
+6. Open `notebooks/03_artifact_diagnostics.ipynb`; pass an artifact path and show the interactive decision workspace.
+7. End with the human review question: “What is the first judgment step where your process differs?”
 
 ## Pre-demo checklist and metric card
 
 ```text
 [ ] latest master pulled
-[ ] runtime v6 health is green
+[ ] runtime v7 health is green
+[ ] structured_no_url_review_outcome=true
 [ ] single product row_id is unique
 [ ] batch CSV validated
 [ ] diagnostic artifact path exists
@@ -290,7 +360,7 @@ Cost per product is the combination of search credits, input/output tokens, brow
 [ ] no unsupported SLA or cost claim is shown
 ```
 
-Record actual products submitted, completed/review/failed counts, elapsed time, products/minute, p50, p95, credits used, manufacturer/retailer selections, image-supported decisions and human-equivalent sequences.
+Record actual products submitted, completed/review/failed counts, no-safe-URL count, elapsed time, products/minute, p50, p95, credits used, manufacturer/retailer selections, image-supported decisions and human-equivalent sequences.
 
 ## Leadership questions
 
@@ -300,10 +370,12 @@ Record actual products submitted, completed/review/failed counts, elapsed time, 
 
 **Does it use images?** Yes, and it records whether visual evidence was decisive.
 
-**Can it process CSVs?** Yes, with bounded parallelism, row-level failure isolation and one full artifact per product.
+**What happens when no safe URL is found?** The platform returns a structured `REVIEW_REQUIRED` result with `NO_SAFE_DIRECT_PRODUCT_URL_FOUND`, preserves every artifact and next action, and refuses to fabricate or promote an indirect URL.
 
-**Can people understand the artifacts?** Yes. The diagnostic notebook reconstructs a mindmap and chronological observable decision trace.
+**Can it process CSVs?** Yes, with bounded parallelism, row-level genuine-failure isolation and one full artifact per product.
+
+**Can people understand the artifacts?** Yes. The diagnostic notebook reconstructs an interactive observable decision workspace.
 
 ## Leadership decisions for scale
 
-Leadership should define the acceptable human-equivalence threshold, review/failure rates, batch volumes, concurrency and p95 targets, cost-per-product ceiling, artifact retention policy, governance owner and whether a persistent distributed queue is required.
+Leadership should define the acceptable human-equivalence threshold, review/failure/no-safe-URL rates, batch volumes, concurrency and p95 targets, cost-per-product ceiling, artifact retention policy, governance owner and whether a persistent distributed queue is required.

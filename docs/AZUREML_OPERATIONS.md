@@ -10,7 +10,7 @@ cp .env.example .env
 ./scripts/azureml_startup.sh --clean-build
 ```
 
-## Choose the notebook
+## Supported notebooks
 
 ```text
 notebooks/01_single_product.ipynb
@@ -20,22 +20,23 @@ notebooks/03_artifact_diagnostics.ipynb
 
 | Notebook | Use | Runtime requirement |
 |---|---|---:|
-| `01_single_product.ipynb` | One product, final URL and full judgment trace | Agent and browser must be healthy |
-| `02_batch_products.ipynb` | CSV batch with bounded parallel products | Agent and browser must be healthy |
-| `03_artifact_diagnostics.ipynb` | Existing artifact mindmap and decision diagnostics | Offline; stack not required |
+| `01_single_product.ipynb` | One product, URL/no-URL outcome and full judgment trace | Agent and browser healthy |
+| `02_batch_products.ipynb` | CSV batch with bounded parallel execution | Agent and browser healthy |
+| `03_artifact_diagnostics.ipynb` | Interactive exploration of an existing artifact | Offline |
 
 ## Runtime contract
 
 ```text
-belief-url-resolution-v6-business-judgement-review
+belief-url-resolution-v7-structured-no-url-review
 ```
 
-Required health response:
+Required health response includes:
 
 ```text
 status=healthy
 manufacturer_first_primary_url=true
 business_judgement_review_artifact=true
+structured_no_url_review_outcome=true
 compatibility_patches_applied=true
 agent_entrypoint=src.product_evidence_harness.agent_service.app:app
 serpapi_request_limit=3
@@ -43,7 +44,7 @@ agentic_browser_contract_enforced=true
 browser_service.agentic_tools=true
 ```
 
-The single and batch notebooks reject a stale or incomplete agent before product submission and before paid search.
+The single and batch notebooks reject stale or incomplete agents before paid search.
 
 ## Product workflow
 
@@ -55,8 +56,8 @@ MAIN_TEXT + COUNTRY_CODE
 → global_fallback
 → browser and multimodal evidence
 → strict identity, feature, scrapability and durability gates
-→ manufacturer-first source_selection
-→ primary_url + manufacturer_url + retailer_url
+→ manufacturer-first source selection
+→ direct URL or structured no-safe-URL review outcome
 → business_judgement_review.md
 ```
 
@@ -68,18 +69,24 @@ Open:
 notebooks/01_single_product.ipynb
 ```
 
-Use a unique `row_id`. The notebook displays `final_decision_df`, `business_judgement_steps_df` and `visual_evidence_summary_df` before candidate-level engineering diagnostics.
+Use a unique `row_id`. The notebook returns normally for both URL-backed and controlled no-safe-URL business outcomes.
 
-Outputs are written to:
+No-safe-URL result:
 
 ```text
-data/artifacts/<row_id>/
+job_status=REVIEW_REQUIRED
+primary_url=null
+resolution_outcome.code=NO_SAFE_DIRECT_PRODUCT_URL_FOUND
+url_delivery.delivered=false
 ```
 
-The primary human-review file is:
+The notebook then loads the artifact and displays the decision trace, reason, search credits and suggested next actions.
+
+Artifacts:
 
 ```text
 data/artifacts/<row_id>/business_judgement_review.md
+data/artifacts/<row_id>/no_url_resolution.json   # no-safe-URL only
 ```
 
 ## Batch operations
@@ -90,7 +97,7 @@ Open:
 notebooks/02_batch_products.ipynb
 ```
 
-CSV required columns:
+Required CSV columns:
 
 ```text
 main_text
@@ -106,16 +113,20 @@ retailer_name
 language_code
 ```
 
-The notebook validates the complete CSV before search. Product-level concurrency defaults to the safe minimum of `AGENT_WORKERS` and `BROWSER_MAX_CONTEXTS`.
+Concurrency defaults to:
 
-Default capacity controls:
+```text
+min(AGENT_WORKERS, BROWSER_MAX_CONTEXTS, 8)
+```
+
+Default controls:
 
 ```env
 AGENT_WORKERS=2
 BROWSER_MAX_CONTEXTS=3
 ```
 
-Increase only after load testing. A larger notebook thread pool does not create additional API or browser capacity by itself.
+Increase only after load testing.
 
 Batch outputs:
 
@@ -128,7 +139,7 @@ data/batch_runs/<run_id>/
 └── batch_run_summary.json
 ```
 
-Each product still writes its complete artifact under `data/artifacts/<row_id>/`. One row failure does not stop the remaining products.
+A no-safe-URL row remains `REVIEW_REQUIRED` in `batch_results.csv`. It is not a technical failure and is not placed in `batch_failures.csv`. Genuine runtime failures remain isolated per row.
 
 ## Artifact diagnostic operations
 
@@ -138,16 +149,15 @@ Open:
 notebooks/03_artifact_diagnostics.ipynb
 ```
 
-Set `ARTIFACT_PATH` to the product directory or any file inside it. The notebook does not call the agent and can be used after the runtime has stopped.
-
-It writes:
+Set `ARTIFACT_PATH` to a product directory or any file inside it. The notebook is offline and writes:
 
 ```text
+artifact_diagnostics_interactive.html
 artifact_diagnostic_report.md
 artifact_diagnostic_workbook.xlsx
 ```
 
-into the selected product artifact directory.
+The interactive HTML is the primary comprehension surface and includes Decision Map, Judgment Timeline, Candidates, Evidence and Artifacts tabs.
 
 ## Product artifact contract
 
@@ -169,6 +179,12 @@ data/artifacts/<row_id>/
 └── single_product_diagnostics.xlsx
 ```
 
+No-safe-URL outcomes additionally include:
+
+```text
+no_url_resolution.json
+```
+
 ## Manual verification
 
 ```bash
@@ -177,15 +193,20 @@ curl -sS http://127.0.0.1:8788/health | python -m json.tool
 cat data/runtime/stack_health.json
 ```
 
+Expected v7 values:
+
+```text
+runtime_contract_version=belief-url-resolution-v7-structured-no-url-review
+structured_no_url_review_outcome=true
+```
+
 ## Recovery
 
 ```bash
 ./scripts/azureml_startup.sh --clean-build
 ```
 
-Use this for `STALE_AGENT_IMAGE`, missing runtime capabilities or after pulling runtime changes. Recovery occurs before `submit_product` and consumes no search credit.
-
-Notebook/documentation-only changes do not require a rebuild when the running runtime contract is unchanged.
+Use a clean rebuild after pulling v7 runtime changes, for `STALE_AGENT_IMAGE`, or for missing capabilities. Recovery occurs before `submit_product` and consumes no search credit.
 
 ## Visual evidence controls
 
@@ -197,24 +218,23 @@ PRODUCT_HARNESS_AGENTIC_MAX_IMAGES=8
 PRODUCT_HARNESS_AGENTIC_IMAGE_DETAIL=high
 ```
 
-Images can support exact-product investigation and feature coverage. The artifacts record whether visual evidence was decisive, merely used, or not recorded.
+Images can support exact-product investigation and feature coverage. Artifacts record whether visual evidence was decisive, merely used or absent.
 
-## Final result schema
+## Result validation
+
+A URL-backed terminal result must have a direct URL and `url_delivery.delivered=true`.
+
+A blank URL is accepted only with the complete structured no-safe-URL result:
 
 ```text
-primary_url
-primary_url_role
-manufacturer_url
-retailer_url
-source_selection
-primary_url_acceptance
-url_delivery
-product_identification
-search.market_decision_path
-business_judgement_review
+job_status=REVIEW_REQUIRED
+resolution_outcome.code=NO_SAFE_DIRECT_PRODUCT_URL_FOUND
+url_delivery.status=NO_SAFE_DIRECT_PRODUCT_URL_FOUND_AFTER_BOUNDED_SEARCH
 ```
 
-## Validation
+Any other blank or contradictory result raises `INCONSISTENT_URL_DELIVERY_RESULT`.
+
+## Validation commands
 
 ```bash
 bash -n scripts/azureml_startup.sh

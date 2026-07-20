@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import pytest
-
+from product_evidence_harness import mandatory_url_policy
 from product_evidence_harness.adaptive_search import SearchEngine, SearchHandle
 from product_evidence_harness.config import HarnessPolicy
 from product_evidence_harness.contracts import (
@@ -12,10 +11,14 @@ from product_evidence_harness.contracts import (
 )
 from product_evidence_harness.mandatory_url_policy import (
     _direct_external_url,
-    _enforce_orchestrated_delivery,
     _mandatory_recovery_action,
 )
 from product_evidence_harness.selector import FinalSelector
+from product_evidence_harness.structured_no_url_outcome import (
+    NO_URL_DELIVERY_STATUS,
+    NO_URL_OUTCOME_CODE,
+    is_structured_no_url_outcome,
+)
 
 
 def _card(url: str, *, hard_failures: tuple[str, ...] = ()) -> CandidateScorecard:
@@ -113,7 +116,7 @@ def test_review_result_preserves_product_url_in_all_primary_output_fields(tmp_pa
         "browser_evidence": [],
     }
 
-    delivered = _enforce_orchestrated_delivery(result)
+    delivered = mandatory_url_policy._enforce_orchestrated_delivery(result)
 
     expected = "https://shop.example.com/product/exact-example-product-123"
     assert delivered["primary_url"] == expected
@@ -131,16 +134,46 @@ def test_review_result_preserves_product_url_in_all_primary_output_fields(tmp_pa
     assert (tmp_path / "mandatory_url_delivery.json").is_file()
 
 
-def test_empty_url_is_a_failed_run_not_a_successful_review() -> None:
-    with pytest.raises(RuntimeError, match="MANDATORY_PRODUCT_URL_NOT_FOUND"):
-        _enforce_orchestrated_delivery(
-            {
-                "job_status": "REVIEW_REQUIRED",
-                "product_match": {},
-                "primary_url_acceptance": {"accepted": False},
-                "evidence_set": {},
-            }
-        )
+def test_empty_url_is_a_structured_review_outcome_with_audit_artifact(tmp_path) -> None:
+    result = mandatory_url_policy._enforce_orchestrated_delivery(
+        {
+            "job_status": "REVIEW_REQUIRED",
+            "artifact_dir": str(tmp_path),
+            "product": {
+                "row_id": "ROW-NO-URL",
+                "main_text": "Obscure exact product",
+                "country_code": "GB",
+            },
+            "search": {
+                "serpapi_requests_used": 3,
+                "serpapi_request_limit": 3,
+                "stages": [
+                    {"name": "manufacturer_primary", "results_returned": 0},
+                    {"name": "country_alternative", "results_returned": 0},
+                    {"name": "global_fallback", "results_returned": 0},
+                ],
+            },
+            "product_match": {},
+            "primary_url_acceptance": {"accepted": False},
+            "evidence_set": {},
+            "feature_assessments": [],
+            "browser_evidence": [],
+            "candidate_investigations": [],
+        }
+    )
+
+    assert is_structured_no_url_outcome(result)
+    assert result["job_status"] == "REVIEW_REQUIRED"
+    assert result["coding_ready"] is False
+    assert result["primary_url"] is None
+    assert result["primary_url_role"] == "NONE"
+    assert result["url_delivery"]["delivered"] is False
+    assert result["url_delivery"]["status"] == NO_URL_DELIVERY_STATUS
+    assert result["resolution_outcome"]["code"] == NO_URL_OUTCOME_CODE
+    assert result["resolution_outcome"]["serpapi_requests_used"] == 3
+    assert result["resolution_outcome"]["url_fabricated"] is False
+    assert (tmp_path / "no_url_resolution.json").is_file()
+    assert (tmp_path / "orchestrated_result.json").is_file()
 
 
 def test_final_credit_prefers_real_immersive_product_token() -> None:

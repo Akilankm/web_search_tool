@@ -30,9 +30,12 @@ def test_single_notebook_uses_current_result_and_judgment_contract() -> None:
         "ensure_platform_ready",
         "manufacturer_first_primary_url",
         "business_judgement_review_artifact",
+        "structured_no_url_review_outcome",
         "run_product(product, FEATURE_SET)",
         "host_artifact_dir(PROJECT_ROOT, result)",
         "build_artifact_diagnostics",
+        "resolution_outcome_code",
+        "NO-URL RESOLUTION ARTIFACT",
         "primary_url",
         "primary_url_role",
         "manufacturer_url",
@@ -90,7 +93,7 @@ def test_artifact_diagnostics_notebook_is_offline_and_interactive() -> None:
     assert "display(diagnostics." not in source
 
 
-def test_notebook_runtime_retains_self_healing_and_mandatory_url_contract() -> None:
+def test_notebook_runtime_retains_self_healing_and_safe_no_url_contract() -> None:
     runtime = runtime_source()
     for token in (
         "RUNTIME_CONTRACT_VERSION",
@@ -100,7 +103,8 @@ def test_notebook_runtime_retains_self_healing_and_mandatory_url_contract() -> N
         "PRODUCT_HARNESS_NOTEBOOK_AUTO_RECOVER_PLATFORM",
         "PRODUCT_HARNESS_NOTEBOOK_CLEAN_BUILD_ON_RECOVERY",
         "validate_result_contract",
-        "MANDATORY_PRODUCT_URL_NOT_DELIVERED",
+        "is_structured_no_url_outcome",
+        "INCONSISTENT_URL_DELIVERY_RESULT",
         "HEARTBEAT_SECONDS = 30",
         "still running",
     ):
@@ -129,6 +133,7 @@ def test_notebook_docs_describe_all_three_workflows() -> None:
         "artifact_diagnostic_report.md",
         "artifact_diagnostic_workbook.xlsx",
         "bounded parallel",
-        "observable",
+        "Decision Map",
+        "Judgment Timeline",
     ):
         assert token in notebook_doc

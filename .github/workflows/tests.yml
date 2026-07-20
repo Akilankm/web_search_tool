@@ -77,6 +77,7 @@ jobs:
             tests/test_runtime_contract_and_browser_fallback.py \
             tests/test_agent_entrypoint_runtime_contract.py \
             tests/test_agent_notebook_dependency_boundary.py \
+            tests/test_structured_no_url_service_outcome.py \
             tests/test_preflight_azureml.py \
             tests/test_serp_harvester.py \
             tests/test_adaptive_search.py \
@@ -85,6 +86,7 @@ jobs:
             tests/test_business_judgement_artifact.py \
             tests/test_three_notebook_workflows.py \
             tests/test_batch_notebook_runtime.py \
+            tests/test_batch_structured_no_url.py \
             tests/test_artifact_diagnostics.py \
             tests/test_artifact_diagnostics_route_hotfix.py \
             tests/test_interactive_artifact_diagnostics.py \

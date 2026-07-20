@@ -23,6 +23,10 @@ from src.product_evidence_harness.notebook_runtime import (
     validate_result_contract,
 )
 from src.product_evidence_harness.runtime_contract import RUNTIME_CONTRACT_VERSION
+from src.product_evidence_harness.structured_no_url_outcome import (
+    NO_URL_DELIVERY_STATUS,
+    NO_URL_OUTCOME_CODE,
+)
 
 
 class _Browser:
@@ -78,6 +82,7 @@ def _healthy_payload() -> dict:
         "compatibility_patches_applied": True,
         "manufacturer_first_primary_url": True,
         "business_judgement_review_artifact": True,
+        "structured_no_url_review_outcome": True,
         "browser_service": {"agentic_tools": True},
         "configuration": {
             "three_stage_contract_enforced": True,
@@ -154,6 +159,7 @@ def test_health_exposes_runtime_contract(tmp_path: Path) -> None:
     assert health["belief_driven_product_resolution"] is True
     assert health["manufacturer_first_primary_url"] is True
     assert health["business_judgement_review_artifact"] is True
+    assert health["structured_no_url_review_outcome"] is True
 
 
 def test_notebook_rejects_legacy_or_incomplete_agent(monkeypatch) -> None:
@@ -169,6 +175,12 @@ def test_notebook_rejects_legacy_or_incomplete_agent(monkeypatch) -> None:
     incomplete.pop("business_judgement_review_artifact")
     monkeypatch.setattr(runtime, "api_json", lambda *args, **kwargs: incomplete)
     with pytest.raises(RuntimeError, match="business judgment review artifact"):
+        check_health()
+
+    no_structured_outcome = _healthy_payload()
+    no_structured_outcome.pop("structured_no_url_review_outcome")
+    monkeypatch.setattr(runtime, "api_json", lambda *args, **kwargs: no_structured_outcome)
+    with pytest.raises(RuntimeError, match="structured no-safe-URL review outcome"):
         check_health()
 
 
@@ -201,6 +213,7 @@ def test_notebook_auto_recovers_stale_agent_from_same_checkout(
         clean_build=True,
     )
     assert health["business_judgement_review_artifact"] is True
+    assert health["structured_no_url_review_outcome"] is True
     assert result.attempted is True
     assert result.recovered is True
     assert result.clean_build is True
@@ -232,6 +245,45 @@ def test_review_required_result_with_real_url_passes_delivery_contract() -> None
     assert validate_result_contract(result) is result
 
 
+def test_structured_no_url_review_result_passes_without_false_success() -> None:
+    result = {
+        "job_status": "REVIEW_REQUIRED",
+        "primary_url": None,
+        "primary_url_role": "NONE",
+        "manufacturer_url": None,
+        "retailer_url": None,
+        "source_selection": {
+            "policy": "MANUFACTURER_FIRST_AFTER_PRODUCTION_GATES",
+            "selection_reason": NO_URL_DELIVERY_STATUS,
+        },
+        "business_judgement_review": _judgement_review(),
+        "product_identification": {"resolution_status": "AMBIGUOUS"},
+        "search": {
+            "market_decision_path": [
+                "manufacturer_primary",
+                "country_alternative",
+                "global_fallback",
+            ]
+        },
+        "url_delivery": {
+            "required": True,
+            "delivered": False,
+            "status": NO_URL_DELIVERY_STATUS,
+            "strictly_verified": False,
+        },
+        "resolution_outcome": {
+            "code": NO_URL_OUTCOME_CODE,
+            "terminal_status": "REVIEW_REQUIRED",
+        },
+        "product_match": {
+            "match_reason": NO_URL_OUTCOME_CODE,
+            "best_available_url": None,
+        },
+        "artifact_dir": "/data/artifacts/ROW-1",
+    }
+    assert validate_result_contract(result) is result
+
+
 def test_missing_business_judgement_review_raises_schema_error() -> None:
     result = {
         "job_status": "REVIEW_REQUIRED",
@@ -249,7 +301,7 @@ def test_missing_business_judgement_review_raises_schema_error() -> None:
     assert "business_judgement_review" in str(exc.value)
 
 
-def test_missing_url_raises_concise_delivery_error() -> None:
+def test_unstructured_missing_url_still_raises_contract_error() -> None:
     result = {
         "job_status": "REVIEW_REQUIRED",
         "primary_url": None,
@@ -270,7 +322,7 @@ def test_missing_url_raises_concise_delivery_error() -> None:
         },
         "artifact_dir": "/data/artifacts/ROW-1",
     }
-    with pytest.raises(RuntimeError, match="MANDATORY_PRODUCT_URL_NOT_DELIVERED") as exc:
+    with pytest.raises(RuntimeError, match="INCONSISTENT_URL_DELIVERY_RESULT") as exc:
         validate_result_contract(result)
     assert "artifact_dir=/data/artifacts/ROW-1" in str(exc.value)
     assert len(str(exc.value)) < 1000

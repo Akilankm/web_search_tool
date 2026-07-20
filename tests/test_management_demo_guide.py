@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from src.product_evidence_harness.runtime_contract import RUNTIME_CONTRACT_VERSION
+
 
 ROOT = Path(__file__).resolve().parents[1]
 GUIDE = ROOT / "docs" / "MANAGEMENT_DEMO_GUIDE.md"
@@ -39,7 +41,9 @@ def test_management_guide_matches_current_business_contract() -> None:
     text = GUIDE.read_text(encoding="utf-8")
 
     for token in (
-        "belief-url-resolution-v6-business-judgement-review",
+        RUNTIME_CONTRACT_VERSION,
+        "structured_no_url_review_outcome",
+        "NO_SAFE_DIRECT_PRODUCT_URL_FOUND",
         "manufacturer_primary",
         "requested_retailer_country",
         "country_alternative",
@@ -50,7 +54,6 @@ def test_management_guide_matches_current_business_contract() -> None:
         "source_selection",
         "business_judgement_review.md",
         "visual_evidence_summary_df",
-        "MANDATORY_PRODUCT_URL_NOT_FOUND",
         "COMPLETED",
         "REVIEW_REQUIRED",
         "FAILED",
