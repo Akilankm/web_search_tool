@@ -44,6 +44,7 @@ outputs/
 artifacts/
 data/artifacts/
 data/runtime/
+data/batch_runs/
 results/
 runs/
 logs/
@@ -78,6 +79,7 @@ product_url_matches.csv
 *.xlsx
 *.xls
 *.csv
+!examples/batch_products.example.csv
 *.parquet
 *.jsonl
 *.sqlite
