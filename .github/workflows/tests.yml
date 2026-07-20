@@ -69,6 +69,7 @@ jobs:
             tests/test_source_authority_hierarchy.py \
             tests/test_manufacturer_primary_contract.py \
             tests/test_business_judgement_artifact.py \
+            tests/test_management_demo_guide.py \
             tests/test_three_stage_production_contract.py \
             tests/test_belief_driven_resolution.py \
             tests/test_mandatory_product_url_policy.py \

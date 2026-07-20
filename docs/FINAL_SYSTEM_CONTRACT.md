@@ -222,4 +222,12 @@ A release is acceptable only when CI validates:
 - human comparison form and notebook visibility;
 - full historical unit suite on Python 3.10 and 3.11.
 
-See [Business judgment review](BUSINESS_JUDGEMENT_REVIEW.md), [Notebook usage](NOTEBOOK_USAGE.md), and [Azure ML operations](AZUREML_OPERATIONS.md).
+## Leadership communication
+
+The speaker-ready explanation of the business problem, workflow, assumptions, constraints, artifacts, selection policy, performance model, token/cost boundaries, KPI framework and change-impact areas is maintained in:
+
+```text
+docs/MANAGEMENT_DEMO_GUIDE.md
+```
+
+See [Management and leadership demo guide](MANAGEMENT_DEMO_GUIDE.md), [Business judgment review](BUSINESS_JUDGEMENT_REVIEW.md), [Notebook usage](NOTEBOOK_USAGE.md), and [Azure ML operations](AZUREML_OPERATIONS.md).

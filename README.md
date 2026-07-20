@@ -225,6 +225,7 @@ docker compose config --quiet
 
 ## Documentation
 
+- [Management and leadership demo guide](docs/MANAGEMENT_DEMO_GUIDE.md)
 - [Final system contract](docs/FINAL_SYSTEM_CONTRACT.md)
 - [Business judgment review](docs/BUSINESS_JUDGEMENT_REVIEW.md)
 - [Notebook usage](docs/NOTEBOOK_USAGE.md)
