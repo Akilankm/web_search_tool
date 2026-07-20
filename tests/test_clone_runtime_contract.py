@@ -24,7 +24,7 @@ def test_one_credit_writer_inherits_configured_output_directory() -> None:
 def test_startup_is_single_command_azureml_bootstrap() -> None:
     startup = (ROOT / "scripts" / "azureml_startup.sh").read_text(encoding="utf-8")
 
-    assert "mkdir -p data/artifacts data/runtime inputs/private secrets" in startup
+    assert "mkdir -p data/artifacts data/runtime data/batch_runs inputs/private secrets" in startup
     assert 'RUNTIME_UID="$(id -u)"' in startup
     assert 'RUNTIME_GID="$(id -g)"' in startup
     assert "--env-permission-mode" in startup
@@ -34,7 +34,9 @@ def test_startup_is_single_command_azureml_bootstrap() -> None:
     assert "data/runtime/stack_health.json" in startup
     assert "Product evidence platform is ready." in startup
     assert "Available FEATURE_SET values:" in startup
-    assert "Notebook: $PROJECT_DIR/notebooks/01_run_product_evidence.ipynb" in startup
+    assert "01_single_product.ipynb" in startup
+    assert "02_batch_products.ipynb" in startup
+    assert "03_artifact_diagnostics.ipynb" in startup
 
 
 def test_waiter_surfaces_configuration_errors_and_writes_health_snapshot() -> None:
@@ -51,3 +53,4 @@ def test_generated_runtime_data_is_ignored() -> None:
 
     assert "data/artifacts/" in gitignore
     assert "data/runtime/" in gitignore
+    assert "data/batch_runs/" in gitignore
