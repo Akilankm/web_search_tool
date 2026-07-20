@@ -86,6 +86,7 @@ jobs:
             tests/test_business_judgement_artifact.py \
             tests/test_three_notebook_workflows.py \
             tests/test_batch_notebook_runtime.py \
+            tests/test_batch_structured_no_url.py \
             tests/test_artifact_diagnostics.py \
             tests/test_artifact_diagnostics_route_hotfix.py \
             tests/test_interactive_artifact_diagnostics.py \
