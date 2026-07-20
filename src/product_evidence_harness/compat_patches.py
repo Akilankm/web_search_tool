@@ -103,6 +103,7 @@ def apply_compatibility_patches() -> None:
     from src.product_evidence_harness.manufacturer_search_planner_hardening import apply_manufacturer_search_planner_hardening
     from src.product_evidence_harness.runtime_contract_runtime import apply_runtime_contract_patch
     from src.product_evidence_harness.business_judgement_runtime import apply_business_judgement_review_patch
+    from src.product_evidence_harness.artifact_diagnostics_runtime import apply_artifact_diagnostics_runtime_patch
 
     apply_precision_search_patches()
     apply_precision_browser_patches()
@@ -118,6 +119,7 @@ def apply_compatibility_patches() -> None:
     apply_mandatory_product_url_policy()
     apply_mandatory_url_identity_safety()
     apply_agentic_browser_fallback_patch()
+    apply_artifact_diagnostics_runtime_patch()
 
     aliases = {
         "query_builder": "src.product_evidence_harness.query_builder",
@@ -148,6 +150,8 @@ def apply_compatibility_patches() -> None:
         "runtime_contract_runtime": "src.product_evidence_harness.runtime_contract_runtime",
         "business_judgement_artifact": "src.product_evidence_harness.business_judgement_artifact",
         "business_judgement_runtime": "src.product_evidence_harness.business_judgement_runtime",
+        "artifact_diagnostics": "src.product_evidence_harness.artifact_diagnostics",
+        "artifact_diagnostics_runtime": "src.product_evidence_harness.artifact_diagnostics_runtime",
     }
     for short_name, source_name in aliases.items():
         module = sys.modules.get(source_name)
