@@ -14,13 +14,12 @@ optional EAN/GTIN
 optional LANGUAGE_CODE
 ```
 
-return:
+return one of two valid business outcomes:
 
-1. a real direct product-detail `primary_url`;
-2. qualified `manufacturer_url` and `retailer_url` references;
-3. an explicit manufacturer-versus-retailer `source_selection`;
-4. a shareable `business_judgement_review.md` recording the observable sequence of business judgments;
-5. notebook surfaces for single execution, bounded parallel batch execution and offline artifact diagnostics.
+1. a defensible direct product-detail URL with manufacturer/retailer references and source decision; or
+2. an explicit structured no-safe-URL `REVIEW_REQUIRED` result when bounded search cannot safely deliver a direct product page.
+
+Both outcomes must include a shareable `business_judgement_review.md` and complete artifacts. The system must never fabricate a URL or convert search exhaustion into an unhandled software exception.
 
 ## URL decision policy
 
@@ -48,19 +47,13 @@ manufacturer_primary
 
 A retailer found during `manufacturer_primary` is retained but cannot stop the search before the official manufacturer opportunity is evaluated.
 
+The standard bounded policy uses three SerpAPI credits. Exhaustion of this bounded route without a safe direct page produces the structured no-safe-URL review outcome.
+
 ## Multimodal evidence policy
 
-The system uses:
+The system may use submitted text and identifiers, static/rendered page text, browser screenshots, product/package images, structured page data, vision-derived feature evidence, source authority and URL durability.
 
-- submitted text and identifiers;
-- static and rendered page text;
-- browser screenshots;
-- product and package images;
-- structured page data;
-- vision-derived requested-feature evidence;
-- source authority and URL durability.
-
-Vision evidence is explicit and auditable:
+Vision evidence is explicit:
 
 ```text
 extraction_method=vision_llm
@@ -69,15 +62,15 @@ evidence_location=visual_asset:<asset_id>
 
 Images may materially complete the selected URL's feature gate. The system reports `UNKNOWN_NOT_COUNTERFACTUALLY_TESTED` for whether text alone would have passed unless a real text-only counterfactual is executed.
 
-## Business judgment artifact contract
+## Business judgment artifact
 
-Every `COMPLETED` or `REVIEW_REQUIRED` product run writes:
+Every terminal business result writes:
 
 ```text
 data/artifacts/<row_id>/business_judgement_review.md
 ```
 
-Each judgment step contains:
+Each step records:
 
 ```text
 business question
@@ -104,17 +97,11 @@ observable evidence
 
 It does not expose hidden chain-of-thought.
 
-## Human validation policy
+For no-safe-URL results, the artifact explicitly states that the bounded search did not produce a safe direct page, no URL was fabricated, the status is `REVIEW_REQUIRED`, and the human should review identifiers, search stages and rejected evidence.
 
-The human coder receives the original input and `business_judgement_review.md`, reviews independently, and classifies:
+## Stable result schema
 
-- `IDENTICAL`;
-- `PARTIALLY IDENTICAL`; or
-- `NOT IDENTICAL`.
-
-The reviewer records the first divergent step, their own judgment, missed or overweighted evidence, image interpretation and proposed system change. Behavioral validation requires sequence equivalence, not merely the same final URL.
-
-## Stable product result schema
+Every `COMPLETED` or `REVIEW_REQUIRED` result contains:
 
 ```text
 product_identification
@@ -129,12 +116,21 @@ url_delivery
 business_judgement_review
 ```
 
-## Runtime contract
-
-Current:
+A structured no-safe-URL result additionally contains:
 
 ```text
-belief-url-resolution-v6-business-judgement-review
+resolution_outcome.code=NO_SAFE_DIRECT_PRODUCT_URL_FOUND
+resolution_outcome.category=CONTROLLED_BUSINESS_NO_MATCH
+url_delivery.status=NO_SAFE_DIRECT_PRODUCT_URL_FOUND_AFTER_BOUNDED_SEARCH
+url_delivery.delivered=false
+```
+
+`manufacturer_url` and `retailer_url` are stable keys and may be null.
+
+## Runtime contract
+
+```text
+belief-url-resolution-v7-structured-no-url-review
 ```
 
 Required capabilities:
@@ -143,11 +139,21 @@ Required capabilities:
 belief_driven_product_resolution=true
 manufacturer_first_primary_url=true
 business_judgement_review_artifact=true
+structured_no_url_review_outcome=true
 mandatory_review_url_delivery=true
 deterministic_browser_fallback_on_llm_error=true
 notebook_self_healing_runtime=true
 compatibility_patches_applied=true
 ```
+
+## Result validation boundary
+
+The notebook result validator accepts:
+
+- a direct URL when `url_delivery.delivered=true`; or
+- a blank URL only when the complete structured no-safe-URL review contract is present.
+
+Any other blank/contradictory result is a hard `INCONSISTENT_URL_DELIVERY_RESULT` error. A response claiming `COMPLETED` without a delivered direct URL is always invalid.
 
 ## Three-notebook contract
 
@@ -163,25 +169,27 @@ notebooks/03_artifact_diagnostics.ipynb
 
 `01_single_product.ipynb` must:
 
-- verify the runtime before paid search;
+- verify v7 readiness before paid search;
 - accept one product input;
-- expose `final_decision_df` with `primary_url`, `primary_url_role`, `manufacturer_url`, `retailer_url` and `source_selection`;
-- expose `business_judgement_steps_df` and `visual_evidence_summary_df` before engineering diagnostics;
-- link to `business_judgement_review.md`;
+- expose URL/source fields or the explicit no-safe-URL outcome;
+- expose `business_judgement_steps_df` and `visual_evidence_summary_df`;
+- continue into diagnostics for no-safe-URL results rather than raising a traceback;
+- link to `business_judgement_review.md` and `no_url_resolution.json` when applicable;
 - export `single_product_diagnostics.xlsx`.
 
 ### Parallel batch
 
 `02_batch_products.ipynb` must:
 
-- accept a CSV with mandatory `main_text` and `country_code`;
+- accept mandatory `main_text` and `country_code`;
 - preserve EAN/GTIN as text;
-- generate or validate unique `row_id` values;
-- execute products with bounded parallelism;
-- isolate row failures;
+- generate or validate unique row IDs;
+- execute with bounded parallelism;
+- isolate genuine technical failures;
+- classify structured no-safe-URL rows as `REVIEW_REQUIRED`, not `FAILED`;
 - preserve one complete artifact per product;
-- expose throughput, p50 and p95 product latency;
-- write consolidated batch outputs under `data/batch_runs/<run_id>/`.
+- expose throughput, p50 and p95 latency;
+- write outputs under `data/batch_runs/<run_id>/`.
 
 Batch outputs:
 
@@ -193,22 +201,17 @@ batch_artifact_index.csv
 batch_run_summary.json
 ```
 
-Product-level parallelism is bounded by the safe capacity of agent workers and browser contexts. Configured concurrency is not a throughput guarantee and must be load-tested.
-
-### Artifact diagnostics
+### Interactive artifact diagnostics
 
 `03_artifact_diagnostics.ipynb` must:
 
 - accept an artifact directory or any file inside it;
-- operate offline without the running agent;
-- reconstruct input, identity, uncertainty, search, candidate investigation, visual evidence, acceptance, source choice and final URL;
-- render a high-level decision mindmap;
-- render a chronological observable business-judgment timeline;
-- expose search, candidate, feature, belief and evidence tables;
-- inventory artifact files;
-- write `artifact_diagnostic_report.md` and `artifact_diagnostic_workbook.xlsx`.
-
-The diagnostic surface displays recorded evidence, actions, rules, judgments and conclusions. It must never claim access to hidden chain-of-thought.
+- operate offline;
+- reconstruct input, identity, uncertainty, search, candidates, visual evidence, gates, source choice and final outcome;
+- render one interactive workspace with `Decision Map`, `Judgment Timeline`, `Candidates`, `Evidence` and `Artifacts`;
+- write `artifact_diagnostics_interactive.html`;
+- optionally write `artifact_diagnostic_report.md` and `artifact_diagnostic_workbook.xlsx`;
+- never claim access to hidden chain-of-thought.
 
 ## Product artifact contract
 
@@ -230,57 +233,55 @@ data/artifacts/<row_id>/
 └── single_product_diagnostics.xlsx
 ```
 
+No-safe-URL outcomes additionally require:
+
+```text
+no_url_resolution.json
+```
+
 Optional diagnostic outputs:
 
 ```text
+artifact_diagnostics_interactive.html
 artifact_diagnostic_report.md
 artifact_diagnostic_workbook.xlsx
 ```
-
-## Batch artifact contract
-
-```text
-data/batch_runs/<run_id>/
-├── batch_input_normalized.csv
-├── batch_results.csv
-├── batch_failures.csv
-├── batch_artifact_index.csv
-└── batch_run_summary.json
-```
-
-The batch summary must distinguish configured parallelism from observed throughput and latency.
 
 ## Terminal outcomes
 
 | Outcome | Contract |
 |---|---|
-| `COMPLETED` | Strict URL gates passed and the business judgment artifact was written |
-| `REVIEW_REQUIRED` | A real direct review URL and business judgment artifact were delivered |
-| `FAILED` | No safe direct product URL was found or execution failed |
+| `COMPLETED` | A direct product URL passed every strict gate and artifacts were written |
+| `REVIEW_REQUIRED` with URL | A real direct review URL was delivered but human confirmation remains |
+| `REVIEW_REQUIRED` without URL | Bounded search found no safe direct page; trace and actions were preserved and no URL was fabricated |
+| `FAILED` | Genuine software, configuration, dependency or response-contract failure |
 
-The workflow never reports success with an empty product URL.
+`NO_SAFE_DIRECT_PRODUCT_URL_FOUND` means no safe page was found within the configured bounded policy. It does not claim that no URL exists anywhere on the internet.
 
 ## Operational acceptance
 
-A release is acceptable only when CI validates:
+A release is acceptable only when CI validates on Python 3.10 and 3.11:
 
-- Python source compilation;
+- source compilation;
 - all three notebook JSON files and every code cell;
 - Docker Compose and Azure ML bootstrap;
-- runtime capabilities and result schema;
+- v7 runtime capability and result schema;
 - manufacturer-primary and retailer-fallback behavior;
+- structured no-safe-URL service and notebook behavior;
+- unstructured no-URL hard-failure behavior;
 - multimodal evidence reporting;
 - business judgment Markdown generation;
 - bounded batch normalization, concurrency and failure isolation;
-- artifact-path resolution, mindmap and report generation;
-- full historical unit suite on Python 3.10 and 3.11.
+- interactive artifact diagnostics;
+- complete historical suite.
 
 ## Leadership communication
 
-The speaker-ready explanation of the business problem, workflow, assumptions, constraints, artifacts, selection policy, notebook choices, performance model, token/cost boundaries, KPI framework and change-impact areas is maintained in:
+See:
 
-```text
-docs/MANAGEMENT_DEMO_GUIDE.md
-```
-
-See [Management and leadership demo guide](MANAGEMENT_DEMO_GUIDE.md), [Business judgment review](BUSINESS_JUDGEMENT_REVIEW.md), [Notebook usage](NOTEBOOK_USAGE.md), and [Azure ML operations](AZUREML_OPERATIONS.md).
+- [Management and leadership demo guide](MANAGEMENT_DEMO_GUIDE.md)
+- [Structured no-safe-URL outcome](STRUCTURED_NO_URL_OUTCOME.md)
+- [Interactive artifact diagnostics](INTERACTIVE_ARTIFACT_DIAGNOSTICS.md)
+- [Business judgment review](BUSINESS_JUDGEMENT_REVIEW.md)
+- [Notebook usage](NOTEBOOK_USAGE.md)
+- [Azure ML operations](AZUREML_OPERATIONS.md)
