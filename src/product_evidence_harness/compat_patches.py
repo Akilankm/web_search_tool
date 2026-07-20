@@ -102,6 +102,7 @@ def apply_compatibility_patches() -> None:
     from src.product_evidence_harness.manufacturer_primary_hardening import apply_manufacturer_primary_hardening
     from src.product_evidence_harness.manufacturer_search_planner_hardening import apply_manufacturer_search_planner_hardening
     from src.product_evidence_harness.runtime_contract_runtime import apply_runtime_contract_patch
+    from src.product_evidence_harness.business_judgement_runtime import apply_business_judgement_review_patch
 
     apply_precision_search_patches()
     apply_precision_browser_patches()
@@ -145,6 +146,8 @@ def apply_compatibility_patches() -> None:
         "manufacturer_search_planner_hardening": "src.product_evidence_harness.manufacturer_search_planner_hardening",
         "runtime_contract": "src.product_evidence_harness.runtime_contract",
         "runtime_contract_runtime": "src.product_evidence_harness.runtime_contract_runtime",
+        "business_judgement_artifact": "src.product_evidence_harness.business_judgement_artifact",
+        "business_judgement_runtime": "src.product_evidence_harness.business_judgement_runtime",
     }
     for short_name, source_name in aliases.items():
         module = sys.modules.get(source_name)
@@ -161,3 +164,4 @@ def apply_compatibility_patches() -> None:
     apply_manufacturer_primary_policy()
     apply_manufacturer_primary_hardening()
     apply_runtime_contract_patch()
+    apply_business_judgement_review_patch()
