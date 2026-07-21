@@ -27,10 +27,12 @@ jobs:
           python -m pip install -r requirements/test.txt
 
       - name: Compile Python sources
-        run: python -m compileall -q src scripts
+        run: python -m compileall -q src scripts apps
 
-      - name: Validate bootstrap shell
-        run: bash -n scripts/azureml_startup.sh
+      - name: Validate shell launchers
+        run: |
+          bash -n scripts/azureml_startup.sh
+          bash -n scripts/run_leadership_demo.sh
 
       - name: Validate default toy feature schema
         run: python -m json.tool inputs/private/toy_features.json >/dev/null
@@ -78,6 +80,8 @@ jobs:
             tests/test_agent_entrypoint_runtime_contract.py \
             tests/test_agent_notebook_dependency_boundary.py \
             tests/test_structured_no_url_service_outcome.py \
+            tests/test_demo_runtime_options.py \
+            tests/test_streamlit_leadership_demo.py \
             tests/test_preflight_azureml.py \
             tests/test_serp_harvester.py \
             tests/test_adaptive_search.py \
