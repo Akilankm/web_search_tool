@@ -49,23 +49,30 @@ def test_final_docs_and_runtime_files_exist() -> None:
     required = [
         "README.md",
         ".env.example",
+        ".streamlit/config.toml",
         "docker-compose.yml",
         "docker/agent.Dockerfile",
         "docker/browser.Dockerfile",
         "requirements/agent.txt",
         "requirements/browser.txt",
+        "requirements/demo.txt",
         "requirements/test.txt",
         "scripts/azureml_startup.sh",
+        "scripts/run_leadership_demo.sh",
         "scripts/preflight_azureml.py",
         "scripts/wait_for_stack.py",
+        "apps/leadership_demo.py",
         "docs/AZUREML_OPERATIONS.md",
         "docs/NOTEBOOK_USAGE.md",
+        "docs/STREAMLIT_LEADERSHIP_DEMO.md",
         "docs/SECURITY.md",
         "examples/features_to_code.example.json",
         "examples/batch_products.example.csv",
         "inputs/private/toy_features.json",
         "src/product_evidence_harness/batch_notebook_runtime.py",
         "src/product_evidence_harness/artifact_diagnostics.py",
+        "src/product_evidence_harness/demo_runtime_options.py",
+        "src/product_evidence_harness/demo_runtime_options_runtime.py",
     ]
     assert [path for path in required if not (ROOT / path).is_file()] == []
 
@@ -109,7 +116,10 @@ def test_readme_points_to_all_supported_paths() -> None:
     text = (ROOT / "README.md").read_text(encoding="utf-8")
     for notebook in SUPPORTED_NOTEBOOKS:
         assert f"notebooks/{notebook}" in text
+    assert "apps/leadership_demo.py" in text
+    assert "scripts/run_leadership_demo.sh" in text
     assert "scripts/azureml_startup.sh" in text
     assert "inputs/private/toy_features.json" in text
+    assert "docs/STREAMLIT_LEADERSHIP_DEMO.md" in text
     assert "docs/AZUREML_OPERATIONS.md" in text
     assert "docs/SECURITY.md" in text

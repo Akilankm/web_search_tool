@@ -14,19 +14,22 @@ Usage: ./scripts/azureml_startup.sh [options]
 
 Fresh Azure ML workflow:
   1. cp .env.example .env
-  2. edit .env with real SerpAPI and LLM values
-  3. ./scripts/azureml_startup.sh
-  4. open one of:
-       notebooks/01_single_product.ipynb
-       notebooks/02_batch_products.ipynb
-       notebooks/03_artifact_diagnostics.ipynb
+  2. edit .env with real SerpAPI and enterprise LLM values
+  3. ./scripts/azureml_startup.sh --clean-build
+  4. choose one surface:
+       apps/leadership_demo.py                # management and leadership demo
+       notebooks/01_single_product.ipynb      # one-product analytical review
+       notebooks/02_batch_products.ipynb      # bounded parallel CSV execution
+       notebooks/03_artifact_diagnostics.ipynb # offline artifact diagnostics
 
-The single and batch notebooks execute the runtime. The diagnostics notebook
-works offline from an existing product artifact.
+After the platform is healthy, launch the leadership surface with:
+
+  bash scripts/run_leadership_demo.sh --install  # first use only
+  bash scripts/run_leadership_demo.sh            # later launches
 
 Options:
   --clean-build              Rebuild agent/browser images with --no-cache, then recreate containers.
-                             Use this for STALE_AGENT_IMAGE recovery.
+                             Use this for STALE_AGENT_IMAGE or runtime-contract changes.
   --no-build                 Reuse existing local images.
   --strict-env-permissions   Require .env mode 0600; disable Azure ML fallback.
   --allow-insecure-env-permissions
@@ -114,9 +117,9 @@ if [[ ! -f .env ]]; then
   chmod 600 .env 2>/dev/null || true
   cat >&2 <<'EOF'
 Created .env from .env.example.
-Edit the real SerpAPI and LLM values, then run this same startup command again:
+Edit the real SerpAPI and enterprise LLM values, then run this same startup command again:
 
-  ./scripts/azureml_startup.sh
+  ./scripts/azureml_startup.sh --clean-build
 EOF
   exit 2
 fi
@@ -210,7 +213,7 @@ python scripts/wait_for_stack.py \
   --env-file "$PROJECT_DIR/.env" \
   --write-status "$PROJECT_DIR/data/runtime/stack_health.json"
 
-phase "Final notebook-ready state"
+phase "Final runtime-ready state"
 docker compose ps
 
 HOST_PORT="$(docker compose port agent 8000 2>/dev/null | tail -n 1 | awk -F: '{print $NF}')"
@@ -230,15 +233,18 @@ echo "Runtime contract: ${RUNTIME_CONTRACT}"
 echo "Health snapshot: $PROJECT_DIR/data/runtime/stack_health.json"
 echo "Product artifacts: $PROJECT_DIR/data/artifacts/<row_id>/"
 echo "Batch outputs: $PROJECT_DIR/data/batch_runs/<run_id>/"
+echo "Leadership demo:"
+echo "  - bash $PROJECT_DIR/scripts/run_leadership_demo.sh --install  # first use"
+echo "  - bash $PROJECT_DIR/scripts/run_leadership_demo.sh            # then forward port 8501 privately"
 echo "Notebooks:"
 echo "  - $PROJECT_DIR/notebooks/01_single_product.ipynb        # one product, final decision and trace"
 echo "  - $PROJECT_DIR/notebooks/02_batch_products.ipynb        # CSV batch with bounded parallelism"
-echo "  - $PROJECT_DIR/notebooks/03_artifact_diagnostics.ipynb  # offline artifact mindmap and diagnostics"
+echo "  - $PROJECT_DIR/notebooks/03_artifact_diagnostics.ipynb  # offline interactive artifact diagnostics"
 echo "Available FEATURE_SET values:"
 for feature_file in "${FEATURE_SETS[@]}"; do
   echo "  - ${feature_file%.json}"
 done
 
 echo
-echo "Choose the notebook for the task. Single and batch require the running stack; artifact diagnostics is offline."
+echo "The agent is ready. Use Streamlit for leadership calls and notebooks for analytical or batch work."
 STARTUP_SUCCEEDED=true

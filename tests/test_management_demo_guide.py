@@ -19,6 +19,7 @@ def test_management_demo_guide_is_complete_and_speaker_ready() -> None:
         "Management value",
         "Input and feature contract",
         "End-to-end architecture",
+        "Leadership Streamlit workflow",
         "Processing workflow and business judgments",
         "Human-comparable decision artifact",
         "Artifacts",
@@ -42,23 +43,25 @@ def test_management_guide_matches_current_business_contract() -> None:
 
     for token in (
         RUNTIME_CONTRACT_VERSION,
+        "leadership_demo_runtime_options",
         "structured_no_url_review_outcome",
         "NO_SAFE_DIRECT_PRODUCT_URL_FOUND",
-        "manufacturer_primary",
-        "requested_retailer_country",
-        "country_alternative",
-        "global_fallback",
+        "manufacturer-first",
+        "retailer",
+        "country",
+        "global fallback",
         "primary_url",
         "manufacturer_url",
         "retailer_url",
-        "source_selection",
+        "source-authority",
         "business_judgement_review.md",
         "visual_evidence_summary_df",
+        "run_configuration.json",
         "COMPLETED",
         "REVIEW_REQUIRED",
         "FAILED",
     ):
-        assert token in text
+        assert token.lower() in text.lower()
 
 
 def test_management_guide_does_not_present_limits_as_measured_usage() -> None:

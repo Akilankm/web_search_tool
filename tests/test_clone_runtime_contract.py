@@ -37,6 +37,8 @@ def test_startup_is_single_command_azureml_bootstrap() -> None:
     assert "01_single_product.ipynb" in startup
     assert "02_batch_products.ipynb" in startup
     assert "03_artifact_diagnostics.ipynb" in startup
+    assert "run_leadership_demo.sh --install" in startup
+    assert "forward port 8501 privately" in startup
 
 
 def test_waiter_surfaces_configuration_errors_and_writes_health_snapshot() -> None:

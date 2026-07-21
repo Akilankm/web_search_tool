@@ -1,7 +1,7 @@
 [project]
 name = "product-evidence-platform"
-version = "0.6.0"
-description = "Azure ML two-container product evidence platform with three-stage search, agentic browser investigation, and interactive diagnostic notebook analysis"
+version = "0.7.0"
+description = "Azure ML product evidence platform with governed URL resolution, multimodal browser investigation, notebooks, and a leadership Streamlit demo"
 requires-python = ">=3.10,<3.12"
 dependencies = [
     "requests>=2.32.0,<3",
@@ -22,6 +22,7 @@ dependencies = [
     "uvicorn[standard]>=0.30.0,<1",
     "playwright==1.52.0",
     "pillow>=11.0.0,<12",
+    "streamlit>=1.41.0,<2",
 ]
 
 [dependency-groups]
