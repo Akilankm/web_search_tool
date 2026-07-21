@@ -28,20 +28,20 @@ for required in (str(PROJECT_ROOT), str(PROJECT_ROOT / "src")):
     if required not in sys.path:
         sys.path.insert(0, required)
 
-from product_evidence_harness.demo_runtime_options import (  # noqa: E402
-    DEMO_OPTION_SPECS,
-    default_demo_runtime_options,
-)
 from product_evidence_harness.numeric_safety import safe_int  # noqa: E402
+from product_evidence_harness.runtime_controls import (  # noqa: E402
+    RUNTIME_CONTROL_SPECS,
+    default_runtime_controls,
+)
 
 
 AGENT_URL = os.getenv("PRODUCT_AGENT_URL", "http://127.0.0.1:8788").rstrip("/")
-EXPECTED_RUNTIME = "belief-url-resolution-v8-leadership-demo"
+EXPECTED_RUNTIME = "belief-url-resolution-v9-product-evidence-ui"
 TERMINAL_STATUSES = {"COMPLETED", "REVIEW_REQUIRED", "FAILED"}
 MAX_POLL_SECONDS = 30 * 60
 
-PRESETS: dict[str, dict[str, int]] = {
-    "Fast demo": {
+EXECUTION_PROFILES: dict[str, dict[str, int]] = {
+    "Latency Optimized": {
         "serpapi_credits": 2,
         "full_scrapes": 3,
         "scrapes_per_domain": 1,
@@ -51,8 +51,8 @@ PRESETS: dict[str, dict[str, int]] = {
         "browser_actions_per_candidate": 4,
         "images_in_reasoning": 6,
     },
-    "Balanced": default_demo_runtime_options(),
-    "Deep evidence": {
+    "Standard": default_runtime_controls(),
+    "Coverage Optimized": {
         "serpapi_credits": 3,
         "full_scrapes": 10,
         "scrapes_per_domain": 3,
@@ -65,27 +65,29 @@ PRESETS: dict[str, dict[str, int]] = {
 }
 
 WORKFLOW = (
-    ("INPUT", "Input", "Product text + market context"),
-    ("UNDERSTAND", "Interpret", "Identity hypothesis + uncertainty"),
-    ("SEARCH", "Search", "Manufacturer → local → global"),
-    ("INVESTIGATE", "Investigate", "Rendered pages + images"),
-    ("VERIFY", "Verify", "Identity + features + durability"),
+    ("INPUT", "Input", "Product text and market context"),
+    ("INTERPRET", "Interpret", "Identity hypothesis and uncertainty"),
+    ("SEARCH", "Search", "Manufacturer, market and global sources"),
+    ("INVESTIGATE", "Investigate", "Rendered pages, screenshots and images"),
+    ("VERIFY", "Verify", "Identity, feature coverage and URL durability"),
     ("SELECT", "Select", "Authority-aware URL decision"),
-    ("EXPLAIN", "Explain", "Business judgment artifact"),
+    ("REPORT", "Report", "Decision trace and product artifacts"),
 )
 
 STAGE_TO_FLOW = {
     "VALIDATING_INPUT": "INPUT",
-    "PRODUCT_UNDERSTANDING": "UNDERSTAND",
+    "PRODUCT_UNDERSTANDING": "INTERPRET",
     "SEARCHING": "SEARCH",
     "ADAPTIVE_SEARCH": "SEARCH",
     "SCRAPING": "INVESTIGATE",
+    "REQUESTING_BROWSER_EVIDENCE": "INVESTIGATE",
     "AGENTIC_BROWSER_INVESTIGATION": "INVESTIGATE",
+    "RUNNING_MULTIMODAL_REASONING": "VERIFY",
     "VALIDATING_PRIMARY_URL": "VERIFY",
-    "WRITING_OUTPUTS": "EXPLAIN",
-    "COMPLETED": "EXPLAIN",
-    "REVIEW_REQUIRED": "EXPLAIN",
-    "FAILED": "EXPLAIN",
+    "WRITING_OUTPUTS": "REPORT",
+    "COMPLETED": "REPORT",
+    "REVIEW_REQUIRED": "REPORT",
+    "FAILED": "REPORT",
 }
 
 STAGE_PROGRESS = {
@@ -94,9 +96,11 @@ STAGE_PROGRESS = {
     "SEARCHING": 0.24,
     "ADAPTIVE_SEARCH": 0.34,
     "SCRAPING": 0.48,
-    "AGENTIC_BROWSER_INVESTIGATION": 0.66,
-    "VALIDATING_PRIMARY_URL": 0.84,
-    "WRITING_OUTPUTS": 0.94,
+    "REQUESTING_BROWSER_EVIDENCE": 0.60,
+    "AGENTIC_BROWSER_INVESTIGATION": 0.68,
+    "RUNNING_MULTIMODAL_REASONING": 0.78,
+    "VALIDATING_PRIMARY_URL": 0.86,
+    "WRITING_OUTPUTS": 0.95,
     "COMPLETED": 1.0,
     "REVIEW_REQUIRED": 1.0,
     "FAILED": 1.0,
@@ -104,7 +108,7 @@ STAGE_PROGRESS = {
 
 
 st.set_page_config(
-    page_title="Product Evidence Intelligence",
+    page_title="Product Evidence Platform",
     page_icon="◈",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -113,12 +117,12 @@ st.set_page_config(
 st.markdown(
     """
 <style>
-.block-container {padding-top: 1.2rem; padding-bottom: 3rem; max-width: 1480px;}
-.hero {padding: 1.25rem 1.5rem; border: 1px solid rgba(128,128,128,.22); border-radius: 18px; background: linear-gradient(130deg, rgba(26,115,232,.11), rgba(99,102,241,.05)); margin-bottom: .9rem;}
-.hero h1 {font-size: 2rem; margin: 0;}
-.hero p {margin: .35rem 0 0; opacity: .76;}
-.flow-row {display: grid; grid-template-columns: repeat(7, 1fr); gap: .45rem; margin: .5rem 0 1rem;}
-.flow-step {border: 1px solid rgba(128,128,128,.22); border-radius: 12px; padding: .72rem .68rem; min-height: 88px; position: relative;}
+.block-container {padding-top: 1.1rem; padding-bottom: 3rem; max-width: 1480px;}
+.hero {padding: 1.15rem 1.4rem; border: 1px solid rgba(128,128,128,.22); border-radius: 16px; background: linear-gradient(130deg, rgba(26,115,232,.10), rgba(99,102,241,.04)); margin-bottom: .8rem;}
+.hero h1 {font-size: 1.95rem; margin: 0;}
+.hero p {margin: .3rem 0 0; opacity: .76;}
+.flow-row {display: grid; grid-template-columns: repeat(7, 1fr); gap: .45rem; margin: .45rem 0 1rem;}
+.flow-step {border: 1px solid rgba(128,128,128,.22); border-radius: 12px; padding: .72rem .68rem; min-height: 88px;}
 .flow-step.done {border-color: rgba(34,197,94,.55); background: rgba(34,197,94,.08);}
 .flow-step.active {border-color: rgba(37,99,235,.75); background: rgba(37,99,235,.12); box-shadow: 0 0 0 1px rgba(37,99,235,.15);}
 .flow-step.pending {opacity: .62;}
@@ -150,15 +154,11 @@ def api_json(
     payload: dict[str, Any] | None = None,
     timeout: int = 30,
 ) -> dict[str, Any]:
-    response = requests.request(
-        method,
-        f"{AGENT_URL}{path}",
-        json=payload,
-        timeout=timeout,
-    )
+    response = requests.request(method, f"{AGENT_URL}{path}", json=payload, timeout=timeout)
     if not response.ok:
-        detail = response.text[:4000]
-        raise RuntimeError(f"Agent API returned HTTP {response.status_code}: {detail}")
+        raise RuntimeError(
+            f"Agent API returned HTTP {response.status_code}: {response.text[:4000]}"
+        )
     data = response.json()
     if not isinstance(data, dict):
         raise RuntimeError("Agent API returned a non-object JSON response")
@@ -170,7 +170,7 @@ def runtime_health() -> dict[str, Any]:
     return api_json("GET", "/health", timeout=15)
 
 
-def clean_optional(value: str) -> str | None:
+def clean_optional(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
 
@@ -220,12 +220,12 @@ def render_workflow(active: str | None = None, terminal: bool = False) -> None:
     st.markdown('<div class="flow-row">' + "".join(cards) + "</div>", unsafe_allow_html=True)
 
 
-def initialize_budget_state(preset: str) -> None:
-    preset_values = PRESETS[preset]
-    preset_changed = st.session_state.get("active_budget_preset") != preset
-    for spec in DEMO_OPTION_SPECS:
-        state_key = f"budget_{spec.key}"
-        fallback = preset_values.get(spec.key, spec.default)
+def initialize_control_state(profile: str) -> None:
+    profile_values = EXECUTION_PROFILES[profile]
+    profile_changed = st.session_state.get("active_execution_profile") != profile
+    for spec in RUNTIME_CONTROL_SPECS:
+        state_key = f"control_{spec.key}"
+        fallback = profile_values.get(spec.key, spec.default)
         current = st.session_state.get(state_key)
         normalized = safe_int(
             current,
@@ -234,19 +234,27 @@ def initialize_budget_state(preset: str) -> None:
             maximum=spec.maximum,
             field_name=state_key,
         )
-        if preset_changed or current is None or normalized != current:
-            st.session_state[state_key] = fallback if preset_changed else normalized
-    st.session_state["active_budget_preset"] = preset
+        if profile_changed or current is None or normalized != current:
+            st.session_state[state_key] = fallback if profile_changed else normalized
+    st.session_state["active_execution_profile"] = profile
 
 
-def budget_controls() -> dict[str, int]:
-    st.sidebar.subheader("Controllable run budget")
-    preset = st.sidebar.selectbox("Profile", tuple(PRESETS), index=1)
-    initialize_budget_state(preset)
-    options: dict[str, int] = {}
-    for spec in DEMO_OPTION_SPECS:
-        state_key = f"budget_{spec.key}"
-        fallback = PRESETS[preset].get(spec.key, spec.default)
+def runtime_controls() -> dict[str, int]:
+    st.sidebar.subheader("Runtime controls")
+    profile = st.sidebar.selectbox(
+        "Execution profile",
+        tuple(EXECUTION_PROFILES),
+        index=1,
+        help=(
+            "Latency Optimized reduces evidence acquisition. Standard uses the default production "
+            "limits. Coverage Optimized expands candidate and visual investigation."
+        ),
+    )
+    initialize_control_state(profile)
+    controls: dict[str, int] = {}
+    for spec in RUNTIME_CONTROL_SPECS:
+        state_key = f"control_{spec.key}"
+        fallback = EXECUTION_PROFILES[profile].get(spec.key, spec.default)
         raw = st.sidebar.number_input(
             spec.label,
             min_value=spec.minimum,
@@ -262,15 +270,17 @@ def budget_controls() -> dict[str, int]:
             key=state_key,
             help=spec.help_text,
         )
-        options[spec.key] = safe_int(
+        controls[spec.key] = safe_int(
             raw,
             fallback,
             minimum=spec.minimum,
             maximum=spec.maximum,
             field_name=state_key,
         )
-    st.sidebar.caption("Per-job only. Identity, durability and no-fabrication rules remain locked.")
-    return options
+    st.sidebar.caption(
+        "Controls apply to one job. Identity, feature, source-authority, durability and no-fabrication policies are fixed."
+    )
+    return controls
 
 
 def runtime_sidebar() -> dict[str, Any] | None:
@@ -290,7 +300,7 @@ def runtime_sidebar() -> dict[str, Any] | None:
     if ready:
         st.sidebar.success("Runtime ready")
     elif health.get("status") == "healthy":
-        st.sidebar.warning(f"Stale runtime: {contract}")
+        st.sidebar.warning(f"Incompatible runtime: {contract}")
     else:
         st.sidebar.error(f"Runtime: {health.get('status') or 'unknown'}")
     st.sidebar.caption(f"Agent · {AGENT_URL}")
@@ -331,10 +341,8 @@ def render_gates(acceptance: Mapping[str, Any]) -> None:
     for column, (key, label) in zip(columns, visible):
         passed = bool(acceptance.get(key))
         with column:
-            css = "gate-pass" if passed else "gate-fail"
-            symbol = "PASS" if passed else "FAIL"
             st.markdown(
-                f'<div class="{css}"><strong>{label}</strong><br><small>{symbol}</small></div>',
+                f'<div class="{"gate-pass" if passed else "gate-fail"}"><strong>{label}</strong><br><small>{"PASS" if passed else "FAIL"}</small></div>',
                 unsafe_allow_html=True,
             )
 
@@ -359,17 +367,26 @@ def render_search_route(search: Mapping[str, Any]) -> None:
         )
 
 
-def render_judgment_trace(result: Mapping[str, Any]) -> None:
+def render_judgment_sequence(result: Mapping[str, Any]) -> None:
     review = dict(result.get("business_judgement_review") or {})
     steps = [item for item in review.get("steps") or [] if isinstance(item, Mapping)]
     if not steps:
         st.info("No structured business judgment sequence was returned.")
         return
-    st.caption("Observable evidence → explicit rule → business judgment → next action. This is not hidden chain-of-thought.")
+    st.caption(
+        "Observable evidence → explicit rule → business judgment → next action. "
+        "This is an audit representation, not hidden chain-of-thought."
+    )
     for item in steps:
         status = str(item.get("judgement_status") or "").upper()
         outcome = str(item.get("final_outcome") or "").upper()
-        css = "selected" if any(token in outcome for token in ("SELECT", "DELIVER", "ELIGIBLE")) else "rejected" if any(token in status + outcome for token in ("REJECT", "FAIL", "NOT_ELIGIBLE")) else ""
+        css = (
+            "selected"
+            if any(token in outcome for token in ("SELECT", "DELIVER", "ELIGIBLE"))
+            else "rejected"
+            if any(token in status + outcome for token in ("REJECT", "FAIL", "NOT_ELIGIBLE"))
+            else ""
+        )
         st.markdown(
             f"""
 <div class="trace-card {css}">
@@ -396,30 +413,45 @@ def render_result(result: dict[str, Any], elapsed_seconds: float | None = None) 
     browser = dict(result.get("agentic_browser") or {})
     outcome = dict(result.get("resolution_outcome") or {})
     run_configuration = dict(result.get("run_configuration") or {})
-    effective_budget = dict(run_configuration.get("effective_runtime_options") or {})
+    effective_controls = dict(run_configuration.get("effective_runtime_options") or {})
 
     st.divider()
-    render_workflow("EXPLAIN", terminal=True)
+    render_workflow("REPORT", terminal=True)
     if status == "COMPLETED":
-        st.markdown('<div class="status-ok"><strong>Accepted direct product URL</strong> · Every mandatory production gate passed.</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="status-ok"><strong>Accepted direct product URL</strong> · Every mandatory production gate passed.</div>',
+            unsafe_allow_html=True,
+        )
     elif status == "REVIEW_REQUIRED" and outcome:
-        st.markdown('<div class="status-review"><strong>No safe direct URL within the bounded run</strong> · Trace preserved; no URL fabricated.</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="status-review"><strong>No safe direct URL within the bounded run</strong> · Trace preserved; no URL fabricated.</div>',
+            unsafe_allow_html=True,
+        )
     elif status == "REVIEW_REQUIRED":
-        st.markdown('<div class="status-review"><strong>Human review required</strong> · A real reference exists, but one or more judgments need confirmation.</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="status-review"><strong>Review required</strong> · A real reference exists, but one or more judgments require confirmation.</div>',
+            unsafe_allow_html=True,
+        )
     else:
-        st.markdown('<div class="status-fail"><strong>Technical execution failure</strong> · No business result was fabricated.</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="status-fail"><strong>Technical execution failure</strong> · No business result was fabricated.</div>',
+            unsafe_allow_html=True,
+        )
 
-    st.subheader("Decision")
+    st.subheader("Decision summary")
     metrics = st.columns(6)
-    metric_values = (
+    values = (
         ("Status", status),
         ("Primary role", result.get("primary_url_role")),
         ("Strictly verified", delivery.get("strictly_verified")),
-        ("Search credits", f"{search.get('serpapi_requests_used', 0)} / {search.get('serpapi_request_limit', effective_budget.get('serpapi_credits', '—'))}"),
+        (
+            "Search credits",
+            f"{search.get('serpapi_requests_used', 0)} / {search.get('serpapi_request_limit', effective_controls.get('serpapi_credits', '—'))}",
+        ),
         ("Browser candidates", browser.get("candidate_urls_admitted", 0)),
         ("Elapsed", f"{elapsed_seconds:.1f}s" if elapsed_seconds is not None else "—"),
     )
-    for column, (label, value) in zip(metrics, metric_values):
+    for column, (label, value) in zip(metrics, values):
         with column:
             result_metric(label, value)
 
@@ -433,19 +465,19 @@ def render_result(result: dict[str, Any], elapsed_seconds: float | None = None) 
 
     render_gates(acceptance)
 
-    decision_tab, trace_tab, evidence_tab, budget_tab, artifacts_tab = st.tabs(
-        ["Decision flow", "Business judgments", "Evidence", "Budget", "Artifacts"]
+    workflow_tab, judgment_tab, evidence_tab, controls_tab, artifacts_tab = st.tabs(
+        ["Workflow and decision", "Judgment sequence", "Evidence", "Runtime controls", "Artifacts"]
     )
 
-    with decision_tab:
+    with workflow_tab:
         identity = dict(result.get("product_identification") or {})
         hypothesis = identity.get("leading_hypothesis") or identity.get("selected_hypothesis") or identity
-        d1, d2 = st.columns(2)
-        with d1:
+        left, right = st.columns(2)
+        with left:
             st.markdown("#### Product interpretation")
             st.json(hypothesis, expanded=True)
-        with d2:
-            st.markdown("#### Source decision")
+        with right:
+            st.markdown("#### Source selection")
             st.markdown(
                 f"**Policy:** {compact(selection.get('policy'))}  \n"
                 f"**Reason:** {compact(selection.get('selection_reason'), 500)}  \n"
@@ -454,33 +486,41 @@ def render_result(result: dict[str, Any], elapsed_seconds: float | None = None) 
             )
             if outcome:
                 st.warning(compact(outcome.get("message") or outcome.get("code"), 600))
-        st.markdown("#### Search-to-decision route")
+        st.markdown("#### Search route")
         render_search_route(search)
 
-    with trace_tab:
-        render_judgment_trace(result)
+    with judgment_tab:
+        render_judgment_sequence(result)
 
     with evidence_tab:
         review = dict(result.get("business_judgement_review") or {})
         visual = dict(review.get("visual_evidence_summary") or {})
-        visual_cols = st.columns(4)
+        visual_columns = st.columns(4)
         visual_values = (
             ("Visual assets", visual.get("visual_assets_collected", 0)),
             ("Screenshots", visual.get("screenshots_captured", 0)),
             ("Image inspections", visual.get("agentic_image_inspection_actions", 0)),
-            ("Visual decision impact", visual.get("image_influenced_final_decision", "—")),
+            ("Decision impact", visual.get("image_influenced_final_decision", "—")),
         )
-        for column, (label, value) in zip(visual_cols, visual_values):
+        for column, (label, value) in zip(visual_columns, visual_values):
             with column:
                 result_metric(label, value)
 
-        assessments = [item for item in result.get("feature_assessments") or [] if isinstance(item, Mapping)]
+        assessments = [
+            item for item in result.get("feature_assessments") or [] if isinstance(item, Mapping)
+        ]
         if assessments:
             st.markdown("#### Candidate evidence")
             for item in assessments:
-                accepted = bool(item.get("identity_accepted")) and not (item.get("missing_features") or []) and not (item.get("conflicting_features") or [])
-                icon = "✓" if accepted else "×"
-                with st.expander(f"{icon} {compact(item.get('url'), 160)}", expanded=accepted):
+                accepted = (
+                    bool(item.get("identity_accepted"))
+                    and not (item.get("missing_features") or [])
+                    and not (item.get("conflicting_features") or [])
+                )
+                with st.expander(
+                    f"{'PASS' if accepted else 'REJECT'} · {compact(item.get('url'), 160)}",
+                    expanded=accepted,
+                ):
                     st.markdown(
                         f"**Identity:** {compact(item.get('identity_status'))}  \n"
                         f"**Coverage:** {compact(item.get('coverage'))}  \n"
@@ -491,7 +531,7 @@ def render_result(result: dict[str, Any], elapsed_seconds: float | None = None) 
         else:
             st.info("No candidate feature assessments were returned.")
 
-    with budget_tab:
+    with controls_tab:
         requested = dict(run_configuration.get("requested_runtime_options") or {})
         catalog = {
             item["key"]: item
@@ -499,20 +539,22 @@ def render_result(result: dict[str, Any], elapsed_seconds: float | None = None) 
             if isinstance(item, dict) and item.get("key")
         }
         rows = []
-        for key, effective in effective_budget.items():
+        for key, effective in effective_controls.items():
             spec = catalog.get(key, {})
             rows.append(
                 {
                     "Control": spec.get("label") or key.replace("_", " ").title(),
-                    "Requested": requested.get(key, "default"),
+                    "Requested": requested.get(key, "environment default"),
                     "Effective": effective,
-                    "Allowed": f"{spec.get('minimum')}–{spec.get('maximum')}" if spec else "—",
+                    "Allowed range": (
+                        f"{spec.get('minimum')}–{spec.get('maximum')}" if spec else "—"
+                    ),
                 }
             )
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
         safety = dict(run_configuration.get("safety_contract") or {})
         if safety:
-            st.caption("Locked governance controls")
+            st.caption("Fixed governance controls")
             st.json(safety, expanded=False)
 
     with artifacts_tab:
@@ -535,10 +577,9 @@ def render_result(result: dict[str, Any], elapsed_seconds: float | None = None) 
             )
             review_path = artifact_root / "business_judgement_review.md"
             if review_path.is_file():
-                review_text = review_path.read_text(encoding="utf-8", errors="replace")
                 st.download_button(
                     "Download business judgment review",
-                    review_text,
+                    review_path.read_text(encoding="utf-8", errors="replace"),
                     file_name=review_path.name,
                     mime="text/markdown",
                     use_container_width=True,
@@ -553,7 +594,7 @@ def render_result(result: dict[str, Any], elapsed_seconds: float | None = None) 
                     use_container_width=True,
                 )
         else:
-            st.warning("Artifact directory is not available to this Streamlit process.")
+            st.warning("Artifact directory is not available to this process.")
         with st.expander("Technical result JSON"):
             st.json(result, expanded=False)
 
@@ -562,50 +603,55 @@ def friendly_error(exc: Exception) -> tuple[str, str]:
     detail = f"{type(exc).__name__}: {exc}"
     if "int() argument must be" in detail and "NoneType" in detail:
         return (
-            "A missing numeric value reached an older runtime path.",
-            "Pull the latest master and rebuild the agent/browser images. The final runtime normalizes null and blank numeric values before execution.",
+            "A nullable numeric value reached an incompatible runtime.",
+            "Pull the latest master and rebuild the agent and browser images.",
         )
     if "STALE_AGENT_IMAGE" in detail or "runtime_contract" in detail.lower():
         return (
-            "The running agent does not match this UI.",
-            "Run ./scripts/azureml_startup.sh --clean-build and reopen the app.",
+            "The running agent is incompatible with this application.",
+            "Run ./scripts/azureml_startup.sh --clean-build and reopen the application.",
         )
-    return ("The governed run could not complete.", "Open the technical detail below; no result was fabricated.")
+    return (
+        "The product resolution run could not complete.",
+        "Open the technical detail below. No result was fabricated.",
+    )
 
 
 st.markdown(
     """
 <div class="hero">
-  <h1>Product Evidence Intelligence</h1>
-  <p>From incomplete product text to a governed URL decision with an observable business-judgment sequence.</p>
+  <h1>Product Evidence Platform</h1>
+  <p>Exact-product resolution, evidence acquisition, governed URL selection and auditable business judgments.</p>
 </div>
 """,
     unsafe_allow_html=True,
 )
 
 health = runtime_sidebar()
-runtime_options = budget_controls()
+controls = runtime_controls()
 render_workflow()
 
-if "demo_row_id" not in st.session_state:
-    st.session_state.demo_row_id = f"DEMO-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
+if "run_row_id" not in st.session_state:
+    st.session_state.run_row_id = (
+        f"RUN-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
+    )
 
-with st.form("product_demo_form", clear_on_submit=False):
-    st.subheader("Input")
+with st.form("product_resolution_form", clear_on_submit=False):
+    st.subheader("Product input")
     main_text = st.text_area(
         "Main product text *",
         placeholder="Paste the incomplete product description",
         height=95,
     )
-    c1, c2, c3 = st.columns(3)
-    with c1:
+    first, second, third = st.columns(3)
+    with first:
         country_code = st.text_input("Country code *", value="CH", max_chars=2)
         retailer_name = st.text_input("Retailer", placeholder="Optional")
-    with c2:
+    with second:
         ean = st.text_input("EAN / GTIN", placeholder="Optional; preserved as text")
         language_code = st.text_input("Language", placeholder="Optional, e.g. de")
-    with c3:
-        row_id = st.text_input("Run ID", value=st.session_state.demo_row_id)
+    with third:
+        row_id = st.text_input("Run ID", value=st.session_state.run_row_id)
         feature_set = st.text_input("Feature set", value="toy_features")
 
     submitted = st.form_submit_button(
@@ -624,7 +670,7 @@ if submitted:
     elif not row_id.strip():
         st.error("Run ID is required.")
     else:
-        st.session_state.demo_row_id = row_id.strip()
+        st.session_state.run_row_id = row_id.strip()
         payload = {
             "product": {
                 "row_id": row_id.strip(),
@@ -635,7 +681,7 @@ if submitted:
                 "language_code": clean_optional(language_code.lower()),
             },
             "feature_set": feature_set.strip() or "toy_features",
-            "runtime_options": runtime_options,
+            "runtime_options": controls,
         }
 
         status_box = st.empty()
@@ -648,7 +694,7 @@ if submitted:
             last_signature: tuple[Any, ...] | None = None
             while True:
                 if time.monotonic() - started > MAX_POLL_SECONDS:
-                    raise TimeoutError("The demo exceeded the 30-minute polling limit")
+                    raise TimeoutError("The run exceeded the 30-minute polling limit")
                 status_payload = api_json("GET", f"/v1/jobs/{job_id}", timeout=20)
                 signature = (
                     status_payload.get("status"),
@@ -680,9 +726,9 @@ if submitted:
 
             result = api_json("GET", f"/v1/jobs/{job_id}/result", timeout=120)
             elapsed = time.monotonic() - started
-            st.session_state.demo_result = result
-            st.session_state.demo_elapsed_seconds = elapsed
-            st.session_state.demo_job_id = job_id
+            st.session_state.run_result = result
+            st.session_state.run_elapsed_seconds = elapsed
+            st.session_state.run_job_id = job_id
             progress_bar.progress(1.0, text="Decision package ready")
             status_box.empty()
             flow_box.empty()
@@ -700,10 +746,12 @@ if submitted:
                 st.code(f"{type(exc).__name__}: {exc}")
                 st.caption(f"Elapsed before failure: {elapsed:.1f}s")
 
-if "demo_result" in st.session_state:
+if "run_result" in st.session_state:
     render_result(
-        st.session_state.demo_result,
-        st.session_state.get("demo_elapsed_seconds"),
+        st.session_state.run_result,
+        st.session_state.get("run_elapsed_seconds"),
     )
 else:
-    st.caption("Safety policy is fixed. Only the bounded run budget in the sidebar is controllable.")
+    st.caption(
+        "Runtime controls are adjustable per job. Identity, feature, source-authority, durability and no-fabrication policies remain fixed."
+    )

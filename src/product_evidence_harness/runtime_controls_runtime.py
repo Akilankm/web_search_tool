@@ -4,12 +4,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from src.product_evidence_harness.demo_runtime_options import (
+from src.product_evidence_harness.runtime_controls import (
     ContextAwareEnvironment,
-    current_demo_runtime_options,
-    demo_runtime_option_scope,
-    effective_demo_runtime_options,
-    runtime_option_catalog,
+    current_runtime_controls,
+    effective_runtime_controls,
+    runtime_control_catalog,
+    runtime_control_scope,
 )
 
 
@@ -37,13 +37,13 @@ def _write_run_configuration(result: dict[str, Any]) -> None:
 
 
 def _annotate_result(result: dict[str, Any]) -> dict[str, Any]:
-    requested = current_demo_runtime_options()
-    effective = effective_demo_runtime_options()
+    requested = current_runtime_controls()
+    effective = effective_runtime_controls()
     result["run_configuration"] = {
-        "mode": "PER_JOB_DEMO_OVERRIDE" if requested else "ENVIRONMENT_DEFAULTS",
+        "mode": "PER_JOB_OVERRIDE" if requested else "ENVIRONMENT_DEFAULTS",
         "requested_runtime_options": requested,
         "effective_runtime_options": effective,
-        "option_catalog": runtime_option_catalog(),
+        "option_catalog": runtime_control_catalog(),
         "safety_contract": {
             "credentials_exposed": False,
             "environment_file_mutated": False,
@@ -85,8 +85,8 @@ def _annotate_result(result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def apply_demo_runtime_options_patch() -> None:
-    """Install per-job budgets without mutating process-wide environment variables."""
+def apply_runtime_controls_patch() -> None:
+    """Install concurrency-safe per-job controls without mutating process environment."""
 
     global _PATCHED
     if _PATCHED:
@@ -105,7 +105,7 @@ def apply_demo_runtime_options_patch() -> None:
 
     def run(self, payload, *, progress=None):
         raw_options = payload.get("runtime_options") if isinstance(payload, dict) else None
-        with demo_runtime_option_scope(raw_options):
+        with runtime_control_scope(raw_options):
             result = current_run(self, payload, progress=progress)
             return _annotate_result(result)
 

@@ -9,29 +9,35 @@ from src.product_evidence_harness.compat_patches import (
     apply_compatibility_patches,
     compatibility_patches_applied,
 )
-from src.product_evidence_harness.demo_runtime_options import (
-    normalize_demo_runtime_options,
-    runtime_option_catalog,
-)
+from src.product_evidence_harness.numeric_safety import safe_int
 from src.product_evidence_harness.runtime_contract import runtime_capabilities
+from src.product_evidence_harness.runtime_controls import (
+    normalize_runtime_controls,
+    runtime_control_catalog,
+)
 
-# The Uvicorn entrypoint must initialize the complete production runtime itself.
-# Package import side effects are retained for compatibility but are no longer
-# the only mechanism that installs the belief/search/browser patches.
 apply_compatibility_patches()
 
 from src.product_evidence_harness.agent_service.jobs import InMemoryJobStore, JobStatus
-from src.product_evidence_harness.progress_context import browser_progress_callback
 from src.product_evidence_harness.agent_service.strict_orchestrator import (
     StrictProductEvidenceOrchestrator,
 )
-from src.product_evidence_harness.three_stage_environment import validate_runtime_environment
 from src.product_evidence_harness.llm.service import LLMConfig
+from src.product_evidence_harness.progress_context import browser_progress_callback
+from src.product_evidence_harness.three_stage_environment import validate_runtime_environment
 
 
 app = FastAPI(title="Product Evidence Agent", version="1.0.0")
 store = InMemoryJobStore()
-executor = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("AGENT_WORKERS", "2"))))
+executor = ThreadPoolExecutor(
+    max_workers=safe_int(
+        os.getenv("AGENT_WORKERS"),
+        2,
+        minimum=1,
+        maximum=32,
+        field_name="AGENT_WORKERS",
+    )
+)
 orchestrator = StrictProductEvidenceOrchestrator()
 
 
@@ -44,10 +50,7 @@ def _enabled(name: str, default: bool) -> bool:
 
 def _validate_runtime() -> tuple[dict | None, str | None]:
     try:
-        report = validate_runtime_environment(
-            None,
-            strict_file_permissions=False,
-        )
+        report = validate_runtime_environment(None, strict_file_permissions=False)
         llm_required = (
             _enabled("PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER", True)
             or _enabled("PRODUCT_HARNESS_ENABLE_VISION_REASONING", True)
@@ -66,7 +69,7 @@ def _service_health() -> dict:
         **runtime_capabilities(),
         "compatibility_patches_applied": compatibility_patches_applied(),
         "agent_entrypoint": "src.product_evidence_harness.agent_service.app:app",
-        "demo_runtime_option_catalog": runtime_option_catalog(),
+        "runtime_control_catalog": runtime_control_catalog(),
     }
 
 
@@ -107,7 +110,7 @@ def create_job(payload: dict) -> dict:
         raise HTTPException(status_code=503, detail=configuration_error)
 
     try:
-        normalized_options = normalize_demo_runtime_options(payload.get("runtime_options"))
+        normalized_options = normalize_runtime_controls(payload.get("runtime_options"))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

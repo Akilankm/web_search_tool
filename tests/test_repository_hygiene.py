@@ -32,6 +32,16 @@ def test_obsolete_public_entry_points_are_removed() -> None:
     obsolete = [
         "main.py",
         "batch_main.py",
+        "apps/leadership_demo.py",
+        "scripts/run_leadership_demo.sh",
+        "requirements/demo.txt",
+        "docs/MANAGEMENT_DEMO_GUIDE.md",
+        "docs/STREAMLIT_LEADERSHIP_DEMO.md",
+        "src/product_evidence_harness/demo_runtime_options.py",
+        "src/product_evidence_harness/demo_runtime_options_runtime.py",
+        "tests/test_streamlit_leadership_demo.py",
+        "tests/test_demo_runtime_options.py",
+        "tests/test_management_demo_guide.py",
         "docs/README.md",
         "docs/SECURE_ENVIRONMENT.md",
         "examples/toy_feature_schema.json",
@@ -55,24 +65,26 @@ def test_final_docs_and_runtime_files_exist() -> None:
         "docker/browser.Dockerfile",
         "requirements/agent.txt",
         "requirements/browser.txt",
-        "requirements/demo.txt",
+        "requirements/ui.txt",
         "requirements/test.txt",
         "scripts/azureml_startup.sh",
-        "scripts/run_leadership_demo.sh",
+        "scripts/run_product_evidence_ui.sh",
         "scripts/preflight_azureml.py",
         "scripts/wait_for_stack.py",
-        "apps/leadership_demo.py",
+        "apps/product_evidence_ui.py",
         "docs/AZUREML_OPERATIONS.md",
         "docs/NOTEBOOK_USAGE.md",
-        "docs/STREAMLIT_LEADERSHIP_DEMO.md",
+        "docs/PRODUCT_EVIDENCE_UI.md",
+        "docs/FEATURE_REFERENCE.md",
+        "docs/SYSTEM_WORKFLOW.md",
         "docs/SECURITY.md",
         "examples/features_to_code.example.json",
         "examples/batch_products.example.csv",
         "inputs/private/toy_features.json",
         "src/product_evidence_harness/batch_notebook_runtime.py",
         "src/product_evidence_harness/artifact_diagnostics.py",
-        "src/product_evidence_harness/demo_runtime_options.py",
-        "src/product_evidence_harness/demo_runtime_options_runtime.py",
+        "src/product_evidence_harness/runtime_controls.py",
+        "src/product_evidence_harness/runtime_controls_runtime.py",
     ]
     assert [path for path in required if not (ROOT / path).is_file()] == []
 
@@ -80,7 +92,6 @@ def test_final_docs_and_runtime_files_exist() -> None:
 def test_default_toy_feature_schema_is_valid_and_intentional() -> None:
     path = ROOT / "inputs" / "private" / "toy_features.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
-
     assert set(payload) == {"features_to_code"}
     names = [
         item if isinstance(item, str) else item["name"]
@@ -116,10 +127,12 @@ def test_readme_points_to_all_supported_paths() -> None:
     text = (ROOT / "README.md").read_text(encoding="utf-8")
     for notebook in SUPPORTED_NOTEBOOKS:
         assert f"notebooks/{notebook}" in text
-    assert "apps/leadership_demo.py" in text
-    assert "scripts/run_leadership_demo.sh" in text
+    assert "apps/product_evidence_ui.py" in text
+    assert "scripts/run_product_evidence_ui.sh" in text
     assert "scripts/azureml_startup.sh" in text
     assert "inputs/private/toy_features.json" in text
-    assert "docs/STREAMLIT_LEADERSHIP_DEMO.md" in text
+    assert "docs/PRODUCT_EVIDENCE_UI.md" in text
+    assert "docs/FEATURE_REFERENCE.md" in text
+    assert "docs/SYSTEM_WORKFLOW.md" in text
     assert "docs/AZUREML_OPERATIONS.md" in text
     assert "docs/SECURITY.md" in text

@@ -13,86 +13,80 @@ cp .env.example .env
 ## Runtime contract
 
 ```text
-belief-url-resolution-v8-leadership-demo
+belief-url-resolution-v9-product-evidence-ui
 ```
 
-Required health response includes:
+Required health response:
 
 ```text
 status=healthy
 manufacturer_first_primary_url=true
 business_judgement_review_artifact=true
 structured_no_url_review_outcome=true
-leadership_demo_runtime_options=true
+per_job_runtime_controls=true
 compatibility_patches_applied=true
 agent_entrypoint=src.product_evidence_harness.agent_service.app:app
-serpapi_request_limit=3
-agentic_browser_contract_enforced=true
 browser_service.agentic_tools=true
 ```
 
-The Streamlit app, single-product notebook and batch notebook reject stale or incomplete agents before paid search.
+The UI, single-product notebook and batch notebook reject incompatible agents before paid search.
 
-## Supported surfaces
+## Supported execution surfaces
 
-| Surface | Use | Runtime requirement |
+| Surface | Use | Agent required |
 |---|---|---:|
-| `apps/leadership_demo.py` | Management and leadership demonstration | Agent and browser healthy |
-| `notebooks/01_single_product.ipynb` | One-product analytical review | Agent and browser healthy |
-| `notebooks/02_batch_products.ipynb` | CSV batch with bounded parallel execution | Agent and browser healthy |
-| `notebooks/03_artifact_diagnostics.ipynb` | Interactive exploration of an existing artifact | Offline |
+| `apps/product_evidence_ui.py` | Browser-based single-product execution and review | Yes |
+| `notebooks/01_single_product.ipynb` | One-product analytical review | Yes |
+| `notebooks/02_batch_products.ipynb` | CSV batch with bounded parallel execution | Yes |
+| `notebooks/03_artifact_diagnostics.ipynb` | Interactive analysis of an existing artifact | No |
 
-## Leadership Streamlit operations
+## Product Evidence Platform UI
 
-Install the host-side UI dependency set once:
+Install once:
 
 ```bash
-bash scripts/run_leadership_demo.sh --install
+bash scripts/run_product_evidence_ui.sh --install
 ```
 
-Later launches:
+Subsequent launches:
 
 ```bash
-bash scripts/run_leadership_demo.sh
+bash scripts/run_product_evidence_ui.sh
 ```
 
 Defaults:
 
 ```text
-Agent API:  http://127.0.0.1:8788
-Streamlit:  http://0.0.0.0:8501
+Agent API: http://127.0.0.1:8788
+UI:        http://0.0.0.0:8501
 ```
 
 In Azure ML VS Code:
 
-1. Keep the Streamlit terminal running.
+1. Keep the UI terminal running.
 2. Open the **Ports** panel.
 3. Forward port `8501`.
 4. Keep visibility **Private**.
 5. Open the forwarded browser address.
 
-Alternate port:
+Alternative port:
 
 ```bash
-bash scripts/run_leadership_demo.sh --port 8502
+bash scripts/run_product_evidence_ui.sh --port 8502
 ```
 
-The app submits work through the same Product Evidence Agent API as the notebooks. It does not edit `.env`, restart containers or implement separate search logic.
+## Per-job runtime controls
 
-### Per-job budget contract
-
-The UI can change only bounded operational limits:
-
-```text
-SerpAPI credits:                 1–3
-full page scrapes:               1–12
-scrapes per domain:              1–4
-planner candidate context:       3–20
-browser-investigated candidates: 1–8
-browser turns per candidate:     1–12
-browser actions per candidate:   1–24
-images in visual reasoning:      4–20
-```
+| Control | Range |
+|---|---:|
+| Search credits | 1–3 |
+| Full-page extractions | 1–12 |
+| Extractions per domain | 1–4 |
+| Planner candidate limit | 3–20 |
+| Browser investigation limit | 1–8 |
+| Browser turns per candidate | 1–12 |
+| Browser actions per candidate | 1–24 |
+| Visual assets per reasoning turn | 4–20 |
 
 Each run writes:
 
@@ -100,21 +94,20 @@ Each run writes:
 data/artifacts/<row_id>/run_configuration.json
 ```
 
-Identity gates, requested-feature completeness, EAN-conflict policy, URL durability, manufacturer-first authority and the no-fabrication rule are not UI controls.
+Runtime controls are isolated to one job. They cannot change credentials, identity gates, requested-feature completeness, EAN-conflict policy, URL durability, source-authority order or no-fabrication behavior.
 
 ## Product workflow
 
 ```text
 MAIN_TEXT + COUNTRY_CODE
-→ identity interpretation and uncertainty
-→ manufacturer-first adaptive search
-→ retailer / country / global fallback
-→ candidate precision and full-page extraction
-→ rendered browser and multimodal evidence
-→ strict identity, feature, scrapability and durability gates
-→ manufacturer-first source selection
-→ direct URL or structured no-safe-URL review outcome
-→ business_judgement_review.md + run_configuration.json
+→ product interpretation
+→ manufacturer, market and global search
+→ candidate normalization and extraction
+→ rendered browser and visual evidence
+→ identity, feature and durability verification
+→ source-authority selection
+→ URL result or structured no-safe-URL outcome
+→ decision and artifact generation
 ```
 
 ## Single-product notebook
@@ -123,7 +116,7 @@ MAIN_TEXT + COUNTRY_CODE
 notebooks/01_single_product.ipynb
 ```
 
-Use a unique `row_id`. The notebook returns normally for URL-backed and controlled no-safe-URL outcomes.
+Use a unique `row_id`. URL-backed and controlled no-safe-URL results return normally and remain available for diagnostics.
 
 ## Batch notebook
 
@@ -131,14 +124,14 @@ Use a unique `row_id`. The notebook returns normally for URL-backed and controll
 notebooks/02_batch_products.ipynb
 ```
 
-Required columns:
+Required CSV columns:
 
 ```text
 main_text
 country_code
 ```
 
-Optional:
+Optional columns:
 
 ```text
 row_id
@@ -147,7 +140,7 @@ retailer_name
 language_code
 ```
 
-Batch outputs:
+Outputs:
 
 ```text
 data/batch_runs/<run_id>/
@@ -158,7 +151,7 @@ data/batch_runs/<run_id>/
 └── batch_run_summary.json
 ```
 
-A no-safe-URL row remains `REVIEW_REQUIRED` in `batch_results.csv`. It is not placed in `batch_failures.csv`.
+A no-safe-URL row remains `REVIEW_REQUIRED` in `batch_results.csv`; it is not a technical failure.
 
 ## Artifact diagnostics
 
@@ -166,50 +159,13 @@ A no-safe-URL row remains `REVIEW_REQUIRED` in `batch_results.csv`. It is not pl
 notebooks/03_artifact_diagnostics.ipynb
 ```
 
-The notebook is offline and produces:
+Offline outputs:
 
 ```text
 artifact_diagnostics_interactive.html
 artifact_diagnostic_report.md
 artifact_diagnostic_workbook.xlsx
 ```
-
-## Product artifacts
-
-```text
-data/artifacts/<row_id>/
-├── business_judgement_review.md
-├── run_configuration.json
-├── product_belief.json
-├── product_understanding.md
-├── market_decision_path.md
-├── belief_updates.md
-├── evidence_ledger.jsonl
-├── adaptive_search_trace.json
-├── candidate_url_records.json
-├── candidates.csv
-├── primary_url_acceptance.json
-├── mandatory_url_delivery.json
-├── source_selection.json
-├── orchestrated_result.json
-└── single_product_diagnostics.xlsx
-```
-
-No-safe-URL outcomes additionally include `no_url_resolution.json`.
-
-## Terminal-result validation
-
-A URL-backed terminal result must have a direct URL and `url_delivery.delivered=true`.
-
-A blank URL is accepted only with:
-
-```text
-job_status=REVIEW_REQUIRED
-resolution_outcome.code=NO_SAFE_DIRECT_PRODUCT_URL_FOUND
-url_delivery.status=NO_SAFE_DIRECT_PRODUCT_URL_FOUND_AFTER_BOUNDED_SEARCH
-```
-
-Any other blank or contradictory result raises `INCONSISTENT_URL_DELIVERY_RESULT`.
 
 ## Manual verification
 
@@ -219,11 +175,11 @@ curl -sS http://127.0.0.1:8788/health | python -m json.tool
 cat data/runtime/stack_health.json
 ```
 
-Expected values:
+Expected:
 
 ```text
-runtime_contract_version=belief-url-resolution-v8-leadership-demo
-leadership_demo_runtime_options=true
+runtime_contract_version=belief-url-resolution-v9-product-evidence-ui
+per_job_runtime_controls=true
 structured_no_url_review_outcome=true
 ```
 
@@ -233,14 +189,21 @@ structured_no_url_review_outcome=true
 ./scripts/azureml_startup.sh --clean-build
 ```
 
-Use a clean rebuild after pulling runtime changes, for `STALE_AGENT_IMAGE`, or for missing capabilities. Recovery happens before product submission and consumes no search credit.
+Use a clean rebuild after runtime-contract changes, `STALE_AGENT_IMAGE`, or missing capabilities.
 
 ## Validation commands
 
 ```bash
 bash -n scripts/azureml_startup.sh
-bash -n scripts/run_leadership_demo.sh
+bash -n scripts/run_product_evidence_ui.sh
 python -m compileall -q src scripts apps
 PYTHONPATH=src pytest -q
 docker compose config --quiet
 ```
+
+## Related documents
+
+- [Feature reference](FEATURE_REFERENCE.md)
+- [System workflow](SYSTEM_WORKFLOW.md)
+- [Product Evidence Platform UI](PRODUCT_EVIDENCE_UI.md)
+- [Final system contract](FINAL_SYSTEM_CONTRACT.md)

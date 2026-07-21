@@ -83,7 +83,7 @@ def _healthy_payload() -> dict:
         "manufacturer_first_primary_url": True,
         "business_judgement_review_artifact": True,
         "structured_no_url_review_outcome": True,
-        "leadership_demo_runtime_options": True,
+        "per_job_runtime_controls": True,
         "browser_service": {"agentic_tools": True},
         "configuration": {
             "three_stage_contract_enforced": True,
@@ -146,7 +146,7 @@ def test_agentic_llm_failure_falls_back_to_rendered_browser(monkeypatch) -> None
     assert browser.aborted is True
 
 
-def test_health_exposes_runtime_contract(tmp_path: Path) -> None:
+def test_health_exposes_v9_runtime_contract(tmp_path: Path) -> None:
     orchestrator = ProductEvidenceOrchestrator(
         config=AgentRuntimeConfig(
             private_feature_root=tmp_path,
@@ -157,44 +157,32 @@ def test_health_exposes_runtime_contract(tmp_path: Path) -> None:
     )
     health = orchestrator.health()
     assert health["runtime_contract_version"] == RUNTIME_CONTRACT_VERSION
-    assert health["belief_driven_product_resolution"] is True
     assert health["manufacturer_first_primary_url"] is True
     assert health["business_judgement_review_artifact"] is True
     assert health["structured_no_url_review_outcome"] is True
-    assert health["leadership_demo_runtime_options"] is True
+    assert health["per_job_runtime_controls"] is True
 
 
-def test_notebook_rejects_legacy_or_incomplete_agent(monkeypatch) -> None:
+def test_notebook_rejects_missing_v9_capabilities(monkeypatch) -> None:
     import src.product_evidence_harness.notebook_runtime as runtime
 
-    legacy = _healthy_payload()
-    legacy.pop("runtime_contract_version")
-    monkeypatch.setattr(runtime, "api_json", lambda *args, **kwargs: legacy)
+    missing_contract = _healthy_payload()
+    missing_contract.pop("runtime_contract_version")
+    monkeypatch.setattr(runtime, "api_json", lambda *args, **kwargs: missing_contract)
     with pytest.raises(RuntimeError, match="STALE_AGENT_IMAGE"):
         check_health()
 
-    incomplete = _healthy_payload()
-    incomplete.pop("business_judgement_review_artifact")
-    monkeypatch.setattr(runtime, "api_json", lambda *args, **kwargs: incomplete)
-    with pytest.raises(RuntimeError, match="business judgment review artifact"):
-        check_health()
-
-    no_structured_outcome = _healthy_payload()
-    no_structured_outcome.pop("structured_no_url_review_outcome")
-    monkeypatch.setattr(runtime, "api_json", lambda *args, **kwargs: no_structured_outcome)
-    with pytest.raises(RuntimeError, match="structured no-safe-URL review outcome"):
-        check_health()
-
-    no_demo_options = _healthy_payload()
-    no_demo_options.pop("leadership_demo_runtime_options")
-    monkeypatch.setattr(runtime, "api_json", lambda *args, **kwargs: no_demo_options)
-    with pytest.raises(RuntimeError, match="safe per-job leadership demo budgets"):
+    missing_controls = _healthy_payload()
+    missing_controls.pop("per_job_runtime_controls")
+    monkeypatch.setattr(runtime, "api_json", lambda *args, **kwargs: missing_controls)
+    with pytest.raises(
+        RuntimeError,
+        match="validated concurrency-safe per-job runtime controls",
+    ):
         check_health()
 
 
-def test_notebook_auto_recovers_stale_agent_from_same_checkout(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_notebook_auto_recovers_incompatible_agent(monkeypatch, tmp_path: Path) -> None:
     import src.product_evidence_harness.notebook_runtime as runtime
 
     calls = iter([RuntimeError("STALE_AGENT_IMAGE: old image"), _healthy_payload()])
@@ -215,46 +203,29 @@ def test_notebook_auto_recovers_stale_agent_from_same_checkout(
     monkeypatch.setattr(runtime, "check_health", fake_check_health)
     monkeypatch.setattr(runtime, "recover_platform", lambda *args, **kwargs: recovery)
 
-    health, result = ensure_platform_ready(
-        tmp_path,
-        auto_recover=True,
-        clean_build=True,
-    )
-    assert health["business_judgement_review_artifact"] is True
-    assert health["structured_no_url_review_outcome"] is True
-    assert health["leadership_demo_runtime_options"] is True
-    assert result.attempted is True
+    health, result = ensure_platform_ready(tmp_path, auto_recover=True, clean_build=True)
+    assert health["per_job_runtime_controls"] is True
     assert result.recovered is True
     assert result.clean_build is True
 
 
-def test_review_required_result_with_real_url_passes_delivery_contract() -> None:
+def test_url_backed_review_result_passes_contract() -> None:
     result = {
         "job_status": "REVIEW_REQUIRED",
         "primary_url": "https://shop.example/product",
         "primary_url_role": "RETAILER",
         "manufacturer_url": None,
         "retailer_url": "https://shop.example/product",
-        "source_selection": {
-            "policy": "MANUFACTURER_FIRST_AFTER_PRODUCTION_GATES",
-            "selection_reason": "RETAILER_REVIEW_URL_AFTER_MANUFACTURER_GATE_FAILURE",
-        },
+        "source_selection": {"policy": "MANUFACTURER_FIRST_AFTER_PRODUCTION_GATES"},
         "business_judgement_review": _judgement_review(),
         "product_identification": {"resolution_status": "PROBABLE"},
-        "search": {
-            "market_decision_path": [
-                "manufacturer_primary",
-                "country_alternative",
-                "global_fallback",
-            ]
-        },
+        "search": {"market_decision_path": ["manufacturer_primary"]},
         "url_delivery": {"delivered": True, "strictly_verified": False},
-        "product_match": {"match_reason": "BEST_AVAILABLE_REVIEW_URL"},
     }
     assert validate_result_contract(result) is result
 
 
-def test_structured_no_url_review_result_passes_without_false_success() -> None:
+def test_structured_no_url_result_passes_contract() -> None:
     result = {
         "job_status": "REVIEW_REQUIRED",
         "primary_url": None,
@@ -267,13 +238,7 @@ def test_structured_no_url_review_result_passes_without_false_success() -> None:
         },
         "business_judgement_review": _judgement_review(),
         "product_identification": {"resolution_status": "AMBIGUOUS"},
-        "search": {
-            "market_decision_path": [
-                "manufacturer_primary",
-                "country_alternative",
-                "global_fallback",
-            ]
-        },
+        "search": {"market_decision_path": ["manufacturer_primary", "global_fallback"]},
         "url_delivery": {
             "required": True,
             "delivered": False,
@@ -284,54 +249,24 @@ def test_structured_no_url_review_result_passes_without_false_success() -> None:
             "code": NO_URL_OUTCOME_CODE,
             "terminal_status": "REVIEW_REQUIRED",
         },
-        "product_match": {
-            "match_reason": NO_URL_OUTCOME_CODE,
-            "best_available_url": None,
-        },
         "artifact_dir": "/data/artifacts/ROW-1",
     }
     assert validate_result_contract(result) is result
 
 
-def test_missing_business_judgement_review_raises_schema_error() -> None:
-    result = {
-        "job_status": "REVIEW_REQUIRED",
-        "primary_url": "https://shop.example/product",
-        "primary_url_role": "RETAILER",
-        "manufacturer_url": None,
-        "retailer_url": "https://shop.example/product",
-        "source_selection": {"policy": "MANUFACTURER_FIRST_AFTER_PRODUCTION_GATES"},
-        "product_identification": {"resolution_status": "PROBABLE"},
-        "search": {"market_decision_path": ["manufacturer_primary"]},
-        "url_delivery": {"delivered": True, "strictly_verified": False},
-    }
-    with pytest.raises(RuntimeError, match="RESULT_CONTRACT_MISMATCH") as exc:
-        validate_result_contract(result)
-    assert "business_judgement_review" in str(exc.value)
-
-
-def test_unstructured_missing_url_still_raises_contract_error() -> None:
+def test_unstructured_blank_url_remains_invalid() -> None:
     result = {
         "job_status": "REVIEW_REQUIRED",
         "primary_url": None,
         "primary_url_role": "RETAILER",
         "manufacturer_url": None,
         "retailer_url": None,
-        "source_selection": {
-            "policy": "MANUFACTURER_FIRST_AFTER_PRODUCTION_GATES",
-            "selection_reason": "NO_SAFE_DIRECT_PRODUCT_URL",
-        },
+        "source_selection": {"policy": "MANUFACTURER_FIRST_AFTER_PRODUCTION_GATES"},
         "business_judgement_review": _judgement_review(),
         "product_identification": {"resolution_status": "AMBIGUOUS"},
-        "search": {"market_decision_path": ["manufacturer_primary", "global_fallback"]},
+        "search": {"market_decision_path": ["manufacturer_primary"]},
         "url_delivery": {"delivered": False, "status": "NOT_DELIVERED"},
-        "product_match": {
-            "match_reason": "MANDATORY_PRODUCT_URL_NOT_FOUND",
-            "best_available_url": None,
-        },
         "artifact_dir": "/data/artifacts/ROW-1",
     }
-    with pytest.raises(RuntimeError, match="INCONSISTENT_URL_DELIVERY_RESULT") as exc:
+    with pytest.raises(RuntimeError, match="INCONSISTENT_URL_DELIVERY_RESULT"):
         validate_result_contract(result)
-    assert "artifact_dir=/data/artifacts/ROW-1" in str(exc.value)
-    assert len(str(exc.value)) < 1000

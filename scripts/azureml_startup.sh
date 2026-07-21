@@ -16,16 +16,16 @@ Fresh Azure ML workflow:
   1. cp .env.example .env
   2. edit .env with real SerpAPI and enterprise LLM values
   3. ./scripts/azureml_startup.sh --clean-build
-  4. choose one surface:
-       apps/leadership_demo.py                # management and leadership demo
-       notebooks/01_single_product.ipynb      # one-product analytical review
-       notebooks/02_batch_products.ipynb      # bounded parallel CSV execution
-       notebooks/03_artifact_diagnostics.ipynb # offline artifact diagnostics
+  4. choose one execution surface:
+       apps/product_evidence_ui.py              # browser-based single-product application
+       notebooks/01_single_product.ipynb        # one-product analytical review
+       notebooks/02_batch_products.ipynb        # bounded parallel CSV execution
+       notebooks/03_artifact_diagnostics.ipynb  # offline artifact diagnostics
 
-After the platform is healthy, launch the leadership surface with:
+After the platform is healthy, launch the UI with:
 
-  bash scripts/run_leadership_demo.sh --install  # first use only
-  bash scripts/run_leadership_demo.sh            # later launches
+  bash scripts/run_product_evidence_ui.sh --install  # first use only
+  bash scripts/run_product_evidence_ui.sh            # subsequent use
 
 Options:
   --clean-build              Rebuild agent/browser images with --no-cache, then recreate containers.
@@ -227,15 +227,15 @@ PY
 )"
 
 echo
-echo "Product evidence platform is ready."
+echo "Product Evidence Platform is ready."
 echo "Agent API: http://127.0.0.1:${HOST_PORT}"
 echo "Runtime contract: ${RUNTIME_CONTRACT}"
 echo "Health snapshot: $PROJECT_DIR/data/runtime/stack_health.json"
 echo "Product artifacts: $PROJECT_DIR/data/artifacts/<row_id>/"
 echo "Batch outputs: $PROJECT_DIR/data/batch_runs/<run_id>/"
-echo "Leadership demo:"
-echo "  - bash $PROJECT_DIR/scripts/run_leadership_demo.sh --install  # first use"
-echo "  - bash $PROJECT_DIR/scripts/run_leadership_demo.sh            # then forward port 8501 privately"
+echo "Product Evidence Platform UI:"
+echo "  - bash $PROJECT_DIR/scripts/run_product_evidence_ui.sh --install  # first use"
+echo "  - bash $PROJECT_DIR/scripts/run_product_evidence_ui.sh            # then forward port 8501 privately"
 echo "Notebooks:"
 echo "  - $PROJECT_DIR/notebooks/01_single_product.ipynb        # one product, final decision and trace"
 echo "  - $PROJECT_DIR/notebooks/02_batch_products.ipynb        # CSV batch with bounded parallelism"
@@ -246,5 +246,5 @@ for feature_file in "${FEATURE_SETS[@]}"; do
 done
 
 echo
-echo "The agent is ready. Use Streamlit for leadership calls and notebooks for analytical or batch work."
+echo "The platform is ready. Use the UI for browser-based single-product execution or the notebooks for analytical and batch workflows."
 STARTUP_SUCCEEDED=true

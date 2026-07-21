@@ -8,7 +8,7 @@ from typing import Any, Iterator, Mapping
 
 
 @dataclass(frozen=True, slots=True)
-class DemoOptionSpec:
+class RuntimeControlSpec:
     key: str
     label: str
     env_names: tuple[str, ...]
@@ -18,95 +18,95 @@ class DemoOptionSpec:
     help_text: str
 
 
-DEMO_OPTION_SPECS: tuple[DemoOptionSpec, ...] = (
-    DemoOptionSpec(
+RUNTIME_CONTROL_SPECS: tuple[RuntimeControlSpec, ...] = (
+    RuntimeControlSpec(
         key="serpapi_credits",
-        label="SerpAPI search credits",
+        label="Search credits",
         env_names=("PRODUCT_HARNESS_MAX_SERPAPI_CREDITS",),
         default=3,
         minimum=1,
         maximum=3,
-        help_text="Maximum paid search actions for this product. The production route is capped at three.",
+        help_text="Maximum paid search actions available to one product run.",
     ),
-    DemoOptionSpec(
+    RuntimeControlSpec(
         key="full_scrapes",
-        label="Full page scrapes",
+        label="Full-page extractions",
         env_names=("PRODUCT_HARNESS_MAX_FULL_SCRAPES", "PRODUCT_HARNESS_MAX_SCRAPES"),
         default=6,
         minimum=1,
         maximum=12,
-        help_text="Maximum candidate pages admitted for full text extraction and verification.",
+        help_text="Maximum candidate pages admitted for full extraction and verification.",
     ),
-    DemoOptionSpec(
+    RuntimeControlSpec(
         key="scrapes_per_domain",
-        label="Scrapes per domain",
+        label="Extractions per domain",
         env_names=("PRODUCT_HARNESS_MAX_SCRAPES_PER_DOMAIN",),
         default=2,
         minimum=1,
         maximum=4,
-        help_text="Prevents one website from consuming the evidence budget.",
+        help_text="Maximum full-page extractions allowed from a single domain.",
     ),
-    DemoOptionSpec(
+    RuntimeControlSpec(
         key="planner_candidates",
-        label="Planner candidate context",
+        label="Planner candidate limit",
         env_names=("PRODUCT_HARNESS_SEARCH_PLANNER_MAX_CANDIDATES",),
         default=8,
         minimum=3,
         maximum=20,
-        help_text="Maximum ranked candidates exposed to the adaptive search planner.",
+        help_text="Maximum ranked candidates supplied to adaptive search planning.",
     ),
-    DemoOptionSpec(
+    RuntimeControlSpec(
         key="agentic_candidates",
-        label="Browser-investigated candidates",
+        label="Browser investigation limit",
         env_names=("PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES",),
         default=3,
         minimum=1,
         maximum=8,
-        help_text="Maximum candidate pages opened through the controlled browser workflow.",
+        help_text="Maximum candidate pages investigated through the rendered browser workflow.",
     ),
-    DemoOptionSpec(
+    RuntimeControlSpec(
         key="browser_turns_per_candidate",
         label="Browser turns per candidate",
         env_names=("PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE",),
         default=4,
         minimum=1,
         maximum=12,
-        help_text="Maximum observe-plan-act turns for each browser candidate.",
+        help_text="Maximum observe-plan-act cycles allowed for each browser candidate.",
     ),
-    DemoOptionSpec(
+    RuntimeControlSpec(
         key="browser_actions_per_candidate",
         label="Browser actions per candidate",
         env_names=("PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE",),
         default=6,
         minimum=1,
         maximum=24,
-        help_text="Maximum clicks, expansions, image inspections and evidence actions per candidate.",
+        help_text="Maximum controlled clicks, expansions, scrolling and evidence actions per candidate.",
     ),
-    DemoOptionSpec(
+    RuntimeControlSpec(
         key="images_in_reasoning",
-        label="Images in visual reasoning",
+        label="Visual assets per reasoning turn",
         env_names=("PRODUCT_HARNESS_AGENTIC_MAX_IMAGES",),
         default=8,
         minimum=4,
         maximum=20,
-        help_text="Maximum rendered or product images made available to one browser reasoning turn.",
+        help_text="Maximum screenshots or product images available to one visual reasoning turn.",
     ),
 )
 
-_SPEC_BY_KEY = {spec.key: spec for spec in DEMO_OPTION_SPECS}
+_SPEC_BY_KEY = {spec.key: spec for spec in RUNTIME_CONTROL_SPECS}
 _SPEC_BY_ENV = {
     env_name: spec
-    for spec in DEMO_OPTION_SPECS
+    for spec in RUNTIME_CONTROL_SPECS
     for env_name in spec.env_names
 }
-_CURRENT_OPTIONS: ContextVar[dict[str, int]] = ContextVar(
-    "product_evidence_demo_runtime_options",
+_CURRENT_CONTROLS: ContextVar[dict[str, int]] = ContextVar(
+    "product_evidence_runtime_controls",
     default={},
 )
 
 
-def normalize_demo_runtime_options(raw: Mapping[str, Any] | None) -> dict[str, int]:
-    """Validate the narrow per-job budget surface used by the leadership demo."""
+def normalize_runtime_controls(raw: Mapping[str, Any] | None) -> dict[str, int]:
+    """Validate the approved per-job operational control surface."""
 
     if raw is None:
         return {}
@@ -124,7 +124,7 @@ def normalize_demo_runtime_options(raw: Mapping[str, Any] | None) -> dict[str, i
             raise ValueError(f"{key} must be an integer, not a boolean")
         try:
             integer = int(value)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError(f"{key} must be an integer") from exc
         if integer < spec.minimum or integer > spec.maximum:
             raise ValueError(
@@ -134,47 +134,47 @@ def normalize_demo_runtime_options(raw: Mapping[str, Any] | None) -> dict[str, i
     return normalized
 
 
-def default_demo_runtime_options() -> dict[str, int]:
-    return {spec.key: spec.default for spec in DEMO_OPTION_SPECS}
+def default_runtime_controls() -> dict[str, int]:
+    return {spec.key: spec.default for spec in RUNTIME_CONTROL_SPECS}
 
 
-def current_demo_runtime_options() -> dict[str, int]:
-    return dict(_CURRENT_OPTIONS.get())
+def current_runtime_controls() -> dict[str, int]:
+    return dict(_CURRENT_CONTROLS.get())
 
 
-def effective_demo_runtime_options() -> dict[str, int]:
-    requested = current_demo_runtime_options()
-    return {
-        spec.key: requested.get(spec.key, _environment_default(spec))
-        for spec in DEMO_OPTION_SPECS
-    }
-
-
-def _environment_default(spec: DemoOptionSpec) -> int:
+def _environment_default(spec: RuntimeControlSpec) -> int:
     for env_name in spec.env_names:
         raw = os.getenv(env_name)
         if raw is None:
             continue
         try:
             value = int(raw)
-        except ValueError:
+        except (TypeError, ValueError, OverflowError):
             continue
         return max(spec.minimum, min(spec.maximum, value))
     return spec.default
 
 
+def effective_runtime_controls() -> dict[str, int]:
+    requested = current_runtime_controls()
+    return {
+        spec.key: requested.get(spec.key, _environment_default(spec))
+        for spec in RUNTIME_CONTROL_SPECS
+    }
+
+
 @contextmanager
-def demo_runtime_option_scope(raw: Mapping[str, Any] | None) -> Iterator[dict[str, int]]:
-    normalized = normalize_demo_runtime_options(raw)
-    token = _CURRENT_OPTIONS.set(normalized)
+def runtime_control_scope(raw: Mapping[str, Any] | None) -> Iterator[dict[str, int]]:
+    normalized = normalize_runtime_controls(raw)
+    token = _CURRENT_CONTROLS.set(normalized)
     try:
-        yield effective_demo_runtime_options()
+        yield effective_runtime_controls()
     finally:
-        _CURRENT_OPTIONS.reset(token)
+        _CURRENT_CONTROLS.reset(token)
 
 
 class ContextAwareEnvironment:
-    """Module-local ``os`` proxy that resolves approved job overrides first."""
+    """Resolve approved context-local controls before process environment values."""
 
     def __init__(self, base_os: Any) -> None:
         self._base_os = base_os
@@ -182,7 +182,7 @@ class ContextAwareEnvironment:
     def getenv(self, name: str, default: Any = None) -> Any:
         spec = _SPEC_BY_ENV.get(name)
         if spec is not None:
-            requested = current_demo_runtime_options()
+            requested = current_runtime_controls()
             if spec.key in requested:
                 return str(requested[spec.key])
         return self._base_os.getenv(name, default)
@@ -191,7 +191,7 @@ class ContextAwareEnvironment:
         return getattr(self._base_os, name)
 
 
-def runtime_option_catalog() -> list[dict[str, Any]]:
+def runtime_control_catalog() -> list[dict[str, Any]]:
     return [
         {
             "key": spec.key,
@@ -201,5 +201,5 @@ def runtime_option_catalog() -> list[dict[str, Any]]:
             "maximum": spec.maximum,
             "help_text": spec.help_text,
         }
-        for spec in DEMO_OPTION_SPECS
+        for spec in RUNTIME_CONTROL_SPECS
     ]

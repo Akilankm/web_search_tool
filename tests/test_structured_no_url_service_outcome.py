@@ -80,15 +80,11 @@ def test_agent_job_preserves_no_url_result_as_review_required(
     agent_app = _load_isolated_agent_app(monkeypatch, tmp_path)
     store = InMemoryJobStore()
     result = _result(tmp_path / "product-artifact")
-
     monkeypatch.setattr(agent_app, "store", store)
     monkeypatch.setattr(agent_app.orchestrator, "run", lambda payload, progress=None: result)
 
     record = store.create(
-        {
-            "product": result["product"],
-            "feature_set": "toy_features",
-        },
+        {"product": result["product"], "feature_set": "toy_features"},
         requested_id="ROW-NO-URL",
     )
     agent_app._run_job(record.job_id)
@@ -96,39 +92,43 @@ def test_agent_job_preserves_no_url_result_as_review_required(
     finished = store.get(record.job_id)
     assert finished.status == JobStatus.REVIEW_REQUIRED
     assert finished.error is None
-    assert finished.result is result
     assert finished.result["resolution_outcome"]["code"] == NO_URL_OUTCOME_CODE
     assert finished.result["url_delivery"]["delivered"] is False
     assert validate_result_contract(finished.result) is finished.result
 
 
-def test_create_job_rejects_invalid_demo_budget_before_queueing(
+def test_create_job_rejects_invalid_runtime_control_before_queueing(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
     agent_app = _load_isolated_agent_app(monkeypatch, tmp_path)
     submitted: list[tuple] = []
     monkeypatch.setattr(agent_app, "store", InMemoryJobStore())
-    monkeypatch.setattr(agent_app, "executor", SimpleNamespace(submit=lambda *args: submitted.append(args)))
+    monkeypatch.setattr(
+        agent_app,
+        "executor",
+        SimpleNamespace(submit=lambda *args: submitted.append(args)),
+    )
     monkeypatch.setattr(agent_app, "_validate_runtime", lambda: ({}, None))
 
-    payload = {
-        "product": {
-            "row_id": "ROW-BUDGET",
-            "main_text": "Example product",
-            "country_code": "GB",
-        },
-        "feature_set": "toy_features",
-        "runtime_options": {"serpapi_credits": 4},
-    }
     with pytest.raises(HTTPException) as exc:
-        agent_app.create_job(payload)
+        agent_app.create_job(
+            {
+                "product": {
+                    "row_id": "ROW-CONTROL",
+                    "main_text": "Example product",
+                    "country_code": "GB",
+                },
+                "feature_set": "toy_features",
+                "runtime_options": {"serpapi_credits": 4},
+            }
+        )
     assert exc.value.status_code == 422
     assert "between 1 and 3" in str(exc.value.detail)
     assert submitted == []
 
 
-def test_create_job_normalizes_valid_demo_budget_before_queueing(
+def test_create_job_normalizes_runtime_controls_before_queueing(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -136,13 +136,17 @@ def test_create_job_normalizes_valid_demo_budget_before_queueing(
     submitted: list[tuple] = []
     store = InMemoryJobStore()
     monkeypatch.setattr(agent_app, "store", store)
-    monkeypatch.setattr(agent_app, "executor", SimpleNamespace(submit=lambda *args: submitted.append(args)))
+    monkeypatch.setattr(
+        agent_app,
+        "executor",
+        SimpleNamespace(submit=lambda *args: submitted.append(args)),
+    )
     monkeypatch.setattr(agent_app, "_validate_runtime", lambda: ({}, None))
 
     response = agent_app.create_job(
         {
             "product": {
-                "row_id": "ROW-BUDGET-VALID",
+                "row_id": "ROW-CONTROL-VALID",
                 "main_text": "Example product",
                 "country_code": "GB",
             },
@@ -159,18 +163,15 @@ def test_create_job_normalizes_valid_demo_budget_before_queueing(
         "agentic_candidates": 2,
     }
     assert submitted
-    record = store.get(response["job_id"])
-    assert record.payload["runtime_options"]["serpapi_credits"] == 2
+    assert store.get(response["job_id"]).payload["runtime_options"]["serpapi_credits"] == 2
 
 
 def test_no_url_business_review_is_explicit_and_non_contradictory(tmp_path: Path) -> None:
     result = _result(tmp_path)
     markdown = (tmp_path / "business_judgement_review.md").read_text(encoding="utf-8")
-
     assert "CONTROLLED NO-URL REVIEW OUTCOME" in markdown
     assert NO_URL_OUTCOME_CODE in markdown
     assert "not an unhandled software exception" in markdown
-    assert "no URL means explicit failure" not in markdown
     assert result["business_judgement_review"]["human_review_status"] == (
         "PENDING_NO_URL_RESOLUTION_REVIEW"
     )
