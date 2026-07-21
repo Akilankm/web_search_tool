@@ -81,6 +81,7 @@ jobs:
             tests/test_agent_notebook_dependency_boundary.py \
             tests/test_structured_no_url_service_outcome.py \
             tests/test_demo_runtime_options.py \
+            tests/test_numeric_safety.py \
             tests/test_streamlit_leadership_demo.py \
             tests/test_preflight_azureml.py \
             tests/test_serp_harvester.py \
