@@ -53,7 +53,7 @@ def test_management_guide_matches_current_business_contract() -> None:
         "primary_url",
         "manufacturer_url",
         "retailer_url",
-        "source selection",
+        "source decision",
         "business_judgement_review.md",
         "visual_evidence_summary_df",
         "run_configuration.json",
