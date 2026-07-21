@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
+import traceback
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 
@@ -175,6 +179,41 @@ def get_result(job_id: str) -> dict:
     return record.result or {}
 
 
+def _write_failure_diagnostic(record, exc: Exception) -> str | None:
+    product = record.payload.get("product") if isinstance(record.payload, dict) else None
+    row_id = str((product or {}).get("row_id") or "").strip()
+    if not row_id:
+        return None
+
+    try:
+        root = Path(orchestrator.config.artifact_root) / row_id
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / "technical_failure.json"
+        temporary = path.with_suffix(".json.tmp")
+        payload = {
+            "schema_version": "technical-failure-v1",
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "job_id": record.job_id,
+            "row_id": row_id,
+            "stage": record.stage,
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+            "traceback": traceback.format_exc(),
+            "action": (
+                "Inspect the first project frame in traceback, correct that boundary, "
+                "then rerun with a new row_id."
+            ),
+        }
+        temporary.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False, default=str) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+        return str(path)
+    except Exception:
+        return None
+
+
 def _run_job(job_id: str) -> None:
     record = store.get(job_id)
     store.update(job_id, status=JobStatus.RUNNING, stage="VALIDATING_INPUT")
@@ -194,10 +233,15 @@ def _run_job(job_id: str) -> None:
             result=result,
         )
     except Exception as exc:
+        latest = store.get(job_id)
+        diagnostic_path = _write_failure_diagnostic(latest, exc)
+        error = f"{type(exc).__name__}: {exc}"
+        if diagnostic_path:
+            error += f" | diagnostic={diagnostic_path}"
         store.update(
             job_id,
             status=JobStatus.FAILED,
             stage="FAILED",
             message="Product evidence workflow failed",
-            error=f"{type(exc).__name__}: {exc}",
+            error=error,
         )
