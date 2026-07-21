@@ -2,12 +2,7 @@
 
 ## Purpose
 
-A bounded web-search workflow can legitimately finish without finding a safe direct product-page URL. That condition must not be confused with either:
-
-- a successful URL resolution; or
-- an internal software failure.
-
-The production contract is:
+A bounded web-search workflow can legitimately finish without finding a safe direct product-page URL. That condition must not be confused with either a successful URL resolution or an internal software failure.
 
 ```text
 No safe direct URL after bounded search
@@ -20,16 +15,17 @@ No safe direct URL after bounded search
 ## Runtime contract
 
 ```text
-belief-url-resolution-v7-structured-no-url-review
+belief-url-resolution-v8-leadership-demo
 ```
 
-Required health capability:
+Required capabilities:
 
 ```text
 structured_no_url_review_outcome=true
+leadership_demo_runtime_options=true
 ```
 
-The single and batch notebooks reject stale agents that do not expose this capability.
+The Streamlit app, single-product notebook and batch notebook reject stale agents that do not expose the current runtime contract.
 
 ## Exact result schema
 
@@ -62,25 +58,17 @@ A controlled no-safe-URL result contains:
 }
 ```
 
-A blank URL is accepted by the notebook result validator only when this complete structured contract is present. Any other blank or contradictory URL response is a hard `INCONSISTENT_URL_DELIVERY_RESULT` contract failure.
+A blank URL is valid only when this complete structured contract is present. Any other blank or contradictory response is a hard `INCONSISTENT_URL_DELIVERY_RESULT` failure.
 
 ## Why this is not `FAILED`
 
-`FAILED` is reserved for genuine technical or contract defects, such as:
+`FAILED` is reserved for genuine defects such as invalid mandatory input, missing configuration, stale runtime, unavailable required service, unhandled exception, malformed schema or a response claiming `COMPLETED` without a delivered URL.
 
-- invalid mandatory input;
-- missing configuration or credentials;
-- stale/incompatible runtime;
-- unavailable required service;
-- unhandled software exception;
-- malformed response schema;
-- a response claiming `COMPLETED` without a delivered URL.
-
-Search exhaustion is different. The system may have worked correctly, consumed the configured three credits, rejected unsafe or indirect results, and concluded that no safe direct page was found within the policy boundary.
+Search exhaustion is different. The system may have worked correctly, consumed the selected bounded credits, rejected unsafe or indirect results, and concluded that no safe direct page was found within that policy boundary.
 
 ## No-fabrication boundary
 
-The system must never convert the following into a successful product URL merely to avoid an empty result:
+The system must never promote the following merely to avoid an empty result:
 
 - search-result pages;
 - category or collection pages;
@@ -91,76 +79,54 @@ The system must never convert the following into a successful product URL merely
 - fabricated URLs;
 - unverified sibling variants or pack forms.
 
-When none of the discovered candidates is safely deliverable, the correct result is explicit human review.
-
 ## Preserved evidence
 
-The no-safe-URL result preserves all available recorded evidence:
-
-- submitted product input;
-- product interpretation and unresolved uncertainty;
-- manufacturer, country/retailer and global search stages;
-- exact queries, engines and scopes;
-- credits used;
-- result and candidate counts;
-- candidate investigations and rejection evidence;
-- browser and visual evidence when available;
-- requested-feature assessments;
-- deterministic acceptance-gate outcome;
-- recommended human next actions.
+The result preserves submitted input, identity interpretation, uncertainty, search stages, queries, engines, selected/effective budget, credits used, candidate counts, rejected evidence, browser/visual evidence, feature assessments, acceptance gates and recommended human actions.
 
 ## Generated artifacts
-
-The normal product artifact remains available and additionally includes:
 
 ```text
 data/artifacts/<row_id>/
 ├── no_url_resolution.json
 ├── business_judgement_review.md
+├── run_configuration.json
 ├── mandatory_url_delivery.json
 ├── primary_url_acceptance.json
 ├── source_selection.json
 └── orchestrated_result.json
 ```
 
-`business_judgement_review.md` begins with a controlled-outcome banner and records that:
+`business_judgement_review.md` begins with a controlled-outcome banner and records that no URL was fabricated.
 
-- the URL was not found within the bounded policy;
-- no URL was fabricated;
-- the run is `REVIEW_REQUIRED`;
-- the human should review identifiers, search stages and rejected candidates.
+## Leadership Streamlit behavior
 
-## Single-product notebook behavior
-
-`notebooks/01_single_product.ipynb` does not raise a traceback for this condition. It displays:
+`apps/leadership_demo.py` displays this condition as an amber business review outcome, not a red technical failure. It shows:
 
 ```text
-job_status
-resolution_outcome_code
-resolution_message
-url_delivered
-search_credits_used
-suggested_next_actions
-artifact paths
+job_status=REVIEW_REQUIRED
+resolution_outcome.code=NO_SAFE_DIRECT_PRODUCT_URL_FOUND
+url_delivery.delivered=false
+search credits used / selected limit
+suggested next actions
+judgment trace
+artifact downloads
 ```
 
-The reviewer can continue directly into the decision trace and artifact diagnostics.
+The app continues to the same Decision, Search & budget, Evidence & images, Judgment trace and Artifacts tabs used by URL-backed outcomes.
 
-## Batch behavior
+## Notebook behavior
 
-A no-safe-URL row remains in `batch_results.csv` as `REVIEW_REQUIRED`. It is not moved to `batch_failures.csv`, because the row did not experience a technical execution failure.
+`notebooks/01_single_product.ipynb` does not raise a traceback for this condition. It displays the reason, credits, next actions and artifact paths, then continues into diagnostics.
 
-The batch continues processing the remaining products and preserves the full artifact directory for the unresolved row.
+A no-safe-URL batch row remains in `batch_results.csv` as `REVIEW_REQUIRED` and is not moved into `batch_failures.csv`.
 
 ## Suggested human actions
-
-The structured result recommends evidence-driven next steps rather than automatically spending more credits:
 
 1. Verify or add EAN/GTIN when available.
 2. Verify the main text, exact model, variant and pack form.
 3. Supply the expected retailer or a known candidate URL when available.
-4. Inspect the three search-stage queries and rejected candidates.
-5. Expand the search budget or add a search source only through an explicit policy change.
+4. Inspect search-stage queries and rejected candidates.
+5. Change the bounded policy only through an explicit governed decision.
 
 ## Governance meaning
 
@@ -168,7 +134,7 @@ The structured result recommends evidence-driven next steps rather than automati
 
 > No safe direct product-page URL was found within the configured bounded search and acceptance policy.
 
-It does **not** mean:
+It does not mean:
 
 > No URL exists anywhere on the internet.
 
