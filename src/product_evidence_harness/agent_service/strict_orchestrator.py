@@ -77,18 +77,12 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
         if _enabled("PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING", False):
             llm_reasoner = LLMFeatureReasoner.from_env(
                 max_calls=_runtime_int(
-                    "PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT",
-                    2,
-                    1,
-                    20,
+                    "PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT", 2, 1, 20
                 )
             )
 
         stage_scrape_top_k = _runtime_int(
-            "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE",
-            6,
-            1,
-            10,
+            "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE", 6, 1, 10
         )
         harness = ThreeStageProductEvidenceHarness(
             serp_config=SerpAPIConfig.from_env(
@@ -98,17 +92,11 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
             config=HarnessConfig.from_env(),
             one_credit=OneCreditConfig(
                 max_candidates=_runtime_int(
-                    "PRODUCT_HARNESS_MAX_CANDIDATE_POOL",
-                    90,
-                    30,
-                    1000,
+                    "PRODUCT_HARNESS_MAX_CANDIDATE_POOL", 90, 30, 1000
                 ),
                 scrape_top_k=stage_scrape_top_k,
                 render_or_browser_top_k=_runtime_int(
-                    "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES",
-                    18,
-                    3,
-                    50,
+                    "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", 18, 1, 90
                 ),
                 max_supplementary_urls=3,
             ),
@@ -217,8 +205,7 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
         strict_acceptance = StrictPrimaryURLSelector(
             reject_expiring_urls=_enabled("PRODUCT_HARNESS_REJECT_EXPIRING_URLS", True),
             require_all_features_on_primary=_enabled(
-                "PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY",
-                True,
+                "PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY", True
             ),
         ).select(
             schema=schema,
@@ -297,32 +284,90 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
                 primary_reject_reason="|".join(strict_acceptance.reasons[:20]),
             )
 
-        emit("WRITING_OUTPUTS", "Writing the final evidence dossier")
+        coding_ready = strict_acceptance.accepted
+        status = "COMPLETED" if coding_ready else "REVIEW_REQUIRED"
+        stage_trace = list(getattr(base.state, "search_stage_trace", []))
+        max_agentic_candidates = _runtime_int(
+            "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", 18, 1, 90
+        )
+
+        emit("WRITING_OUTPUTS", "Writing the final agentic evidence dossier")
         result = {
-            "job_status": "COMPLETED" if evidence_set.coding_ready else "REVIEW_REQUIRED",
+            "job_status": status,
             "product": product.to_dict(),
             "feature_set": feature_set,
             "feature_schema_path": str(feature_path),
-            "search": base.search_trace,
-            "product_match": product_match.to_dict(),
-            "primary_url": evidence_set.primary_url,
-            "supplementary_urls": list(evidence_set.supplementary_urls),
-            "evidence_set": evidence_set.to_dict(),
-            "feature_assessments": [assessment.to_dict() for assessment in assessments],
-            "browser_evidence": [bundle.to_dict() for bundle in browser_bundles],
-            "candidate_investigations": candidate_investigations,
+            "search": {
+                "queries": list(base.state.queries),
+                "stages": stage_trace,
+                "serpapi_requests_used": base.state.budget.organic_used,
+                "serpapi_request_limit": 3,
+                "policy": "REQUESTED_RETAILER_COUNTRY_GLOBAL",
+                "feature_schema_used_by_search": False,
+            },
             "agentic_browser": {
                 "enabled": agentic_enabled,
                 "required": agentic_required,
+                "policy": "LLM_OBSERVE_PLAN_ACT_PER_ELIGIBLE_CANDIDATE",
                 "candidate_urls_admitted": len(browser_urls),
-                "candidate_investigations": len(candidate_investigations),
-                "successful_bundles": len(browser_bundles),
+                "candidate_investigations_completed": sum(
+                    1 for item in candidate_investigations if item.get("status") == "COMPLETED"
+                ),
+                "candidate_investigations_failed": sum(
+                    1 for item in candidate_investigations if item.get("status") == "FAILED"
+                ),
+                "max_candidates": max_agentic_candidates,
+                "max_turns_per_candidate": agentic_config.max_turns_per_candidate,
+                "max_actions_per_candidate": agentic_config.max_actions_per_candidate,
+                "llm_controls_browser_actions": True,
+                "deterministic_final_selector": True,
             },
+            "candidate_investigations": candidate_investigations,
+            "product_match": product_match.to_dict(),
+            "primary_url": strict_acceptance.primary_url,
+            "supplementary_urls": list(evidence_set.supplementary_urls),
             "primary_url_acceptance": strict_acceptance.to_dict(),
+            "evidence_set": evidence_set.to_dict(),
+            "feature_assessments": [assessment.to_dict() for assessment in assessments],
+            "browser_evidence": [bundle.to_dict() for bundle in browser_bundles],
             "multimodal_ready": any(bundle.multimodal_scrapable for bundle in browser_bundles),
-            "coding_ready": evidence_set.coding_ready,
+            "coding_ready": coding_ready,
             "artifact_dir": str(output_dir),
         }
-        output = output_dir / "orchestrated_result.json"
-        self._atomic_json(output, result)
+        self._atomic_json(
+            output_dir / "primary_url_acceptance.json",
+            strict_acceptance.to_dict(),
+        )
+        self._atomic_json(output_dir / "orchestrated_result.json", result)
         return result
+
+    def _browser_urls(self, base: FeatureAwareHarnessResult) -> tuple[str, ...]:
+        limit = _runtime_int(
+            "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", 18, 1, 90
+        )
+        cards = list(base.state.scorecards)
+        selected: list[str] = []
+        stage_order = (
+            "requested_retailer_country",
+            "country_primary",
+            "country_alternative",
+            "global_fallback",
+        )
+
+        for stage in stage_order:
+            marker = f"scope_{stage}"
+            selected.extend(
+                item.candidate.url
+                for item in cards
+                if marker in item.candidate.source_types and not item.hard_failures
+            )
+
+        selected.extend(
+            [
+                base.product_match.product_url,
+                base.product_match.best_available_url,
+            ]
+        )
+        selected.extend(card.candidate.url for card in cards if not card.hard_failures)
+        selected.extend(card.candidate.url for card in cards)
+        return tuple(dict.fromkeys(url for url in selected if url))[:limit]
