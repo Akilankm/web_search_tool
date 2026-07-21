@@ -1,34 +1,42 @@
-# Product Evidence Platform — System Workflow
+# Product Identification Platform — System Workflow
 
 ## Objective
 
-Resolve incomplete product text into either:
+Resolve incomplete product text into the strongest defensible product identity.
 
-1. a defensible direct product-page URL that passes every production gate; or
-2. a structured `REVIEW_REQUIRED` outcome when no safe direct URL is found within the configured bounded policy.
+```text
+Primary output
+= product_identification
 
-The workflow is evidence-first and artifact-producing. Search results are candidates, not answers.
+Supporting output
+= evidence sources, URLs and artifacts
+```
 
-## End-to-end flow
+Search results and URLs are evidence locations. They are not answers by themselves.
+
+## End-to-end workflow
 
 ```text
 Product input
 → Product interpretation
+→ Product hypothesis construction
 → Adaptive source search
 → Candidate normalization
 → Static extraction
 → Rendered browser investigation
 → Multimodal evidence reasoning
+→ Atomic evidence ledger
+→ Hypothesis comparison
 → Exact-product verification
-→ Requested-feature verification
-→ URL durability verification
-→ Source-authority selection
-→ Result and artifact generation
+→ Product identity resolution
+→ Requested-feature assessment
+→ Supporting source selection
+→ Decision audit and artifacts
 ```
 
 ## Stage 1 — Product input
 
-The system receives:
+Inputs:
 
 ```text
 row_id
@@ -38,125 +46,119 @@ optional retailer_name
 optional EAN/GTIN
 optional language_code
 feature_set
-optional per-job runtime controls
+optional runtime controls
 ```
 
-Mandatory-field validation occurs before paid search.
+Validation occurs before paid search.
 
 ## Stage 2 — Product interpretation
 
-The system constructs an explicit identity hypothesis and uncertainty state. It attempts to resolve:
+The system extracts explicit claims, normalized values, assumptions, unknowns and negative constraints.
 
 ```text
 brand
 manufacturer
-model or series
+model
+series
 product form
 variant
 size
 quantity
-pack configuration
-market context
+pack
+category
 ```
 
-Ambiguity is recorded and used to guide search. It is not hidden or silently discarded.
+## Stage 3 — Product hypothesis construction
 
-## Stage 3 — Adaptive source search
+The system creates one or more candidate product identities.
 
-The default authority-aware route is:
-
-```text
-official manufacturer
-→ requested retailer or same-country alternatives
-→ global exact-product sources
-```
-
-Each search stage records:
+Each hypothesis contains:
 
 ```text
-query
-engine
-scope
-reason
-results returned
-new candidate URLs
-qualified candidates
-continuation or stop decision
-```
-
-Search is bounded by the effective per-job controls.
-
-## Stage 4 — Candidate normalization
-
-Candidates are normalized and deduplicated. Indirect or low-value references are rejected before expensive processing.
-
-Common rejection classes:
-
-```text
-search-result page
-category page
-homepage
-tracking or redirect URL
-signed or expiring URL
-PDF or media document
-wrong country or retailer context
-obvious sibling product or variant
-```
-
-## Stage 5 — Static extraction
-
-Promising candidates are fetched for text and structured evidence. The system attempts to extract:
-
-```text
-page title and product name
-description
-brand and manufacturer
-specifications
+canonical name
 attributes
-EAN/GTIN
-price and availability signals
-image references
-page richness and scrapability
+assumptions
+negative constraints
+prior score
+posterior probability
+supporting evidence
+contradicting evidence
 ```
 
-Static extraction reduces browser cost and provides an initial evidence record.
+Multiple hypotheses remain active until evidence resolves the ambiguity.
 
-## Stage 6 — Rendered browser investigation
+## Stage 4 — Adaptive source search
 
-Eligible candidates are opened through the isolated browser service.
-
-The browser workflow can:
+Search is used to find evidence that distinguishes hypotheses.
 
 ```text
-open the page
-dismiss safe overlays
-expand product sections
-scroll for lazy content
-inspect product images
-capture screenshots
-stop when resolved, blocked or unproductive
+manufacturer sources
+→ requested retailer or same-country sources
+→ global product sources
 ```
 
-It cannot log in, enter credentials, purchase, submit forms or bypass access controls.
+Search queries target unresolved identity fields rather than simply collecting many URLs.
 
-## Stage 7 — Multimodal evidence reasoning
+## Stage 5 — Candidate normalization
 
-The system combines:
+Indirect, duplicate and obviously irrelevant sources are removed before expensive processing.
+
+## Stage 6 — Static extraction
+
+The system extracts text and structured facts such as product name, identifiers, specifications, brand, manufacturer, model, variant and pack.
+
+## Stage 7 — Rendered browser investigation
+
+The browser collects evidence unavailable through static requests:
 
 ```text
 rendered text
-structured page data
+expanded specifications
+lazy-loaded content
 screenshots
-product gallery images
-package front/back images
-visible warnings and diagrams
+product gallery
+package images
 ```
 
-Vision-derived evidence is linked to the exact visual asset that supported the conclusion.
+## Stage 8 — Multimodal evidence reasoning
 
-## Stage 8 — Exact-product verification
+Visual evidence is converted into explicit facts with asset provenance.
 
-The candidate is checked against the intended product across:
+```text
+extraction_method=vision_llm
+evidence_location=visual_asset:<asset_id>
+```
+
+## Stage 9 — Evidence ledger
+
+Every material fact is represented as atomic evidence.
+
+```text
+SUPPORTS
+CONTRADICTS
+NEUTRAL
+```
+
+Evidence includes source reliability, extraction confidence, affected hypotheses and hard-conflict status.
+
+## Stage 10 — Hypothesis comparison
+
+Posterior probabilities are updated using supporting and contradicting evidence.
+
+Decision diagnostics include:
+
+```text
+identity completeness
+ambiguity entropy
+assumption burden
+posterior margin
+evidence count
+hard conflicts
+```
+
+## Stage 11 — Exact-product verification
+
+The leading hypothesis is checked across:
 
 ```text
 EAN/GTIN
@@ -168,163 +170,167 @@ form
 size
 quantity
 pack
-country context
+market context
 ```
 
-A blocking conflict prevents acceptance even when the page appears otherwise plausible.
+Sibling products and wrong variants must remain rejected even when their pages are visually similar.
 
-## Stage 9 — Requested-feature verification
+## Stage 12 — Product identity resolution
 
-The active feature schema defines which facts must exist on the selected page.
-
-The strict default requires:
+Resolution states:
 
 ```text
-100% required-feature coverage
-100% critical-feature coverage
-no conflicting requested features
+EXACT
+PROBABLE
+AMBIGUOUS
+CONFLICTING
+INSUFFICIENT_EVIDENCE
 ```
 
-## Stage 10 — URL usability and durability
+The primary result is:
 
-The candidate must be:
+```text
+product_identification.resolution_status
+product_identification.leading_hypothesis
+product_identification.hypotheses
+product_identification.claims
+product_identification.uncertainties
+product_identification.evidence_ledger
+```
+
+## Stage 13 — Requested-feature assessment
+
+The active feature schema determines whether requested downstream facts are supported.
+
+Feature completeness is reported separately from product identity.
+
+## Stage 14 — Supporting source selection
+
+Qualified source pages may be selected for evidence reuse.
+
+```text
+manufacturer evidence
+retailer evidence
+global evidence
+```
+
+### Source-authority selection
+
+Authority ranks evidence sources after their relevance and usability are evaluated.
+
+### URL durability and usability
+
+URL checks describe the source:
 
 ```text
 browser-openable
-text-scrapable
-an individual product page
-direct and reusable
+text-accessible
+individual product page
 non-expiring
-not session-bound
+reusable
 ```
 
-A page that is exact but operationally unusable is not accepted as the final URL.
+A failed source check does not automatically invalidate an `EXACT` product identification.
 
-## Stage 11 — Source-authority selection
+## Stage 15 — Structured no-safe-URL outcome
 
-Only candidates that pass the production gates are compared by source authority.
-
-```text
-local official manufacturer
-global official manufacturer
-requested retailer in market
-requested retailer global
-major country retailer
-global exact-product source
-marketplace last resort
-```
-
-Manufacturer priority is conditional. Authority does not override incompleteness, mismatch or access failure.
-
-## Stage 12 — Terminal result
-
-### Accepted URL
+When no reusable direct source is available:
 
 ```text
-job_status=COMPLETED
-primary_url=<direct product page>
-url_delivery.delivered=true
-url_delivery.strictly_verified=true
-```
-
-### Review with URL
-
-```text
-job_status=REVIEW_REQUIRED
-primary_url=<real direct review URL>
-url_delivery.delivered=true
-url_delivery.strictly_verified=false
-```
-
-### No safe URL
-
-```text
-job_status=REVIEW_REQUIRED
-primary_url=null
 resolution_outcome.code=NO_SAFE_DIRECT_PRODUCT_URL_FOUND
-url_delivery.delivered=false
 ```
 
-### Technical failure
+This is a source-delivery result. It does not claim that the product identity is absent.
 
-```text
-job_status=FAILED
-```
+## Stage 16 — Decision audit sequence
 
-Technical failure is reserved for software, configuration, dependency or contract errors.
-
-## Decision audit sequence
-
-Every terminal business result exposes:
+Every terminal product result exposes:
 
 ```text
 observable evidence
-→ explicit business rule
-→ agent judgment
+→ explicit rule
+→ product judgment
 → next action
 ```
 
-This sequence is written to:
+This is written to:
 
 ```text
 data/artifacts/<row_id>/business_judgement_review.md
 ```
 
-The artifact supports human comparison of decision order, evidence use and final outcome without exposing hidden chain-of-thought.
-
 ## Runtime control flow
 
-The UI or API may submit approved per-job controls:
-
-```json
-{
-  "runtime_options": {
-    "serpapi_credits": 3,
-    "full_scrapes": 6,
-    "scrapes_per_domain": 2,
-    "planner_candidates": 8,
-    "agentic_candidates": 3,
-    "browser_turns_per_candidate": 4,
-    "browser_actions_per_candidate": 6,
-    "images_in_reasoning": 8
-  }
-}
-```
-
-These values are:
+Per-job controls are validated, context-local, concurrency-safe and persisted in `run_configuration.json`.
 
 ```text
-validated by the API
-stored in context-local state
-isolated across workers
-applied only to the submitted job
-persisted in run_configuration.json
+Latency Optimized
+Standard
+Coverage Optimized
 ```
 
-They do not modify shared environment variables or safety policies.
+Controls change evidence depth, not identity semantics.
 
-## Artifact flow
+## UI result hierarchy
 
 ```text
-run starts
-→ artifact directory created
-→ interpretation and search traces written
-→ browser and evidence records written
-→ acceptance and source decisions written
-→ final result rewritten with runtime configuration
-→ diagnostic exports generated when requested
+1. identified product
+2. resolution status and confidence
+3. resolved identity fields
+4. evidence basis
+5. alternative product hypotheses
+6. unresolved distinctions
+7. supporting source evidence
+8. audit and artifacts
 ```
 
-Primary artifact directory:
+Source-quality values are displayed as:
 
 ```text
-data/artifacts/<row_id>/
+VERIFIED
+NOT VERIFIED
+NOT ASSESSED
+```
+
+The UI must never use URL checks as the headline product verdict.
+
+## Terminal interpretation
+
+| Product resolution | Meaning |
+|---|---|
+| `EXACT` | Product identified |
+| `PROBABLE` | Leading product identified with residual uncertainty |
+| `AMBIGUOUS` | Multiple plausible products remain |
+| `CONFLICTING` | Evidence materially disagrees |
+| `INSUFFICIENT_EVIDENCE` | Product cannot be defensibly identified |
+
+Technical `FAILED` remains reserved for software, configuration, dependency or result-contract errors.
+
+## Primary artifacts
+
+```text
+product_belief.json
+product_understanding.md
+belief_updates.md
+evidence_ledger.jsonl
+business_judgement_review.md
+orchestrated_result.json
+```
+
+## Supporting source artifacts
+
+```text
+adaptive_search_trace.json
+candidate_url_records.json
+candidates.csv
+source_selection.json
+primary_url_acceptance.json
+mandatory_url_delivery.json
 ```
 
 ## Related documents
 
 - [Feature reference](FEATURE_REFERENCE.md)
-- [Product Evidence Platform UI](PRODUCT_EVIDENCE_UI.md)
+- [Product Identification Platform UI](PRODUCT_EVIDENCE_UI.md)
 - [Final system contract](FINAL_SYSTEM_CONTRACT.md)
 - [Business judgment review](BUSINESS_JUDGEMENT_REVIEW.md)
-- [Structured no-safe-URL outcome](STRUCTURED_NO_URL_OUTCOME.md)
