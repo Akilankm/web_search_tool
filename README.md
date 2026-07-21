@@ -1,96 +1,135 @@
-# Product Evidence Platform
+# Product Identification Platform
 
-A production-oriented, multimodal system for exact-product identification, evidence acquisition and governed product-page URL resolution.
+A production-oriented, multimodal system for identifying the exact product represented by incomplete vendor text.
 
-Given `MAIN_TEXT`, `COUNTRY_CODE`, and optional `RETAILER_NAME`, `EAN/GTIN`, and `LANGUAGE_CODE`, the platform identifies the intended product, evaluates direct product-page candidates, returns the strongest qualified URL when one can be safely established, and preserves an auditable sequence of evidence, rules, judgments and actions.
-
-## Core contract
+The platform does **not** treat a URL as the product result.
 
 ```text
-product interpretation
-→ manufacturer, market and global search
-→ candidate normalization
-→ static and rendered evidence acquisition
-→ text and visual feature resolution
-→ exact-product verification
-→ requested-feature verification
-→ URL durability verification
-→ source-authority selection
-→ final result and artifacts
+Primary result   = identified product
+Supporting result = evidence, source pages and artifacts
 ```
 
-The platform separates **product truth** from **commercial reference**:
+Given `MAIN_TEXT`, `COUNTRY_CODE`, and optional `RETAILER_NAME`, `EAN/GTIN`, and `LANGUAGE_CODE`, the platform:
 
-- an exact, complete and durable manufacturer page is preferred for product truth;
-- a qualified retailer page is retained for market, pack, price and availability context;
-- a retailer or global source may become `primary_url` when no manufacturer page passes every mandatory gate;
-- when no safe direct page is found within the bounded policy, the system returns `REVIEW_REQUIRED` and never fabricates a URL.
+1. interprets the product identity contained in the input;
+2. constructs competing product hypotheses;
+3. searches for text, structured and visual evidence;
+4. compares supporting and contradicting evidence;
+5. resolves the strongest defensible product identity;
+6. records uncertainty, alternatives and unresolved distinctions;
+7. retains URLs only as evidence locations.
 
-## Runtime contract
+## Core workflow
 
 ```text
-belief-url-resolution-v9-product-evidence-ui
+Input
+→ Interpret
+→ Discover evidence
+→ Compare product hypotheses
+→ Resolve product identity
+→ Validate evidence consistency
+→ Report identification and artifacts
 ```
 
-Required capabilities:
+## Primary outcome
+
+The primary result is `product_identification`.
 
 ```text
-manufacturer_first_primary_url=true
-business_judgement_review_artifact=true
-structured_no_url_review_outcome=true
-per_job_runtime_controls=true
+resolution_status
+leading_hypothesis
+canonical product name
+brand
+manufacturer
+model or series
+product form
+variant
+size
+quantity or pack
+posterior probability
+identity claims
+alternative hypotheses
+uncertainties
+unknowns
+evidence ledger
 ```
 
-## Product Evidence Platform UI
+### Resolution states
 
-Application:
+| Status | Meaning |
+|---|---|
+| `EXACT` | One product identity is resolved with sufficient evidence |
+| `PROBABLE` | One hypothesis leads but confirmation evidence remains incomplete |
+| `AMBIGUOUS` | Multiple plausible products remain |
+| `CONFLICTING` | Material evidence supports incompatible identities |
+| `INSUFFICIENT_EVIDENCE` | Evidence is not sufficient for a defensible identity |
+
+An `EXACT` product remains identified even when no source URL passes every page-usability check.
+
+## Supporting source evidence
+
+URLs are supporting evidence locations.
+
+```text
+primary_url
+manufacturer_url
+retailer_url
+source_selection
+primary_url_acceptance
+url_delivery
+```
+
+These fields describe where evidence was found and whether a source is reusable. They do not replace `product_identification`.
+
+Source-quality states in the UI are:
+
+```text
+VERIFIED
+NOT VERIFIED
+NOT ASSESSED
+```
+
+The UI never converts a missing source-quality field into a product `FAIL` verdict.
+
+## Browser application
 
 ```text
 apps/product_evidence_ui.py
 ```
 
-Start the agent and UI:
+Start the application:
 
 ```bash
-./scripts/azureml_startup.sh --clean-build
 bash scripts/run_product_evidence_ui.sh --install   # first use
 bash scripts/run_product_evidence_ui.sh             # subsequent use
 ```
 
-Forward port `8501` privately through the VS Code **Ports** panel.
+Forward port `8501` privately through the Azure ML VS Code **Ports** panel.
 
-The UI presents:
+The application presents:
 
 ```text
-runtime health
-product input
-per-job runtime controls
-seven-stage workflow
-live execution status
-strict acceptance gates
-source-selection decision
-business judgment sequence
-text and visual evidence
-artifact inventory and downloads
+identified product
+resolution status and confidence
+resolved identity attributes
+identity claims
+evidence ledger
+alternative product hypotheses
+unresolved distinctions
+supporting source evidence
+decision audit
+artifacts
 ```
 
-Execution profiles:
+## Execution profiles
 
 | Profile | Operating intent |
 |---|---|
 | `Latency Optimized` | Lower evidence-acquisition limits for lower elapsed time |
-| `Standard` | Default production operating limits |
+| `Standard` | Default production evidence limits |
 | `Coverage Optimized` | Broader candidate, browser and visual investigation |
 
-Profiles are convenience presets. Every submitted value remains independently adjustable, validated and recorded in `run_configuration.json`.
-
-## Supported notebooks
-
-| Notebook | Purpose | Agent required |
-|---|---|---:|
-| `notebooks/01_single_product.ipynb` | Execute and inspect one product-resolution run | Yes |
-| `notebooks/02_batch_products.ipynb` | Process a CSV with bounded product-level parallelism | Yes |
-| `notebooks/03_artifact_diagnostics.ipynb` | Explore an existing artifact through an interactive diagnostic workspace | No |
+Profiles change evidence depth. They do not change product-identity rules.
 
 ## Input contract
 
@@ -131,64 +170,52 @@ inputs/private/toy_features.json
 | Browser actions per candidate | 1–24 |
 | Visual assets per reasoning turn | 4–20 |
 
-Controls are context-local and concurrency-safe. They cannot change credentials, exact-product identity rules, requested-feature completeness, URL durability, source-authority policy or no-fabrication behavior.
+Controls are context-local and concurrency-safe.
 
-## Result schema
+## Supported notebooks
 
-Every `COMPLETED` or `REVIEW_REQUIRED` result contains:
-
-```text
-product_identification
-search.market_decision_path
-primary_url
-primary_url_role
-manufacturer_url
-retailer_url
-source_selection
-primary_url_acceptance
-url_delivery
-business_judgement_review
-run_configuration
-```
-
-A controlled no-safe-URL result additionally contains:
-
-```text
-resolution_outcome.code=NO_SAFE_DIRECT_PRODUCT_URL_FOUND
-url_delivery.status=NO_SAFE_DIRECT_PRODUCT_URL_FOUND_AFTER_BOUNDED_SEARCH
-```
-
-## Terminal outcomes
-
-| Outcome | Meaning |
-|---|---|
-| `COMPLETED` | A direct product page passed identity, feature, browser, scrapability, durability and authority gates |
-| `REVIEW_REQUIRED` with URL | A real direct reference was delivered but one or more judgments require confirmation |
-| `REVIEW_REQUIRED` without URL | No safe direct page was found within the bounded policy; trace preserved and no URL fabricated |
-| `FAILED` | Software, configuration, dependency or result-contract failure |
+| Notebook | Purpose | Agent required |
+|---|---|---:|
+| `notebooks/01_single_product.ipynb` | Execute and inspect one product-identification run | Yes |
+| `notebooks/02_batch_products.ipynb` | Process a CSV with bounded product-level parallelism | Yes |
+| `notebooks/03_artifact_diagnostics.ipynb` | Explore an existing product artifact | No |
 
 ## Product artifacts
 
 ```text
 data/artifacts/<row_id>/
-├── business_judgement_review.md
-├── run_configuration.json
 ├── product_belief.json
 ├── product_understanding.md
-├── market_decision_path.md
 ├── belief_updates.md
 ├── evidence_ledger.jsonl
 ├── adaptive_search_trace.json
 ├── candidate_url_records.json
 ├── candidates.csv
+├── business_judgement_review.md
+├── source_selection.json
 ├── primary_url_acceptance.json
 ├── mandatory_url_delivery.json
-├── source_selection.json
 ├── orchestrated_result.json
 └── single_product_diagnostics.xlsx
 ```
 
-No-safe-URL outcomes additionally include `no_url_resolution.json`.
+The product-belief and evidence artifacts are primary. URL artifacts are supporting diagnostics.
+
+## Runtime compatibility
+
+```text
+belief-url-resolution-v9-product-evidence-ui
+```
+
+The runtime name is retained for backward compatibility. The browser application and documentation use a product-identification-first result hierarchy.
+
+Required capabilities:
+
+```text
+business_judgement_review_artifact=true
+structured_no_url_review_outcome=true
+per_job_runtime_controls=true
+```
 
 ## Azure ML setup
 
@@ -199,6 +226,8 @@ cp .env.example .env
 # Add real SerpAPI and enterprise LLM values.
 ./scripts/azureml_startup.sh --clean-build
 ```
+
+For UI-only updates where the runtime contract is unchanged, pull the repository and restart Streamlit; a clean container rebuild is not required.
 
 ## Validation
 
@@ -211,13 +240,13 @@ PYTHONPATH=src pytest -q
 docker compose config --quiet
 ```
 
-CI validates Python 3.10 and 3.11, all notebooks, the UI, runtime-control isolation, Docker Compose, structured no-safe-URL behavior, exact-product selection and the complete regression suite.
+CI validates Python 3.10 and 3.11, notebooks, product-identification UI semantics, runtime-control isolation, Compose and the complete regression suite.
 
 ## Documentation
 
 - [Feature reference](docs/FEATURE_REFERENCE.md)
 - [System workflow](docs/SYSTEM_WORKFLOW.md)
-- [Product Evidence Platform UI](docs/PRODUCT_EVIDENCE_UI.md)
+- [Product Identification Platform UI](docs/PRODUCT_EVIDENCE_UI.md)
 - [Final system contract](docs/FINAL_SYSTEM_CONTRACT.md)
 - [Notebook usage](docs/NOTEBOOK_USAGE.md)
 - [Business judgment review](docs/BUSINESS_JUDGEMENT_REVIEW.md)
