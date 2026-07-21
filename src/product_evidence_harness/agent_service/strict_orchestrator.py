@@ -21,6 +21,7 @@ from src.product_evidence_harness.llm.agentic_browser import (
 )
 from src.product_evidence_harness.llm.feature_reasoner import LLMFeatureReasoner
 from src.product_evidence_harness.llm.service import LLMService
+from src.product_evidence_harness.numeric_safety import safe_int
 from src.product_evidence_harness.one_credit_pipeline import FeatureAwareHarnessResult, OneCreditConfig
 from src.product_evidence_harness.schema_io import load_feature_schema
 from src.product_evidence_harness.strict_acceptance import StrictPrimaryURLSelector
@@ -32,6 +33,16 @@ def _enabled(name: str, default: bool) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _runtime_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    return safe_int(
+        os.getenv(name),
+        default,
+        minimum=minimum,
+        maximum=maximum,
+        field_name=name,
+    )
 
 
 class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
@@ -65,15 +76,13 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
         llm_reasoner = None
         if _enabled("PRODUCT_HARNESS_ENABLE_LLM_FEATURE_REASONING", False):
             llm_reasoner = LLMFeatureReasoner.from_env(
-                max_calls=int(os.getenv("PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT", "2"))
+                max_calls=_runtime_int(
+                    "PRODUCT_HARNESS_LLM_MAX_CALLS_PER_PRODUCT", 2, 1, 20
+                )
             )
 
-        stage_scrape_top_k = max(
-            1,
-            min(
-                10,
-                int(os.getenv("PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE", "6")),
-            ),
+        stage_scrape_top_k = _runtime_int(
+            "PRODUCT_HARNESS_SCRAPE_TOP_K_PER_STAGE", 6, 1, 10
         )
         harness = ThreeStageProductEvidenceHarness(
             serp_config=SerpAPIConfig.from_env(
@@ -82,14 +91,12 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
             ),
             config=HarnessConfig.from_env(),
             one_credit=OneCreditConfig(
-                max_candidates=max(
-                    30,
-                    int(os.getenv("PRODUCT_HARNESS_MAX_CANDIDATE_POOL", "90")),
+                max_candidates=_runtime_int(
+                    "PRODUCT_HARNESS_MAX_CANDIDATE_POOL", 90, 30, 1000
                 ),
                 scrape_top_k=stage_scrape_top_k,
-                render_or_browser_top_k=max(
-                    3,
-                    int(os.getenv("PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", "18")),
+                render_or_browser_top_k=_runtime_int(
+                    "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", 18, 1, 90
                 ),
                 max_supplementary_urls=3,
             ),
@@ -198,8 +205,7 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
         strict_acceptance = StrictPrimaryURLSelector(
             reject_expiring_urls=_enabled("PRODUCT_HARNESS_REJECT_EXPIRING_URLS", True),
             require_all_features_on_primary=_enabled(
-                "PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY",
-                True,
+                "PRODUCT_HARNESS_REQUIRE_ALL_FEATURES_ON_PRIMARY", True
             ),
         ).select(
             schema=schema,
@@ -281,6 +287,9 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
         coding_ready = strict_acceptance.accepted
         status = "COMPLETED" if coding_ready else "REVIEW_REQUIRED"
         stage_trace = list(getattr(base.state, "search_stage_trace", []))
+        max_agentic_candidates = _runtime_int(
+            "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", 18, 1, 90
+        )
 
         emit("WRITING_OUTPUTS", "Writing the final agentic evidence dossier")
         result = {
@@ -307,9 +316,7 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
                 "candidate_investigations_failed": sum(
                     1 for item in candidate_investigations if item.get("status") == "FAILED"
                 ),
-                "max_candidates": int(
-                    os.getenv("PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", "18")
-                ),
+                "max_candidates": max_agentic_candidates,
                 "max_turns_per_candidate": agentic_config.max_turns_per_candidate,
                 "max_actions_per_candidate": agentic_config.max_actions_per_candidate,
                 "llm_controls_browser_actions": True,
@@ -335,12 +342,8 @@ class StrictProductEvidenceOrchestrator(ProductEvidenceOrchestrator):
         return result
 
     def _browser_urls(self, base: FeatureAwareHarnessResult) -> tuple[str, ...]:
-        limit = max(
-            3,
-            min(
-                90,
-                int(os.getenv("PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", "18")),
-            ),
+        limit = _runtime_int(
+            "PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES", 18, 1, 90
         )
         cards = list(base.state.scorecards)
         selected: list[str] = []

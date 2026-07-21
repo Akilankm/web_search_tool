@@ -108,11 +108,11 @@ resolution_outcome.code=NO_SAFE_DIRECT_PRODUCT_URL_FOUND
 url_delivery.delivered=false
 search credits used / selected limit
 suggested next actions
-judgment trace
+business judgment sequence
 artifact downloads
 ```
 
-The app continues to the same Decision, Search & budget, Evidence & images, Judgment trace and Artifacts tabs used by URL-backed outcomes.
+The app continues through the same **Decision flow**, **Business judgments**, **Evidence**, **Budget** and **Artifacts** views used by URL-backed outcomes.
 
 ## Notebook behavior
 

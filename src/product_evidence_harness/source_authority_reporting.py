@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 
+from src.product_evidence_harness.numeric_safety import safe_int
+
 
 def _marker(source_types: str, prefix: str) -> str:
     for item in str(source_types or "").split("|"):
@@ -14,7 +16,17 @@ def _marker(source_types: str, prefix: str) -> str:
 def _tier(source_types: str) -> tuple[int, str]:
     value = _marker(source_types, "source_tier_")
     match = re.match(r"(\d{2})_(.+)", value)
-    return (int(match.group(1)), match.group(2)) if match else (8, "UNKNOWN")
+    return (safe_int(match.group(1), 8), match.group(2)) if match else (8, "UNKNOWN")
+
+
+def _record_tier(record: dict) -> int:
+    return safe_int(
+        record.get("source_tier"),
+        8,
+        minimum=0,
+        maximum=99,
+        field_name="candidate.source_tier",
+    )
 
 
 def apply_source_authority_reporting_patch() -> None:
@@ -55,13 +67,14 @@ def apply_source_authority_reporting_patch() -> None:
             by_tier[tier].append(record)
 
         viable_tiers = {
-            int(record["source_tier"])
+            _record_tier(record)
             for record in records
             if record.get("scrape_accepted")
             and str(record.get("identity_status")) in {"VERIFIED", "PROBABLE"}
         }
         for record in records:
-            tier = int(record["source_tier"])
+            tier = _record_tier(record)
+            record["source_tier"] = tier
             record["higher_priority_tier_exhausted"] = not any(
                 stronger < tier for stronger in viable_tiers
             )
@@ -80,7 +93,7 @@ def apply_source_authority_reporting_patch() -> None:
             records,
             key=lambda item: (
                 bool(item.get("selected")),
-                -int(item.get("source_tier", 8)),
+                -_record_tier(item),
                 bool(item.get("scrape_accepted")),
                 float(item.get("confidence") or 0.0),
             ),

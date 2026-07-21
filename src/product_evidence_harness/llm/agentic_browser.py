@@ -17,6 +17,7 @@ from src.product_evidence_harness.browser_client import BrowserEvidenceClient, B
 from src.product_evidence_harness.browser_contracts import BrowserEvidenceBundle, BrowserEvidenceRequest
 from src.product_evidence_harness.feature_schema import FeatureSchema
 from src.product_evidence_harness.llm.service import LLMService
+from src.product_evidence_harness.numeric_safety import safe_int
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,27 +32,45 @@ class AgenticBrowserConfig:
     @classmethod
     def from_env(cls) -> "AgenticBrowserConfig":
         return cls(
-            max_turns_per_candidate=max(
-                1,
-                min(30, int(os.getenv("PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE", "10"))),
-            ),
-            max_actions_per_candidate=max(
-                1,
-                min(60, int(os.getenv("PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE", "20"))),
-            ),
-            max_observation_chars=max(
-                2_000,
-                min(30_000, int(os.getenv("PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS", "12000"))),
-            ),
-            max_elements_in_prompt=max(
+            max_turns_per_candidate=safe_int(
+                os.getenv("PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE"),
                 10,
-                min(100, int(os.getenv("PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS", "60"))),
+                minimum=1,
+                maximum=30,
+                field_name="PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE",
             ),
-            max_images_in_prompt=max(
-                4,
-                min(50, int(os.getenv("PRODUCT_HARNESS_AGENTIC_MAX_IMAGES", "30"))),
+            max_actions_per_candidate=safe_int(
+                os.getenv("PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE"),
+                20,
+                minimum=1,
+                maximum=60,
+                field_name="PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE",
             ),
-            image_detail=os.getenv("PRODUCT_HARNESS_AGENTIC_IMAGE_DETAIL", "high").strip() or "high",
+            max_observation_chars=safe_int(
+                os.getenv("PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS"),
+                12_000,
+                minimum=2_000,
+                maximum=30_000,
+                field_name="PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS",
+            ),
+            max_elements_in_prompt=safe_int(
+                os.getenv("PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS"),
+                60,
+                minimum=10,
+                maximum=100,
+                field_name="PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS",
+            ),
+            max_images_in_prompt=safe_int(
+                os.getenv("PRODUCT_HARNESS_AGENTIC_MAX_IMAGES"),
+                30,
+                minimum=4,
+                maximum=50,
+                field_name="PRODUCT_HARNESS_AGENTIC_MAX_IMAGES",
+            ),
+            image_detail=(
+                str(os.getenv("PRODUCT_HARNESS_AGENTIC_IMAGE_DETAIL") or "high").strip()
+                or "high"
+            ),
         )
 
 
