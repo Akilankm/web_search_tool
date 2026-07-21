@@ -1,8 +1,8 @@
 # Final Product Evidence System Contract
 
-This is the canonical end-to-end production contract.
+This document defines the canonical production contract.
 
-## Business objective
+## Objective
 
 Given:
 
@@ -16,12 +16,12 @@ optional LANGUAGE_CODE
 
 return one of two valid business outcomes:
 
-1. a defensible direct product-detail URL with manufacturer/retailer references and source decision; or
-2. an explicit structured no-safe-URL `REVIEW_REQUIRED` result when bounded search cannot safely deliver a direct product page.
+1. a defensible direct product-page URL with manufacturer and retailer references; or
+2. a structured `REVIEW_REQUIRED` result when bounded search cannot safely deliver a direct product page.
 
-Both outcomes must include a shareable `business_judgement_review.md`, a recorded run configuration and complete artifacts. The system must never fabricate a URL or convert search exhaustion into an unhandled software exception.
+Both outcomes must include `business_judgement_review.md`, `run_configuration.json` and the standard product artifacts. The system must never fabricate a URL or convert expected search exhaustion into an unhandled exception.
 
-## URL decision policy
+## URL acceptance policy
 
 ```text
 exact product, model, form, variant, size, quantity and pack
@@ -29,15 +29,26 @@ exact product, model, form, variant, size, quantity and pack
 → text scrapability and information richness
 → requested-feature completeness
 → durable non-expiring URL
-→ official manufacturer authority
-→ requested retailer / requested-country retailer
-→ global exact-product source
-→ marketplace last resort
+→ source-authority selection
 ```
 
-Manufacturer authority is conditional. A retailer or qualified global source becomes primary only when no manufacturer page passes every mandatory gate.
+Source authority is evaluated only after identity, browser, feature, scrapability and durability gates pass.
 
-## Search and evidence policy
+## Source-authority order
+
+```text
+local official manufacturer
+global official manufacturer
+requested retailer in market
+requested retailer global
+major country retailer
+global exact-product source
+marketplace last resort
+```
+
+Manufacturer priority is conditional. An incomplete, inaccessible or mismatched official page cannot override a qualified retailer page.
+
+## Search policy
 
 ```text
 manufacturer_primary
@@ -45,11 +56,24 @@ manufacturer_primary
 → global_fallback
 ```
 
-The standard policy is bounded to three SerpAPI credits. Search exhaustion without a safe direct page produces the structured no-safe-URL review outcome.
+The standard policy is bounded to three paid search credits. Search exhaustion without a safe direct page produces the structured no-safe-URL result.
 
-Evidence may include submitted identifiers, static/rendered page text, structured page data, browser screenshots, product/package images, source authority and URL durability.
+## Evidence policy
 
-Vision-derived evidence is explicit:
+Accepted evidence may include:
+
+```text
+submitted identifiers
+static page text
+rendered page text
+structured page data
+browser screenshots
+product and package images
+source authority
+URL durability
+```
+
+Vision-derived evidence must include:
 
 ```text
 extraction_method=vision_llm
@@ -96,7 +120,7 @@ url_delivery.delivered=false
 ## Runtime contract
 
 ```text
-belief-url-resolution-v8-leadership-demo
+belief-url-resolution-v9-product-evidence-ui
 ```
 
 Required capabilities:
@@ -106,39 +130,42 @@ belief_driven_product_resolution=true
 manufacturer_first_primary_url=true
 business_judgement_review_artifact=true
 structured_no_url_review_outcome=true
-leadership_demo_runtime_options=true
+per_job_runtime_controls=true
 mandatory_review_url_delivery=true
 deterministic_browser_fallback_on_llm_error=true
 notebook_self_healing_runtime=true
 compatibility_patches_applied=true
 ```
 
-## Leadership Streamlit contract
+## Product Evidence Platform UI contract
 
-The leadership surface is:
+The application is:
 
 ```text
-apps/leadership_demo.py
+apps/product_evidence_ui.py
 ```
 
 It must call the Product Evidence Agent API and must not implement independent search, browser, selection or artifact logic.
 
 It must expose:
 
-- runtime health and v8 contract;
-- product input and feature set;
-- live job stage;
-- final URL/source decision or structured no-safe-URL result;
-- strict gates;
-- requested and actual budget usage;
-- multimodal evidence impact;
-- candidate rejection evidence;
-- chronological business judgments;
-- artifact inventory and downloads.
+```text
+runtime health
+product input and feature set
+per-job runtime controls
+live workflow stage
+final URL or structured no-safe-URL result
+strict acceptance gates
+source-selection decision
+multimodal evidence impact
+candidate rejection evidence
+chronological business judgments
+artifact inventory and downloads
+```
 
-### Safe per-job budget boundary
+## Per-job runtime control boundary
 
-Only these bounded values may be overridden per job:
+Only these values may be overridden per job:
 
 ```text
 serpapi_credits:                 1–3
@@ -164,13 +191,11 @@ The UI must not expose credentials, mutate `.env`, restart shared containers or 
 The result validator accepts:
 
 - a direct URL when `url_delivery.delivered=true`; or
-- a blank URL only when the complete structured no-safe-URL review contract is present.
+- a blank URL only when the complete structured no-safe-URL contract is present.
 
 Any other blank or contradictory result is a hard `INCONSISTENT_URL_DELIVERY_RESULT` error. `COMPLETED` without a delivered direct URL is always invalid.
 
-## Supported notebook contract
-
-Exactly these notebooks are supported:
+## Supported notebooks
 
 ```text
 notebooks/01_single_product.ipynb
@@ -178,7 +203,7 @@ notebooks/02_batch_products.ipynb
 notebooks/03_artifact_diagnostics.ipynb
 ```
 
-The first two use the running agent. The diagnostic notebook operates offline from persisted artifacts. Streamlit is an additional presentation surface, not a fourth notebook or alternate runtime.
+The first two use the running agent. The diagnostic notebook operates offline from persisted artifacts. The browser application is an additional execution surface, not an alternate runtime.
 
 ## Product artifact contract
 
@@ -215,40 +240,39 @@ artifact_diagnostic_workbook.xlsx
 
 | Outcome | Contract |
 |---|---|
-| `COMPLETED` | A direct product URL passed every strict gate and artifacts were written |
-| `REVIEW_REQUIRED` with URL | A real direct review URL was delivered but human confirmation remains |
-| `REVIEW_REQUIRED` without URL | Bounded search found no safe direct page; trace and actions were preserved and no URL was fabricated |
-| `FAILED` | Genuine software, configuration, dependency or response-contract failure |
+| `COMPLETED` | A direct product page passed every strict gate and artifacts were written |
+| `REVIEW_REQUIRED` with URL | A real direct reference was delivered but confirmation remains |
+| `REVIEW_REQUIRED` without URL | No safe direct page was found within the bounded policy; trace preserved and no URL fabricated |
+| `FAILED` | Software, configuration, dependency or response-contract failure |
 
-`NO_SAFE_DIRECT_PRODUCT_URL_FOUND` states that no safe page was found within the configured bounded policy; it does not claim that no page exists anywhere on the internet.
+`NO_SAFE_DIRECT_PRODUCT_URL_FOUND` means that no safe page was found within the configured bounded policy. It does not claim that no page exists anywhere on the internet.
 
-## Operational acceptance
+## Release acceptance
 
 A release is acceptable only when CI validates on Python 3.10 and 3.11:
 
-- source and Streamlit compilation;
-- shell launchers;
-- all three notebook JSON files and code cells;
-- Docker Compose and Azure ML bootstrap;
-- runtime capabilities and result schema;
-- per-job option validation and concurrent isolation;
-- manufacturer-primary and controlled fallback behavior;
-- structured no-safe-URL service, notebook and UI behavior;
-- unstructured no-URL hard-failure behavior;
-- multimodal evidence reporting;
-- business judgment generation;
-- batch failure isolation;
-- interactive artifact diagnostics;
-- complete historical suite.
+```text
+source and UI compilation
+shell launchers
+all notebook JSON and code cells
+Docker Compose and Azure ML bootstrap
+runtime capabilities and result schema
+per-job control validation and concurrency isolation
+manufacturer-primary and controlled fallback behavior
+structured no-safe-URL behavior
+multimodal evidence reporting
+business judgment generation
+batch failure isolation
+interactive artifact diagnostics
+complete regression suite
+```
 
-## Leadership communication
+## Related documents
 
-See:
-
-- [Management and leadership demo guide](MANAGEMENT_DEMO_GUIDE.md)
-- [Leadership Streamlit demo](STREAMLIT_LEADERSHIP_DEMO.md)
+- [Feature reference](FEATURE_REFERENCE.md)
+- [System workflow](SYSTEM_WORKFLOW.md)
+- [Product Evidence Platform UI](PRODUCT_EVIDENCE_UI.md)
 - [Structured no-safe-URL outcome](STRUCTURED_NO_URL_OUTCOME.md)
-- [Interactive artifact diagnostics](INTERACTIVE_ARTIFACT_DIAGNOSTICS.md)
 - [Business judgment review](BUSINESS_JUDGEMENT_REVIEW.md)
 - [Notebook usage](NOTEBOOK_USAGE.md)
 - [Azure ML operations](AZUREML_OPERATIONS.md)
