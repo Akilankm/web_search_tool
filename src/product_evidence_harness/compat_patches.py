@@ -105,6 +105,7 @@ def apply_compatibility_patches() -> None:
     from src.product_evidence_harness.runtime_contract_runtime import apply_runtime_contract_patch
     from src.product_evidence_harness.business_judgement_runtime import apply_business_judgement_review_patch
     from src.product_evidence_harness.artifact_diagnostics_runtime import apply_artifact_diagnostics_runtime_patch
+    from src.product_evidence_harness.demo_runtime_options_runtime import apply_demo_runtime_options_patch
 
     apply_precision_search_patches()
     apply_precision_browser_patches()
@@ -154,6 +155,8 @@ def apply_compatibility_patches() -> None:
         "business_judgement_runtime": "src.product_evidence_harness.business_judgement_runtime",
         "artifact_diagnostics": "src.product_evidence_harness.artifact_diagnostics",
         "artifact_diagnostics_runtime": "src.product_evidence_harness.artifact_diagnostics_runtime",
+        "demo_runtime_options": "src.product_evidence_harness.demo_runtime_options",
+        "demo_runtime_options_runtime": "src.product_evidence_harness.demo_runtime_options_runtime",
     }
     for short_name, source_name in aliases.items():
         module = sys.modules.get(source_name)
@@ -174,3 +177,6 @@ def apply_compatibility_patches() -> None:
     apply_structured_no_url_outcome_patch()
     apply_runtime_contract_patch()
     apply_business_judgement_review_patch()
+    # The demo option wrapper must be outermost so every lower-level policy sees
+    # one immutable, context-local budget and the final result records it.
+    apply_demo_runtime_options_patch()
