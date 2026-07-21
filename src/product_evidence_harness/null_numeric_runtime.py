@@ -49,7 +49,8 @@ class _PlannerCounterProxy:
         if name == "_planner":
             object.__setattr__(self, name, value)
         elif name in {"calls", "fallbacks"}:
-            setattr(type(self), name).fset(self, value)
+            descriptor = getattr(type(self), name)
+            descriptor.fset(self, value)
         else:
             setattr(self._planner, name, value)
 
@@ -243,7 +244,7 @@ def _patch_serpapi_config() -> None:
     current_from_env = config.SerpAPIConfig.from_env.__func__
 
     @classmethod
-    def from_env(cls, **kwargs):
+    def from_env(cls, *args, **kwargs):
         overrides = dict(kwargs)
         if "organic_num_results" in overrides:
             overrides["organic_num_results"] = safe_int(
@@ -253,7 +254,7 @@ def _patch_serpapi_config() -> None:
                 maximum=100,
                 field_name="organic_num_results",
             )
-        return current_from_env(cls, **overrides)
+        return current_from_env(cls, *args, **overrides)
 
     config.SerpAPIConfig.from_env = from_env
 
