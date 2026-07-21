@@ -116,15 +116,23 @@ Ask them to classify:
 
 For no-safe-URL cases, explicitly ask:
 
-- Would the human also stop after the same three bounded search stages?
+- Would the human also stop after the same bounded search stages?
 - Did the agent miss a known manufacturer, retailer, identifier or query formulation?
 - Should the input be corrected, or should the search policy itself change?
 
 The reviewer records the first divergent step, human judgment, missing/overweighted evidence, image interpretation and preferred change.
 
-## Notebook surfaces
+## Review surfaces
 
-### Single product
+### Leadership Streamlit
+
+```text
+apps/leadership_demo.py
+```
+
+The **Judgment trace** tab displays the chronological records, while **Artifacts** allows the reviewer to preview and download `business_judgement_review.md`.
+
+### Single product notebook
 
 ```text
 notebooks/01_single_product.ipynb
@@ -157,7 +165,7 @@ artifact_diagnostic_workbook.xlsx
 ## Runtime contract
 
 ```text
-belief-url-resolution-v7-structured-no-url-review
+belief-url-resolution-v8-leadership-demo
 ```
 
 Required capabilities:
@@ -165,16 +173,19 @@ Required capabilities:
 ```text
 business_judgement_review_artifact=true
 structured_no_url_review_outcome=true
+leadership_demo_runtime_options=true
 ```
 
-Required result field:
+Required result fields:
 
 ```text
 business_judgement_review
+run_configuration
 ```
 
 ## Related contracts
 
+- [Leadership Streamlit demo](STREAMLIT_LEADERSHIP_DEMO.md)
 - [Structured no-safe-URL outcome](STRUCTURED_NO_URL_OUTCOME.md)
 - [Final system contract](FINAL_SYSTEM_CONTRACT.md)
 - [Notebook usage](NOTEBOOK_USAGE.md)
