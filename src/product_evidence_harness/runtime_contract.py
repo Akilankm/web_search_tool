@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-# Increment this whenever notebook/agent/bootstrap compatibility changes in a
-# way that requires rebuilding the Docker agent image.
-# Previous contract: belief-url-resolution-v8-leadership-demo
+# Increment this whenever notebook, agent, UI or bootstrap compatibility changes
+# in a way that requires rebuilding the Docker agent image.
 RUNTIME_CONTRACT_VERSION = "belief-url-resolution-v9-product-evidence-ui"
 
 REQUIRED_RUNTIME_CAPABILITIES = {
