@@ -32,7 +32,7 @@ jobs:
       - name: Validate shell launchers
         run: |
           bash -n scripts/azureml_startup.sh
-          bash -n scripts/run_leadership_demo.sh
+          bash -n scripts/run_product_evidence_ui.sh
 
       - name: Validate default toy feature schema
         run: python -m json.tool inputs/private/toy_features.json >/dev/null
@@ -80,9 +80,10 @@ jobs:
             tests/test_agent_entrypoint_runtime_contract.py \
             tests/test_agent_notebook_dependency_boundary.py \
             tests/test_structured_no_url_service_outcome.py \
-            tests/test_demo_runtime_options.py \
+            tests/test_runtime_controls.py \
             tests/test_numeric_safety.py \
-            tests/test_streamlit_leadership_demo.py \
+            tests/test_product_evidence_ui.py \
+            tests/test_feature_reference.py \
             tests/test_preflight_azureml.py \
             tests/test_serp_harvester.py \
             tests/test_adaptive_search.py \
@@ -95,7 +96,6 @@ jobs:
             tests/test_artifact_diagnostics.py \
             tests/test_artifact_diagnostics_route_hotfix.py \
             tests/test_interactive_artifact_diagnostics.py \
-            tests/test_management_demo_guide.py \
             tests/test_three_stage_production_contract.py \
             tests/test_belief_driven_resolution.py \
             tests/test_mandatory_product_url_policy.py \
