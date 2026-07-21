@@ -2,75 +2,128 @@
 
 ## Purpose
 
-The Streamlit application is a presentation surface for management and leadership calls. It does not replace the three supported notebooks and does not implement a second search workflow.
+The Streamlit application is the presentation surface for management and leadership calls. It calls the same Product Evidence Agent API as the notebooks; it does not implement a second search or decision workflow.
 
 ```text
 apps/leadership_demo.py
 → Product Evidence Agent API
-→ the same feature schema, search planner, browser workflow, strict URL gates and artifacts used by the notebooks
+→ feature schema + adaptive search + browser evidence + strict URL gates
+→ business judgment artifact
 ```
 
-The UI is deliberately business-first. It shows the platform's complete capability, the submitted input, live execution stage, per-job budget, final URL/source decision, visual evidence, strict gates, business judgment sequence and downloadable artifacts.
+The UI is intentionally concise. It centers the workflow, controllable budget, final decision and observable business judgments rather than narrating every internal component.
 
-## What the UI demonstrates
+## Flow shown in the UI
 
-- product identity interpretation from incomplete vendor text;
-- manufacturer-first product truth;
-- adaptive bounded multi-engine search;
-- local retailer, country and global fallbacks;
-- candidate preflight and full-page extraction;
-- rendered browser observe-plan-act investigation;
-- text, structured data, screenshots and product/package images;
-- exact product/model/form/variant/size/quantity/pack verification;
-- requested-feature completeness;
-- direct, durable and non-expiring URL enforcement;
-- manufacturer-versus-retailer source authority;
-- controlled no-safe-URL review outcomes;
-- human-comparable business judgment sequence;
-- product-level artifact governance.
+```text
+Input
+→ Interpret
+→ Search
+→ Investigate
+→ Verify
+→ Select
+→ Explain
+```
 
-## Safe per-job budget controls
+| Stage | Meaning |
+|---|---|
+| Input | Product text, country, optional retailer, EAN and language |
+| Interpret | Identity hypothesis and unresolved distinctions |
+| Search | Manufacturer, local-market and global routes |
+| Investigate | Full-page extraction, rendered browser and images |
+| Verify | Exact identity, requested features, scrapability and durability |
+| Select | Authority-aware manufacturer/retailer URL decision |
+| Explain | Human-comparable business judgment artifact |
 
-The sidebar exposes only bounded operational limits:
+During execution, the active stage is highlighted. After completion, the entire flow is shown as completed.
 
-| Control | Allowed range | Purpose |
-|---|---:|---|
-| SerpAPI search credits | 1–3 | Maximum paid search actions for one product |
-| Full page scrapes | 1–12 | Maximum candidate pages admitted for full extraction |
-| Scrapes per domain | 1–4 | Prevent one website consuming the evidence budget |
-| Planner candidate context | 3–20 | Candidate context supplied to the adaptive search planner |
-| Browser-investigated candidates | 1–8 | Candidate pages opened through the browser workflow |
-| Browser turns per candidate | 1–12 | Observe-plan-act reasoning turns |
-| Browser actions per candidate | 1–24 | Controlled clicks, expansions and evidence actions |
-| Images in visual reasoning | 4–20 | Images available to a browser reasoning turn |
+## Main result views
 
-Every option is submitted inside that job, stored under `run_configuration`, and persisted to:
+### Decision flow
+
+Shows the interpreted product, source decision, strict gates and the search-to-decision route.
+
+### Business judgments
+
+Shows the chronological sequence:
+
+```text
+observable evidence
+→ explicit business rule
+→ agent judgment
+→ next action
+```
+
+This is an auditable decision trace, not hidden chain-of-thought.
+
+### Evidence
+
+Shows visual assets, screenshots, image inspections, candidate feature coverage, conflicts and rejection reasons.
+
+### Budget
+
+Shows requested, effective and allowed per-job limits plus locked governance controls.
+
+### Artifacts
+
+Shows the generated product files and provides downloads for `business_judgement_review.md` and `orchestrated_result.json`.
+
+## Controllable per-job budget
+
+| Control | Allowed range |
+|---|---:|
+| SerpAPI search credits | 1–3 |
+| Full page scrapes | 1–12 |
+| Scrapes per domain | 1–4 |
+| Planner candidate context | 3–20 |
+| Browser-investigated candidates | 1–8 |
+| Browser turns per candidate | 1–12 |
+| Browser actions per candidate | 1–24 |
+| Images in visual reasoning | 4–20 |
+
+The UI cannot change credentials, exact-product identity gates, EAN conflict policy, requested-feature completeness, URL durability, manufacturer-first authority or no-fabrication behavior.
+
+Every job persists its effective settings to:
 
 ```text
 data/artifacts/<row_id>/run_configuration.json
 ```
 
-The app never edits `.env`, restarts shared containers, exposes credentials or allows the user to change:
+## Null numeric handling
 
-- exact-product identity gates;
-- EAN conflict policy;
-- requested-feature gates;
-- URL durability requirements;
-- manufacturer-first authority policy;
-- no-fabrication behavior.
+Older Streamlit sessions or external runtime payloads can contain a numeric key with a null value. Calling `int(None)` produces:
+
+```text
+TypeError: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'
+```
+
+The current implementation normalizes numeric values at every active boundary:
+
+```text
+Streamlit session state
+→ per-job runtime options
+→ strict orchestrator environment values
+→ browser-agent configuration
+→ source-authority ranking
+```
+
+Null, blank or malformed optional values fall back to the governed default and are clamped to the allowed range. Strict API validation still rejects unsupported user-supplied values before queueing.
+
+After pulling this fix, rebuild the agent/browser images so the running containers use the updated code.
 
 ## Azure ML VS Code setup
-
-Open the repository on the Azure Machine Learning compute instance through **VS Code for the Web** or **VS Code Desktop**.
-
-From the repository terminal:
 
 ```bash
 git checkout master
 git pull origin master
-cp .env.example .env
-# Add the real SerpAPI and enterprise LLM values only when .env is new.
 ./scripts/azureml_startup.sh --clean-build
+bash scripts/run_leadership_demo.sh --install   # first use
+```
+
+Later launches:
+
+```bash
+bash scripts/run_leadership_demo.sh
 ```
 
 Runtime health must report:
@@ -83,56 +136,34 @@ manufacturer_first_primary_url=true
 business_judgement_review_artifact=true
 ```
 
-Install the small host-side demo dependency set once:
-
-```bash
-bash scripts/run_leadership_demo.sh --install
-```
-
-Subsequent launches:
-
-```bash
-bash scripts/run_leadership_demo.sh
-```
-
-Default ports:
-
-```text
-Product Evidence Agent API: 8788
-Leadership Streamlit UI:    8501
-```
-
-## Open the UI from Azure ML VS Code
+## Open the UI in Azure ML VS Code
 
 1. Keep the Streamlit terminal running.
 2. Open the VS Code **Ports** panel.
-3. Forward remote port `8501`.
-4. Keep the port visibility **Private**.
-5. Select the forwarded address or the browser icon.
+3. Forward port `8501`.
+4. Keep visibility **Private**.
+5. Open the forwarded address.
 
-The app binds to `0.0.0.0:8501` inside the compute instance, while VS Code provides the authenticated browser route. Do not make the port public when real product or enterprise evidence is displayed.
-
-## Alternate port
+Alternate port:
 
 ```bash
 bash scripts/run_leadership_demo.sh --port 8502
 ```
 
-Then forward port `8502` in VS Code.
+## Demo sequence
 
-## Demo flow
+1. Show runtime readiness and the seven-stage workflow.
+2. Select a run-budget profile in the sidebar.
+3. Enter one incomplete product description and country code.
+4. Run and narrate the highlighted stage transitions.
+5. Show the final URL role and strict gate outcomes.
+6. Open **Decision flow** to explain search and source selection.
+7. Open **Business judgments** to show the chronological evidence/rule/judgment/action sequence.
+8. Open **Evidence** to show candidate and visual evidence.
+9. Open **Budget** to compare requested and effective limits.
+10. Open **Artifacts** to download the review document.
 
-1. Show the runtime status and v8 contract in the sidebar.
-2. Explain that the budget controls are isolated to one job and cannot weaken safety gates.
-3. Paste one incomplete product description and market code.
-4. Run the workflow and narrate the live stages.
-5. Open **Decision** and show the URL role, source policy and strict acceptance gates.
-6. Open **Search & budget** and compare requested limits with actual credits/candidates consumed.
-7. Open **Evidence & images** and show multimodal evidence impact and candidate rejection reasons.
-8. Open **Judgment trace** and show the chronological evidence → rule → judgment → next-action sequence.
-9. Open **Artifacts** and download the human review Markdown or complete result JSON.
-
-## Terminal outcomes
+## Outcomes
 
 ### Strict success
 
@@ -161,16 +192,14 @@ resolution_outcome.code=NO_SAFE_DIRECT_PRODUCT_URL_FOUND
 url_delivery.delivered=false
 ```
 
-The third state is displayed as an amber business review outcome, not a red software failure. The complete search trace and recommended next actions remain available.
-
 ### Genuine failure
 
-Configuration, dependency, runtime and response-contract errors remain red `FAILED` outcomes. The application presents a clean management-facing message and keeps technical detail inside an expandable section.
+Configuration, dependency, stale-runtime and response-contract defects remain red `FAILED` outcomes. Technical detail is kept inside an expandable section and no result is fabricated.
 
 ## Operational notes
 
 - Use a new `row_id` for every execution.
-- The Streamlit application and notebooks can coexist because they submit jobs to the same API.
-- Per-job budgets use context-local state and do not leak across concurrent agent workers.
-- The current job store is in memory; restarting the agent removes job-status history, while persisted product artifacts remain on disk.
-- Streamlit is a demo surface. Notebook and batch outputs remain the analytical and submission workflows.
+- Pull `master` and perform a clean rebuild after runtime code changes.
+- Browser refresh alone does not update the agent container.
+- The current job store is in memory; product artifacts remain on disk.
+- Streamlit is the demo surface; notebooks remain the analytical and batch workflows.
