@@ -1,7 +1,7 @@
 [project]
 name = "product-evidence-platform"
-version = "0.7.0"
-description = "Azure ML product evidence platform with governed URL resolution, multimodal browser investigation, notebooks, and a leadership Streamlit demo"
+version = "0.8.0"
+description = "Azure ML product evidence platform with exact-product resolution, multimodal browser investigation, auditable decisions, notebooks, and a browser application"
 requires-python = ">=3.10,<3.12"
 dependencies = [
     "requests>=2.32.0,<3",
