@@ -82,6 +82,7 @@ jobs:
             tests/test_structured_no_url_service_outcome.py \
             tests/test_runtime_controls.py \
             tests/test_numeric_safety.py \
+            tests/test_null_numeric_runtime_boundaries.py \
             tests/test_product_evidence_ui.py \
             tests/test_feature_reference.py \
             tests/test_preflight_azureml.py \
