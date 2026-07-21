@@ -159,7 +159,7 @@ def test_create_job_normalizes_valid_demo_budget_before_queueing(
         "agentic_candidates": 2,
     }
     assert submitted
-    record = store.get("ROW-BUDGET-VALID")
+    record = store.get(response["job_id"])
     assert record.payload["runtime_options"]["serpapi_credits"] == 2
 
 
