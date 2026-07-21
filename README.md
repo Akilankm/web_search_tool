@@ -2,7 +2,7 @@
 
 A production-oriented, multimodal product-identification and URL-resolution system for incomplete vendor product text.
 
-> Given `MAIN_TEXT`, `COUNTRY_CODE`, and optional `RETAILER_NAME`, `EAN/GTIN`, and `LANGUAGE_CODE`, identify the exact product, return the strongest defensible direct product URL when one can be safely found, preserve manufacturer and retailer references, and expose the observable business judgments that produced the result.
+> Given `MAIN_TEXT`, `COUNTRY_CODE`, and optional `RETAILER_NAME`, `EAN/GTIN`, and `LANGUAGE_CODE`, identify the intended product, return the strongest defensible direct product URL when one can be safely found, preserve manufacturer and retailer references, and expose the observable business judgments that produced the result.
 
 ## Core business contract
 
@@ -10,7 +10,7 @@ The system separates **product truth** from **commercial reference**:
 
 - an exact, complete and durable official manufacturer page is preferred for product truth;
 - a qualified retailer page is retained for local pack, language, price, availability and purchase context;
-- a retailer becomes `primary_url` when no official manufacturer page passes every mandatory production gate;
+- a retailer or qualified global page becomes `primary_url` when no official manufacturer page passes every mandatory production gate;
 - when bounded search produces no safe direct product page, the system returns an explicit `REVIEW_REQUIRED` result and never fabricates a URL.
 
 ```text
@@ -27,21 +27,10 @@ exact product, model, form, variant, size, quantity and pack
 
 Source authority never bypasses identity, browser, feature, scrapability or durability safety.
 
-## Three-credit search route
-
-```text
-Credit 1: manufacturer_primary
-Credit 2: requested_retailer_country when retailer_name is supplied
-          otherwise country_alternative
-Credit 3: global_fallback
-```
-
-A retailer found during credit 1 is retained but cannot stop the search before the official manufacturer opportunity is evaluated.
-
 ## Runtime contract
 
 ```text
-belief-url-resolution-v7-structured-no-url-review
+belief-url-resolution-v8-leadership-demo
 ```
 
 Required health capabilities include:
@@ -50,11 +39,74 @@ Required health capabilities include:
 manufacturer_first_primary_url=true
 business_judgement_review_artifact=true
 structured_no_url_review_outcome=true
+leadership_demo_runtime_options=true
 ```
 
-The single and batch notebooks validate this contract before any paid search.
+## Leadership Streamlit demo
+
+For management and leadership calls, use:
+
+```text
+apps/leadership_demo.py
+```
+
+The Streamlit surface calls the same Product Evidence Agent API used by the notebooks. It does not duplicate search, browser, validation or artifact logic.
+
+It shows:
+
+- complete platform capabilities;
+- runtime and browser health;
+- product input and feature set;
+- safe per-job budget controls;
+- live execution stage;
+- final URL, source role, manufacturer and retailer references;
+- strict production gates;
+- requested budget versus actual usage;
+- text, screenshot and image evidence;
+- candidate rejection reasons;
+- chronological business judgment sequence;
+- product artifacts and downloads.
+
+First use in Azure ML VS Code:
+
+```bash
+./scripts/azureml_startup.sh --clean-build
+bash scripts/run_leadership_demo.sh --install
+```
+
+Later launches:
+
+```bash
+bash scripts/run_leadership_demo.sh
+```
+
+Forward port `8501` privately through the VS Code **Ports** panel. See [Leadership Streamlit demo](docs/STREAMLIT_LEADERSHIP_DEMO.md).
+
+### Safe per-job budget controls
+
+The demo can vary only bounded operational limits:
+
+```text
+SerpAPI search credits
+full page scrapes
+scrapes per domain
+planner candidate context
+browser-investigated candidates
+browser turns and actions
+images available to visual reasoning
+```
+
+Every selected value is isolated to one job and persisted in:
+
+```text
+data/artifacts/<row_id>/run_configuration.json
+```
+
+The UI cannot expose credentials, edit `.env`, restart shared containers or weaken exact-product identity, requested-feature, URL-durability, manufacturer-first or no-fabrication policies.
 
 ## Three supported notebooks
+
+The notebooks remain the primary analytical and batch workflows.
 
 | Notebook | Purpose | Requires agent? |
 |---|---|---:|
@@ -69,7 +121,6 @@ one product input
 → final_decision_df
 → business_judgement_steps_df
 → visual_evidence_summary_df
-→ chronological decision timeline
 → candidate and feature evidence
 → single_product_diagnostics.xlsx
 ```
@@ -78,14 +129,6 @@ The primary human-review file is:
 
 ```text
 data/artifacts/<row_id>/business_judgement_review.md
-```
-
-If no safe direct URL is found, the notebook continues normally and displays:
-
-```text
-job_status=REVIEW_REQUIRED
-resolution_outcome.code=NO_SAFE_DIRECT_PRODUCT_URL_FOUND
-url_delivery.delivered=false
 ```
 
 ### Parallel batch
@@ -97,7 +140,7 @@ main_text
 country_code
 ```
 
-Optional columns:
+Optional:
 
 ```text
 row_id
@@ -133,7 +176,7 @@ The diagnostics notebook accepts an artifact directory or any file inside it and
 data/artifacts/<row_id>/artifact_diagnostics_interactive.html
 ```
 
-The self-contained offline dashboard contains:
+The offline workspace contains:
 
 ```text
 Decision Map
@@ -143,14 +186,7 @@ Evidence
 Artifacts
 ```
 
-It supports hover detail, pan/zoom, legend isolation, outcome filtering and click-to-zoom evidence/artifact hierarchies. It visualizes recorded evidence, rules, judgments and actions—not hidden chain-of-thought.
-
-Secondary exports remain available:
-
-```text
-artifact_diagnostic_report.md
-artifact_diagnostic_workbook.xlsx
-```
+It visualizes recorded evidence, rules, judgments and actions—not hidden chain-of-thought.
 
 ## Human-comparable business judgment artifact
 
@@ -209,11 +245,10 @@ source_selection
 primary_url_acceptance
 url_delivery
 business_judgement_review
+run_configuration
 ```
 
-`manufacturer_url` and `retailer_url` are stable keys and may be `null`.
-
-A no-safe-URL review result additionally contains:
+A no-safe-URL result additionally contains:
 
 ```text
 resolution_outcome.code=NO_SAFE_DIRECT_PRODUCT_URL_FOUND
@@ -229,13 +264,14 @@ url_delivery.status=NO_SAFE_DIRECT_PRODUCT_URL_FOUND_AFTER_BOUNDED_SEARCH
 | `REVIEW_REQUIRED` without URL | Bounded search found no safe direct page; full trace and next actions are preserved and no URL is fabricated |
 | `FAILED` | Genuine software, configuration, dependency or response-contract failure |
 
-The system never reports `COMPLETED` with an empty URL. A blank URL is valid only under the explicit structured no-safe-URL review contract.
+The system never reports `COMPLETED` with an empty URL.
 
 ## Product artifact contract
 
 ```text
 data/artifacts/<row_id>/
 ├── business_judgement_review.md
+├── run_configuration.json
 ├── product_belief.json
 ├── product_understanding.md
 ├── market_decision_path.md
@@ -251,19 +287,7 @@ data/artifacts/<row_id>/
 └── single_product_diagnostics.xlsx
 ```
 
-No-safe-URL outcomes additionally include:
-
-```text
-no_url_resolution.json
-```
-
-Diagnostics may add:
-
-```text
-artifact_diagnostics_interactive.html
-artifact_diagnostic_report.md
-artifact_diagnostic_workbook.xlsx
-```
+No-safe-URL outcomes additionally include `no_url_resolution.json`.
 
 ## Azure ML setup
 
@@ -281,50 +305,27 @@ The committed feature schema is:
 inputs/private/toy_features.json
 ```
 
-## Important controls
-
-```env
-PRODUCT_HARNESS_MAX_SERPAPI_CREDITS=3
-PRODUCT_HARNESS_MAX_FULL_SCRAPES=6
-PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES=3
-PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER=true
-PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER=true
-PRODUCT_HARNESS_ENABLE_VISION_REASONING=true
-PRODUCT_HARNESS_ALLOW_DETERMINISTIC_BROWSER_FALLBACK_ON_LLM_ERROR=true
-PRODUCT_HARNESS_ALLOW_EAN_CONFLICT=false
-PRODUCT_HARNESS_REJECT_EXPIRING_URLS=true
-AGENT_WORKERS=2
-BROWSER_MAX_CONTEXTS=3
-```
-
-Configured ceilings are safety controls, not guaranteed usage or a latency SLA.
-
 ## Validation
 
 ```bash
 bash -n scripts/azureml_startup.sh
-python -m compileall -q src scripts
+bash -n scripts/run_leadership_demo.sh
+python -m compileall -q src scripts apps
 python -m json.tool inputs/private/toy_features.json >/dev/null
 PYTHONPATH=src pytest -q
 docker compose config --quiet
 ```
 
-CI validates all three notebook JSON documents and every code cell on Python 3.10 and 3.11.
+CI validates the agent, all three notebooks, Streamlit contract, per-job budget isolation and the complete historical suite on Python 3.10 and 3.11.
 
 ## Documentation
 
 - [Management and leadership demo guide](docs/MANAGEMENT_DEMO_GUIDE.md)
+- [Leadership Streamlit demo](docs/STREAMLIT_LEADERSHIP_DEMO.md)
 - [Structured no-safe-URL outcome](docs/STRUCTURED_NO_URL_OUTCOME.md)
 - [Interactive artifact diagnostics](docs/INTERACTIVE_ARTIFACT_DIAGNOSTICS.md)
 - [Final system contract](docs/FINAL_SYSTEM_CONTRACT.md)
 - [Notebook usage](docs/NOTEBOOK_USAGE.md)
 - [Business judgment review](docs/BUSINESS_JUDGEMENT_REVIEW.md)
 - [Azure ML operations](docs/AZUREML_OPERATIONS.md)
-- [Manufacturer-first source authority](docs/SOURCE_AUTHORITY_HIERARCHY.md)
-- [Belief-driven product resolution](docs/BELIEF_DRIVEN_PRODUCT_RESOLUTION.md)
-- [Adaptive SerpAPI search](docs/ADAPTIVE_SERPAPI_SEARCH.md)
-- [Candidate precision and context control](docs/CANDIDATE_PRECISION_AND_CONTEXT.md)
-- [Mandatory product URL delivery](docs/MANDATORY_PRODUCT_URL.md)
-- [Agentic browser](docs/AGENTIC_BROWSER.md)
-- [Enterprise LLM configuration](docs/ENTERPRISE_LLM_CONFIGURATION.md)
 - [Security contract](docs/SECURITY.md)
