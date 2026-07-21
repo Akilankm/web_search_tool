@@ -4,6 +4,9 @@ import ast
 import subprocess
 from pathlib import Path
 
+import requests
+from streamlit.testing.v1 import AppTest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "apps" / "leadership_demo.py"
@@ -52,6 +55,27 @@ def test_streamlit_app_is_parseable_and_exposes_full_demo_contract() -> None:
     )
     for token in forbidden_tokens:
         assert token not in source
+
+
+def test_streamlit_app_loads_cleanly_when_agent_is_unavailable(monkeypatch) -> None:
+    def unavailable(*args, **kwargs):
+        raise requests.ConnectionError("agent unavailable for UI smoke test")
+
+    monkeypatch.setattr(requests, "request", unavailable)
+    app = AppTest.from_file(str(APP), default_timeout=30)
+    app.run()
+
+    assert app.exception == []
+    rendered = "\n".join(
+        str(item.value)
+        for collection in (app.markdown, app.info, app.error, app.caption)
+        for item in collection
+    )
+    assert "Product Evidence Intelligence" in rendered
+    assert "Full platform capability" in rendered
+    assert "Agent unavailable" in rendered
+    assert app.button
+    assert any(button.disabled for button in app.button)
 
 
 def test_streamlit_launcher_is_valid_shell_and_uses_private_host_workflow() -> None:
