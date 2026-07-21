@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import importlib
 import json
+import sys
 from types import SimpleNamespace
 
 from src.product_evidence_harness.browser_contracts import (
@@ -117,7 +119,11 @@ def test_llm_config_normalizes_null_optional_numeric_fields() -> None:
 
 
 def test_agent_failure_writes_traceback_artifact(monkeypatch, tmp_path) -> None:
-    from src.product_evidence_harness.agent_service import app as agent_app
+    monkeypatch.setenv("ARTIFACT_ROOT", str(tmp_path))
+    monkeypatch.setenv("PRIVATE_FEATURE_ROOT", str(tmp_path / "private"))
+    monkeypatch.setenv("PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE", "false")
+    sys.modules.pop("src.product_evidence_harness.agent_service.app", None)
+    agent_app = importlib.import_module("src.product_evidence_harness.agent_service.app")
 
     monkeypatch.setattr(
         agent_app,
