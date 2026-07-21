@@ -14,7 +14,7 @@ notebooks/03_artifact_diagnostics.ipynb
 | Process a CSV with bounded parallel execution | `02_batch_products.ipynb` | Yes |
 | Explore an existing product artifact interactively | `03_artifact_diagnostics.ipynb` | No |
 
-For management and leadership calls, use `apps/leadership_demo.py`; it is a presentation surface over the same agent API, not a fourth notebook or alternate workflow.
+For browser-based single-product execution, use `apps/product_evidence_ui.py`. It calls the same agent API and does not implement an alternate workflow.
 
 ## Runtime setup
 
@@ -29,7 +29,7 @@ cp .env.example .env
 Current runtime:
 
 ```text
-belief-url-resolution-v8-leadership-demo
+belief-url-resolution-v9-product-evidence-ui
 ```
 
 Required capabilities:
@@ -38,14 +38,14 @@ Required capabilities:
 manufacturer_first_primary_url=true
 business_judgement_review_artifact=true
 structured_no_url_review_outcome=true
-leadership_demo_runtime_options=true
+per_job_runtime_controls=true
 ```
 
-The single and batch notebooks verify readiness before paid search. The diagnostic notebook works offline.
+The single-product and batch notebooks verify readiness before paid search. The diagnostic notebook operates offline.
 
 ---
 
-# 1. Single product notebook
+# 1. Single-product notebook
 
 ```text
 notebooks/01_single_product.ipynb
@@ -71,16 +71,13 @@ product = {
 Processing route:
 
 ```text
-input interpretation
-→ uncertainty definition
-→ manufacturer_primary
-→ requested_retailer_country or country_alternative
-→ global_fallback
-→ candidate scraping and rendered browser investigation
+product interpretation
+→ manufacturer, market and global search
+→ candidate extraction and browser investigation
 → text and visual feature evidence
-→ strict identity, browser, scrapability, feature and durability gates
-→ manufacturer-first source authority
-→ direct URL or structured no-safe-URL review outcome
+→ identity, feature and durability verification
+→ source-authority selection
+→ direct URL or structured no-safe-URL result
 → business_judgement_review.md
 ```
 
@@ -92,7 +89,7 @@ Workbook:
 data/artifacts/<row_id>/single_product_diagnostics.xlsx
 ```
 
-A no-safe-URL result remains `REVIEW_REQUIRED`, shows `NO_SAFE_DIRECT_PRODUCT_URL_FOUND`, and continues into diagnostics without a traceback.
+A no-safe-URL result remains `REVIEW_REQUIRED` and continues into diagnostics without a traceback.
 
 ---
 
@@ -118,7 +115,7 @@ retailer_name
 language_code
 ```
 
-The loader rejects missing/blank mandatory fields, duplicate row IDs and empty files before paid search. Product parallelism is bounded by agent workers and browser contexts.
+The loader rejects missing or blank mandatory fields, duplicate row IDs and empty files before paid search. Product parallelism is bounded by agent workers and browser contexts.
 
 Outputs:
 
@@ -131,11 +128,11 @@ data/batch_runs/<run_id>/
 └── batch_run_summary.json
 ```
 
-`batch_run_summary.json` includes status counts, throughput, mean latency, p50, p95 and total SerpAPI credits. Each row preserves its own product artifact. Structured no-safe-URL rows remain `REVIEW_REQUIRED`; genuine technical errors alone appear in `batch_failures.csv`.
+`batch_run_summary.json` includes status counts, throughput, mean latency, p50, p95 and total search credits. Each row preserves its own product artifact. Structured no-safe-URL rows remain `REVIEW_REQUIRED`; only technical failures appear in `batch_failures.csv`.
 
 ---
 
-# 3. Interactive artifact diagnostics notebook
+# 3. Artifact diagnostics notebook
 
 ```text
 notebooks/03_artifact_diagnostics.ipynb
@@ -153,14 +150,14 @@ It reconstructs:
 ```text
 submitted input
 → product identity and uncertainty
-→ manufacturer/local/global search route
+→ source-search route
 → candidate discovery and rejection
-→ rendered browser actions
+→ browser actions
 → text and image evidence
 → requested-feature coverage
 → strict URL gates
-→ manufacturer-versus-retailer selection
-→ final URL or controlled no-safe-URL outcome
+→ source selection
+→ final URL or controlled no-safe-URL result
 ```
 
 Interactive workspace:
@@ -206,8 +203,12 @@ Terminal outcomes:
 | Outcome | Meaning |
 |---|---|
 | `COMPLETED` | Strict URL gates passed |
-| `REVIEW_REQUIRED` with URL | Real direct reference delivered; human confirmation remains |
+| `REVIEW_REQUIRED` with URL | Real direct reference delivered; confirmation remains |
 | `REVIEW_REQUIRED` without URL | No safe direct page found within the bounded policy; trace preserved and no URL fabricated |
-| `FAILED` | Genuine runtime, configuration, dependency or result-contract failure |
+| `FAILED` | Runtime, configuration, dependency or result-contract failure |
 
-The first divergent human judgment becomes a precise development requirement.
+## Related documents
+
+- [Feature reference](FEATURE_REFERENCE.md)
+- [System workflow](SYSTEM_WORKFLOW.md)
+- [Product Evidence Platform UI](PRODUCT_EVIDENCE_UI.md)
