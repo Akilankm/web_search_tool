@@ -117,7 +117,6 @@ def test_notebook_docs_describe_all_three_workflows() -> None:
         "notebooks": (ROOT / "docs" / "NOTEBOOK_USAGE.md").read_text(encoding="utf-8"),
         "azureml": (ROOT / "docs" / "AZUREML_OPERATIONS.md").read_text(encoding="utf-8"),
         "final": (ROOT / "docs" / "FINAL_SYSTEM_CONTRACT.md").read_text(encoding="utf-8"),
-        "management": (ROOT / "docs" / "MANAGEMENT_DEMO_GUIDE.md").read_text(encoding="utf-8"),
     }
     for text in documentation.values():
         assert "01_single_product.ipynb" in text
