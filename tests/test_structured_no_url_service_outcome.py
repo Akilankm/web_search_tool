@@ -3,6 +3,10 @@ from __future__ import annotations
 import importlib
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from fastapi import HTTPException
 
 from src.product_evidence_harness.agent_service.jobs import InMemoryJobStore, JobStatus
 from src.product_evidence_harness.business_judgement_artifact import (
@@ -96,6 +100,67 @@ def test_agent_job_preserves_no_url_result_as_review_required(
     assert finished.result["resolution_outcome"]["code"] == NO_URL_OUTCOME_CODE
     assert finished.result["url_delivery"]["delivered"] is False
     assert validate_result_contract(finished.result) is finished.result
+
+
+def test_create_job_rejects_invalid_demo_budget_before_queueing(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    agent_app = _load_isolated_agent_app(monkeypatch, tmp_path)
+    submitted: list[tuple] = []
+    monkeypatch.setattr(agent_app, "store", InMemoryJobStore())
+    monkeypatch.setattr(agent_app, "executor", SimpleNamespace(submit=lambda *args: submitted.append(args)))
+    monkeypatch.setattr(agent_app, "_validate_runtime", lambda: ({}, None))
+
+    payload = {
+        "product": {
+            "row_id": "ROW-BUDGET",
+            "main_text": "Example product",
+            "country_code": "GB",
+        },
+        "feature_set": "toy_features",
+        "runtime_options": {"serpapi_credits": 4},
+    }
+    with pytest.raises(HTTPException) as exc:
+        agent_app.create_job(payload)
+    assert exc.value.status_code == 422
+    assert "between 1 and 3" in str(exc.value.detail)
+    assert submitted == []
+
+
+def test_create_job_normalizes_valid_demo_budget_before_queueing(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    agent_app = _load_isolated_agent_app(monkeypatch, tmp_path)
+    submitted: list[tuple] = []
+    store = InMemoryJobStore()
+    monkeypatch.setattr(agent_app, "store", store)
+    monkeypatch.setattr(agent_app, "executor", SimpleNamespace(submit=lambda *args: submitted.append(args)))
+    monkeypatch.setattr(agent_app, "_validate_runtime", lambda: ({}, None))
+
+    response = agent_app.create_job(
+        {
+            "product": {
+                "row_id": "ROW-BUDGET-VALID",
+                "main_text": "Example product",
+                "country_code": "GB",
+            },
+            "feature_set": "toy_features",
+            "runtime_options": {
+                "serpapi_credits": "2",
+                "agentic_candidates": 2,
+            },
+        }
+    )
+    assert response["status"] == "QUEUED"
+    assert response["runtime_options"] == {
+        "serpapi_credits": 2,
+        "agentic_candidates": 2,
+    }
+    assert submitted
+    record = store.get("ROW-BUDGET-VALID")
+    assert record.payload["runtime_options"]["serpapi_credits"] == 2
 
 
 def test_no_url_business_review_is_explicit_and_non_contradictory(tmp_path: Path) -> None:
