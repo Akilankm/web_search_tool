@@ -2,8 +2,8 @@ from __future__ import annotations
 
 # Increment this whenever notebook/agent/bootstrap compatibility changes in a
 # way that requires rebuilding the Docker agent image.
-# Previous contract: belief-url-resolution-v7-structured-no-url-review
-RUNTIME_CONTRACT_VERSION = "belief-url-resolution-v8-leadership-demo"
+# Previous contract: belief-url-resolution-v8-leadership-demo
+RUNTIME_CONTRACT_VERSION = "belief-url-resolution-v9-product-evidence-ui"
 
 REQUIRED_RUNTIME_CAPABILITIES = {
     "belief_driven_product_resolution": "belief-driven product resolution",
@@ -14,7 +14,7 @@ REQUIRED_RUNTIME_CAPABILITIES = {
     "manufacturer_first_primary_url": "manufacturer-first primary URL selection",
     "business_judgement_review_artifact": "human-comparable business judgment review artifact",
     "structured_no_url_review_outcome": "structured no-safe-URL review outcome",
-    "leadership_demo_runtime_options": "safe per-job leadership demo budgets",
+    "per_job_runtime_controls": "validated concurrency-safe per-job runtime controls",
 }
 
 REQUIRED_RESULT_FIELDS = (
