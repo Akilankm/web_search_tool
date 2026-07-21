@@ -83,6 +83,7 @@ def _healthy_payload() -> dict:
         "manufacturer_first_primary_url": True,
         "business_judgement_review_artifact": True,
         "structured_no_url_review_outcome": True,
+        "leadership_demo_runtime_options": True,
         "browser_service": {"agentic_tools": True},
         "configuration": {
             "three_stage_contract_enforced": True,
@@ -160,6 +161,7 @@ def test_health_exposes_runtime_contract(tmp_path: Path) -> None:
     assert health["manufacturer_first_primary_url"] is True
     assert health["business_judgement_review_artifact"] is True
     assert health["structured_no_url_review_outcome"] is True
+    assert health["leadership_demo_runtime_options"] is True
 
 
 def test_notebook_rejects_legacy_or_incomplete_agent(monkeypatch) -> None:
@@ -181,6 +183,12 @@ def test_notebook_rejects_legacy_or_incomplete_agent(monkeypatch) -> None:
     no_structured_outcome.pop("structured_no_url_review_outcome")
     monkeypatch.setattr(runtime, "api_json", lambda *args, **kwargs: no_structured_outcome)
     with pytest.raises(RuntimeError, match="structured no-safe-URL review outcome"):
+        check_health()
+
+    no_demo_options = _healthy_payload()
+    no_demo_options.pop("leadership_demo_runtime_options")
+    monkeypatch.setattr(runtime, "api_json", lambda *args, **kwargs: no_demo_options)
+    with pytest.raises(RuntimeError, match="safe per-job leadership demo budgets"):
         check_health()
 
 
@@ -214,6 +222,7 @@ def test_notebook_auto_recovers_stale_agent_from_same_checkout(
     )
     assert health["business_judgement_review_artifact"] is True
     assert health["structured_no_url_review_outcome"] is True
+    assert health["leadership_demo_runtime_options"] is True
     assert result.attempted is True
     assert result.recovered is True
     assert result.clean_build is True
