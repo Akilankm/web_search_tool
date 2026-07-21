@@ -11,17 +11,21 @@ WORKFLOW = ROOT / "docs" / "SYSTEM_WORKFLOW.md"
 UI_DOC = ROOT / "docs" / "PRODUCT_EVIDENCE_UI.md"
 
 
-def test_feature_reference_covers_platform_features() -> None:
+def test_feature_reference_covers_product_identification_features() -> None:
     text = FEATURE_REFERENCE.read_text(encoding="utf-8")
     for section in (
+        "Product-result hierarchy",
         "Product input contract",
         "Product interpretation",
+        "Product hypothesis construction",
         "Feature schema resolution",
         "Adaptive source search",
         "Candidate normalization and precision filtering",
         "Static extraction",
         "Rendered browser investigation",
         "Multimodal evidence reasoning",
+        "Evidence ledger",
+        "Hypothesis scoring and product resolution",
         "Exact-product identity verification",
         "Requested-feature coverage",
         "URL durability and usability",
@@ -29,7 +33,7 @@ def test_feature_reference_covers_platform_features() -> None:
         "Structured no-safe-URL outcome",
         "Business judgment sequence",
         "Per-job runtime controls",
-        "Product Evidence Platform UI",
+        "Product Identification Platform UI",
         "Batch execution",
         "Artifact diagnostics",
         "Artifact inventory",
@@ -38,12 +42,16 @@ def test_feature_reference_covers_platform_features() -> None:
         assert section in text
 
 
-def test_feature_reference_maps_features_to_modules_and_outputs() -> None:
+def test_feature_reference_enforces_product_first_hierarchy() -> None:
     text = FEATURE_REFERENCE.read_text(encoding="utf-8")
     for token in (
-        "Primary modules",
-        "Requirement changes",
-        "Outputs",
+        "Primary outcome",
+        "identified product",
+        "Product hypothesis construction",
+        "ResolutionStatus",
+        "EXACT product + no usable URL = product remains identified",
+        "missing source field = NOT ASSESSED, not FAIL",
+        "URL controls never appear as the primary verdict",
         "business_judgement_review.md",
         "run_configuration.json",
         "apps/product_evidence_ui.py",
@@ -55,21 +63,32 @@ def test_feature_reference_maps_features_to_modules_and_outputs() -> None:
         assert token in text
 
 
-def test_workflow_and_ui_docs_match_current_runtime() -> None:
+def test_workflow_and_ui_docs_match_product_first_contract() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     ui = UI_DOC.read_text(encoding="utf-8")
     assert RUNTIME_CONTRACT_VERSION == "belief-url-resolution-v9-product-evidence-ui"
     assert RUNTIME_CONTRACT_VERSION in ui
     for token in (
         "Product interpretation",
+        "Product hypothesis construction",
         "Adaptive source search",
         "Rendered browser investigation",
         "Exact-product verification",
+        "Product identity resolution",
         "Source-authority selection",
         "Decision audit sequence",
         "Runtime control flow",
+        "The UI must never use URL checks as the headline product verdict",
     ):
         assert token in workflow
+    for token in (
+        "Primary outcome",
+        "identified product",
+        "ResolutionStatus",
+        "URLs are evidence locations",
+        "NOT ASSESSED",
+    ):
+        assert token in ui
 
 
 def test_canonical_docs_use_professional_terminology() -> None:

@@ -1,32 +1,56 @@
-# Product Evidence Platform — Feature Reference
+# Product Identification Platform — Feature Reference
 
-This document is the canonical feature-level reference for the Product Evidence Platform. It describes what each feature does, the inputs it consumes, the decisions it makes, the artifacts it produces, and the modules that must change when requirements evolve.
+This document is the canonical feature-level reference for the repository.
+
+## Product-result hierarchy
+
+```text
+Primary outcome
+= identified product + resolution status + evidence confidence
+
+Supporting outcome
+= evidence sources + URLs + source-quality metadata + artifacts
+```
+
+A URL is never treated as the product itself. URL checks describe the usefulness of an evidence source. They do not determine whether a product hypothesis exists.
+
+---
 
 ## 1. Product input contract
 
 ### Purpose
 
-Represent one intended product and its market context without assuming that every identifier is available.
+Represent one intended product and its market context without assuming every identifier is available.
 
-### Required fields
+### Inputs
 
-| Field | Type | Requirement | Use |
-|---|---|---|---|
-| `row_id` | string | Required | Unique artifact and job identifier |
-| `main_text` | string | Required | Primary product description supplied by the source system |
-| `country_code` | two-letter string | Required | Market, language and source-selection context |
+| Field | Required | Use |
+|---|---:|---|
+| `row_id` | Yes | Job and artifact identifier |
+| `main_text` | Yes | Incomplete vendor or source product description |
+| `country_code` | Yes | Market and language context |
+| `retailer_name` | No | Retailer-specific context and search scope |
+| `ean` | No | Strong exact-product evidence when available |
+| `language_code` | No | Query and page-language context |
+| `feature_set` | Yes | Requested product facts |
+| `runtime_options` | No | Per-job evidence-depth controls |
 
-### Optional fields
+### Processing
 
-| Field | Type | Use |
-|---|---|---|
-| `retailer_name` | string or null | Requested-retailer search and authority classification |
-| `ean` | string or null | Exact identifier verification; preserved as text |
-| `language_code` | string or null | Query and page-language context |
+Mandatory fields are validated before paid search. Identifiers are preserved as text.
 
-### Validation behavior
+### Outputs
 
-Missing mandatory fields are rejected before paid search. Invalid country codes, unsupported runtime controls and missing feature sets return explicit validation errors.
+```text
+validated product payload
+normalized country and language
+artifact row identifier
+resolved feature-set name
+```
+
+### Requirement changes
+
+Modify when the external input schema changes.
 
 ### Primary modules
 
@@ -42,21 +66,9 @@ src/product_evidence_harness/feature_schema.py
 
 ### Purpose
 
-Convert incomplete product text into an explicit identity hypothesis and identify unresolved distinctions before external search.
+Convert incomplete text into explicit product claims, assumptions, unknowns and identity dimensions.
 
-### Inputs
-
-```text
-main_text
-country_code
-retailer_name
-ean
-language_code
-```
-
-### Processing
-
-The interpretation stage extracts or infers observable identity dimensions such as:
+### Identity dimensions
 
 ```text
 brand
@@ -67,72 +79,117 @@ variant
 size
 quantity
 pack configuration
+category
 market context
 ```
 
-It records uncertainty rather than silently treating ambiguous text as exact.
+### Processing
+
+The interpretation stage distinguishes explicit text, normalized values, deterministic derivations, model priors and unresolved fields.
 
 ### Outputs
 
 ```text
-product_identification
-product_belief.json
+claims
+negative_constraints
+unknowns
+parse_coverage
+identity_completeness
+search_readiness
 product_understanding.md
-belief_updates.md
 ```
 
 ### Requirement changes
 
-Modify interpretation when new identity dimensions, abbreviations, domain-specific aliases or ambiguity rules are introduced.
+Modify for new abbreviations, identity dimensions or domain-specific parsing rules.
 
 ### Primary modules
 
 ```text
-src/product_evidence_harness/belief.py
+src/product_evidence_harness/belief/contracts.py
+src/product_evidence_harness/belief/engine.py
 src/product_evidence_harness/belief_runtime.py
-src/product_evidence_harness/belief_compatibility.py
 ```
 
 ---
 
-## 3. Feature schema resolution
+## 3. Product hypothesis construction
 
 ### Purpose
 
-Define which product facts must be found before a URL can support downstream coding.
+Create explicit competing explanations for which product the input may represent.
 
-### Default feature set
+### Hypothesis fields
+
+```text
+hypothesis_id
+canonical_name
+category
+attributes
+assumptions
+negative_constraints
+prior_score
+posterior_probability
+supporting_evidence_ids
+contradicting_evidence_ids
+```
+
+### Processing
+
+The system must preserve multiple plausible hypotheses until evidence justifies resolving one.
+
+### Outputs
+
+```text
+hypotheses
+leading_hypothesis
+selected_hypothesis_id
+uncertainties
+ambiguity_entropy
+```
+
+### Requirement changes
+
+Modify when candidate identity generation, prior construction or ambiguity policy changes.
+
+### Primary modules
+
+```text
+src/product_evidence_harness/belief/contracts.py
+src/product_evidence_harness/belief/engine.py
+src/product_evidence_harness/belief/artifacts.py
+```
+
+---
+
+## 4. Feature schema resolution
+
+### Purpose
+
+Define product facts required by downstream coding or review.
+
+### Default schema
 
 ```text
 inputs/private/toy_features.json
 ```
 
-### Current default features
+### Processing
 
-```text
-brand
-manufacturer
-minimum recommended age
-```
-
-### Behavior
-
-The feature schema is loaded inside the agent container. Search does not receive private feature definitions directly. Candidate pages are evaluated against the resolved schema after evidence acquisition.
+Feature requirements guide evidence collection and completeness assessment. They do not replace product identity.
 
 ### Outputs
 
 ```text
 feature_set
-feature_schema_path
-feature_assessments
-missing_features
-conflicting_features
-coverage
+feature assessments
+missing requested facts
+conflicting requested facts
 ```
 
 ### Requirement changes
 
-Add or modify features in the feature-set JSON. Update extraction or reasoning modules only when the new feature cannot be resolved through existing text, structured-data or visual evidence methods.
+Modify the feature-set JSON when requested product facts change.
 
 ### Primary modules
 
@@ -140,72 +197,41 @@ Add or modify features in the feature-set JSON. Update extraction or reasoning m
 src/product_evidence_harness/feature_schema.py
 src/product_evidence_harness/schema_io.py
 src/product_evidence_harness/feature_evidence.py
-src/product_evidence_harness/llm/feature_reasoner.py
 ```
 
 ---
 
-## 4. Adaptive source search
+## 5. Adaptive source search
 
 ### Purpose
 
-Discover direct product-page candidates through a bounded, evidence-aware search sequence.
+Find evidence capable of distinguishing product hypotheses.
 
 ### Search order
 
 ```text
-official manufacturer
-→ requested retailer or same-country alternatives
-→ global exact-product sources
+manufacturer sources
+→ requested retailer or same-country sources
+→ global product sources
 ```
 
-### Inputs
+### Processing
 
-```text
-product interpretation
-country and language context
-retailer name
-EAN/GTIN
-previous search evidence
-rejected candidates
-runtime search limits
-```
-
-### Search decisions
-
-The planner determines:
-
-```text
-query formulation
-search engine
-market scope
-whether to continue
-which unresolved identity distinction to target
-which candidates require investigation
-```
-
-### Safety and cost controls
-
-```text
-search credits: 1–3
-planner candidate limit: 3–20
-full-page extraction limit: 1–12
-per-domain extraction limit: 1–4
-```
+Queries target unresolved product distinctions, identifiers, models, variants, forms and pack configurations.
 
 ### Outputs
 
 ```text
-search.market_decision_path
-search.stages
+search stages
+queries and engines
+market decision path
 adaptive_search_trace.json
 candidate_url_records.json
-candidates.csv
 ```
 
 ### Requirement changes
 
-Modify this feature when source order, query strategy, search engines, market fallback or search-credit policy changes.
+Modify for new search engines, query strategy, source order or search-credit limits.
 
 ### Primary modules
 
@@ -214,34 +240,33 @@ src/product_evidence_harness/adaptive_search.py
 src/product_evidence_harness/adaptive_search_runtime.py
 src/product_evidence_harness/query_builder.py
 src/product_evidence_harness/three_stage_pipeline.py
-src/product_evidence_harness/manufacturer_search_planner_hardening.py
 ```
 
 ---
 
-## 5. Candidate normalization and precision filtering
+## 6. Candidate normalization and precision filtering
 
 ### Purpose
 
-Remove indirect, duplicated, low-value or obviously incompatible URLs before expensive evidence acquisition.
+Remove duplicate, indirect or obviously irrelevant evidence sources before expensive acquisition.
 
-### Candidate checks
+### Checks
 
 ```text
+URL normalization
+domain classification
 direct product-page likelihood
-URL normalization and deduplication
-domain and source role
-country and retailer compatibility
 identifier and title signals
+country and retailer compatibility
 search/category/homepage rejection
-signed or expiring URL indicators
+signed or transient URL indicators
 ```
 
 ### Outputs
 
 ```text
-normalized candidate URL
-source role and tier
+normalized candidate
+source role
 precision score
 hard-failure reasons
 candidate status
@@ -249,7 +274,7 @@ candidate status
 
 ### Requirement changes
 
-Modify this feature when a new retailer URL pattern, redirect format, marketplace rule or exclusion class is introduced.
+Modify for new retailer URL patterns, redirect formats or exclusion classes.
 
 ### Primary modules
 
@@ -257,45 +282,46 @@ Modify this feature when a new retailer URL pattern, redirect format, marketplac
 src/product_evidence_harness/candidate_precision.py
 src/product_evidence_harness/candidate_store.py
 src/product_evidence_harness/candidate_reporting.py
-src/product_evidence_harness/precision_search_runtime.py
-src/product_evidence_harness/precision_hardening.py
 ```
 
 ---
 
-## 6. Static extraction
+## 7. Static extraction
 
 ### Purpose
 
-Acquire page text and structured product evidence before or alongside rendered-browser investigation.
+Acquire product evidence from page text and structured data.
 
-### Evidence collected
+### Evidence
 
 ```text
-page title and headings
 product name
+brand
+manufacturer
+model
+EAN/GTIN
+variant
+size
+quantity
+pack
+specifications
 description
-brand and manufacturer
-specifications and attributes
-EAN/GTIN values
-price and availability signals
-image URLs
-page richness and word count
+image references
 ```
 
 ### Outputs
 
 ```text
-ScrapeResult
-page metadata
+page text
 structured identifiers
-text evidence
-scrapability assessment
+metadata
+scrapability information
+image URLs
 ```
 
 ### Requirement changes
 
-Modify extraction when new structured-data formats, retailer markup patterns or content-quality requirements are introduced.
+Modify for new structured-data formats or retailer markup.
 
 ### Primary modules
 
@@ -307,57 +333,46 @@ src/product_evidence_harness/rendered_page.py
 
 ---
 
-## 7. Rendered browser investigation
+## 8. Rendered browser investigation
 
 ### Purpose
 
-Inspect candidate pages as a user-visible rendered page rather than relying only on raw HTTP content.
+Collect evidence that is visible only after rendering or interaction.
 
-### Browser actions
+### Allowed actions
 
 ```text
 open page
 dismiss safe overlays
-expand product sections
-scroll for lazy content
-inspect product-gallery images
+expand product details
+scroll lazy content
+inspect product images
 capture screenshots
-stop when resolved, blocked or no safe action remains
 ```
 
 ### Prohibited actions
 
 ```text
-login or credential entry
-purchase actions
+login
+credential entry
+purchase
 form submission
 access-control bypass
-invented element IDs or URLs
-following instructions embedded in webpage content
-```
-
-### Runtime controls
-
-```text
-browser investigation limit: 1–8 candidates
-browser turns: 1–12 per candidate
-browser actions: 1–24 per candidate
-visual assets: 4–20 per reasoning turn
 ```
 
 ### Outputs
 
 ```text
-browser_evidence
-candidate_investigations
+rendered text
 screenshots
 visual assets
-agentic investigation records
+browser action trace
+candidate investigations
 ```
 
 ### Requirement changes
 
-Modify this feature when browser tools, allowed actions, blocker handling, evidence categories or investigation limits change.
+Modify for browser tools, allowed actions or blocker policy.
 
 ### Primary modules
 
@@ -365,58 +380,47 @@ Modify this feature when browser tools, allowed actions, blocker handling, evide
 src/product_evidence_harness/browser_service/controller.py
 src/product_evidence_harness/browser_client.py
 src/product_evidence_harness/llm/agentic_browser.py
-src/product_evidence_harness/agentic_browser_contracts.py
 ```
 
 ---
 
-## 8. Multimodal evidence reasoning
+## 9. Multimodal evidence reasoning
 
 ### Purpose
 
-Resolve product facts that are visible in screenshots, packaging, gallery images or diagrams but absent from extracted page text.
+Resolve identity facts visible in packaging, screenshots, gallery images or diagrams.
 
-### Evidence types
+### Evidence examples
 
 ```text
 package front and back
-product gallery
+model text
+variant markings
 age markings
-warning labels
-model and variant text
-dimensions diagrams
-visible specification sections
+quantity and pack count
+dimension diagrams
+visible warnings
 ```
 
 ### Evidence trace
-
-Vision-derived facts are recorded with an explicit extraction method and asset reference:
 
 ```text
 extraction_method=vision_llm
 evidence_location=visual_asset:<asset_id>
 ```
 
-### Visual-decision statuses
-
-```text
-YES_VISUAL_EVIDENCE_SUPPORTED_SELECTED_URL_FEATURE_GATE
-VISUAL_EVIDENCE_USED_BUT_NOT_RECORDED_AS_DECISIVE_FOR_SELECTED_URL
-NO_VISUAL_EVIDENCE_RECORDED
-```
-
 ### Outputs
 
 ```text
-visual_evidence_summary
-visual feature evidence
+visual evidence facts
+visual asset references
 image-inspection actions
-screenshot-informed decisions
+visual decision impact
 ```
 
 ### Requirement changes
 
-Modify this feature when image categories, visual prompts, accepted visual evidence or counterfactual analysis changes.
+Modify for new visual evidence types or reasoning policy.
 
 ### Primary modules
 
@@ -428,11 +432,110 @@ src/product_evidence_harness/business_judgement_artifact.py
 
 ---
 
-## 9. Exact-product identity verification
+## 10. Evidence ledger
 
 ### Purpose
 
-Prevent a plausible but incorrect sibling product, pack, size or variant from being accepted.
+Represent each material fact as atomic evidence that supports, contradicts or remains neutral toward product hypotheses.
+
+### Evidence fields
+
+```text
+evidence_id
+source_url
+field
+value
+polarity
+affected_hypothesis_ids
+directness
+source_reliability
+extraction_confidence
+hard_conflict
+excerpt
+```
+
+### Outputs
+
+```text
+evidence_ledger
+belief snapshots
+evidence_ledger.jsonl
+```
+
+### Requirement changes
+
+Modify when evidence weighting, polarity or provenance requirements change.
+
+### Primary modules
+
+```text
+src/product_evidence_harness/belief/contracts.py
+src/product_evidence_harness/belief/engine.py
+src/product_evidence_harness/belief/artifacts.py
+```
+
+---
+
+## 11. Hypothesis scoring and product resolution
+
+### Purpose
+
+Determine which product hypothesis is best supported.
+
+### ResolutionStatus
+
+```text
+EXACT
+PROBABLE
+AMBIGUOUS
+CONFLICTING
+INSUFFICIENT_EVIDENCE
+IN_PROGRESS
+INITIALIZED
+```
+
+### Decision factors
+
+```text
+posterior probability
+posterior margin
+identity completeness
+ambiguity entropy
+assumption burden
+supporting evidence
+contradicting evidence
+hard conflicts
+```
+
+### Outputs
+
+```text
+product_identification.resolution_status
+product_identification.leading_hypothesis
+selected_hypothesis_id
+posterior probability
+unresolved distinctions
+```
+
+### Requirement changes
+
+Modify when scoring thresholds or terminal identity semantics change.
+
+### Primary modules
+
+```text
+src/product_evidence_harness/belief/engine.py
+src/product_evidence_harness/belief_runtime.py
+src/product_evidence_harness/identity_verifier.py
+```
+
+---
+
+## 12. Exact-product identity verification
+
+### Purpose
+
+Prevent sibling products, wrong variants, wrong forms or wrong pack configurations from being treated as the intended product.
 
 ### Verification dimensions
 
@@ -440,42 +543,27 @@ Prevent a plausible but incorrect sibling product, pack, size or variant from be
 EAN/GTIN
 brand
 manufacturer
-model or product name
+model
 variant
 form
 size
 quantity
-pack configuration
-country compatibility
-```
-
-### Blocking conflicts
-
-```text
-EAN conflict
-variant conflict
-wrong product form
-wrong size or quantity
-wrong pack
-unrelated rendered page
-insufficient exact-product evidence
+pack
+country context
 ```
 
 ### Outputs
 
 ```text
-identity_status
-exact_product_check
-variant_check
-ean_check
-identity_accepted
-conflicting_features
-rejection_reasons
+identity status
+conflicts
+rejection reasons
+verified identity claims
 ```
 
 ### Requirement changes
 
-Modify this feature when product identity rules, critical identifiers or domain-specific variant semantics change.
+Modify for new product identity rules or critical identifiers.
 
 ### Primary modules
 
@@ -487,23 +575,15 @@ src/product_evidence_harness/precision_selection_hardening.py
 
 ---
 
-## 10. Requested-feature coverage
+## 13. Requested-feature coverage
 
 ### Purpose
 
-Ensure that the selected primary URL contains evidence for every feature required by the active feature schema.
+Assess whether available evidence supports the requested product facts.
 
-### Acceptance requirement
+### Important distinction
 
-The primary URL must satisfy:
-
-```text
-required coverage = 100%
-critical coverage = 100%
-no conflicting requested features
-```
-
-Supplementary URLs may be preserved for diagnostics, but they do not make an incomplete primary URL coding-ready when the strict primary-page policy is enabled.
+Requested-feature coverage is an evidence-completeness measure. It is not the complete definition of product identity.
 
 ### Outputs
 
@@ -512,12 +592,11 @@ coverage
 missing_features
 conflicting_features
 feature_assessments
-evidence_set
 ```
 
 ### Requirement changes
 
-Modify this feature when the organization permits multi-source coding, changes criticality rules or introduces partial-coverage acceptance.
+Modify when feature criticality or multi-source evidence policy changes.
 
 ### Primary modules
 
@@ -529,38 +608,46 @@ src/product_evidence_harness/mandatory_url_policy.py
 
 ---
 
-## 11. URL durability and usability
+## 14. URL durability and usability
 
 ### Purpose
 
-Ensure the delivered URL is a reusable direct product page rather than a transient or indirect reference.
+Determine whether an evidence source can be reused operationally.
 
-### Required properties
+### Source properties
 
 ```text
 browser-openable
-text-scrapable
+text-accessible
 individual product page
 non-expiring
 not session-bound
 not a search or category page
-not a PDF or media document
-not an intermediary tracking URL
+```
+
+### Product-first rule
+
+A failed URL check means the source is not qualified for that operational use. It does not automatically mean the product hypothesis is false.
+
+### UI states
+
+```text
+VERIFIED
+NOT VERIFIED
+NOT ASSESSED
 ```
 
 ### Outputs
 
 ```text
-browser_openable
-text_scrapable
-durable_url
-url_delivery
 primary_url_acceptance
+url_delivery
+source-quality metadata
 ```
 
 ### Requirement changes
 
-Modify this feature when new signed-URL patterns, redirect policies or page-type rules are introduced.
+Modify for new transient URL patterns or reuse requirements.
 
 ### Primary modules
 
@@ -572,84 +659,75 @@ src/product_evidence_harness/mandatory_url_policy.py
 
 ---
 
-## 12. Source-authority selection
+## 15. Source-authority selection
 
 ### Purpose
 
-Choose the strongest qualified source after identity, feature, browser and durability gates have passed.
+Choose the strongest qualified evidence source after product evidence has been evaluated.
 
 ### Authority order
 
 ```text
 local official manufacturer
 global official manufacturer
-requested retailer in market
-requested retailer global
-major country retailer
+requested retailer
+major market retailer
 global exact-product source
 marketplace last resort
 ```
 
-Manufacturer priority is conditional. An official page that is incomplete, inaccessible or for the wrong product cannot override a qualified retailer page.
+### Product-first rule
+
+Source authority ranks evidence locations. It does not create the product identity.
 
 ### Outputs
 
 ```text
 primary_url
-primary_url_role
 manufacturer_url
 retailer_url
 source_selection
-source tier and reason
 ```
 
 ### Requirement changes
 
-Modify this feature when source priority, retailer policy, marketplace policy or manufacturer qualification rules change.
+Modify when source priority or marketplace policy changes.
 
 ### Primary modules
 
 ```text
 src/product_evidence_harness/source_authority.py
 src/product_evidence_harness/source_authority_runtime.py
-src/product_evidence_harness/source_authority_reporting.py
 src/product_evidence_harness/manufacturer_primary_runtime.py
-src/product_evidence_harness/manufacturer_primary_hardening.py
 ```
 
 ---
 
-## 13. Structured no-safe-URL outcome
+## 16. Structured no-safe-URL outcome
 
 ### Purpose
 
-Return a controlled business outcome when bounded search cannot find a safe direct product page.
-
-### Contract
+Record that no reusable direct source URL was found within the bounded source-search policy.
 
 ```text
-job_status=REVIEW_REQUIRED
-primary_url=null
-primary_url_role=NONE
 resolution_outcome.code=NO_SAFE_DIRECT_PRODUCT_URL_FOUND
-url_delivery.delivered=false
-url_fabricated=false
 ```
 
-This means no safe page was found within the configured bounded policy. It does not claim that no URL exists anywhere on the internet.
+### Product-first rule
+
+`NO_SAFE_DIRECT_PRODUCT_URL_FOUND` is a source-delivery outcome. It does not, by itself, mean `product_identification` is empty or failed.
 
 ### Outputs
 
 ```text
 no_url_resolution.json
 mandatory_url_delivery.json
-resolution_outcome
-suggested_next_actions
+suggested source follow-up actions
 ```
 
 ### Requirement changes
 
-Modify this feature when terminal status, review workflow, escalation actions or bounded-search policy changes.
+Modify when source-delivery escalation or bounded-search policy changes.
 
 ### Primary modules
 
@@ -661,49 +739,29 @@ src/product_evidence_harness/mandatory_url_policy.py
 
 ---
 
-## 14. Business judgment sequence
+## 17. Business judgment sequence
 
 ### Purpose
 
-Expose a human-comparable audit sequence without exposing hidden chain-of-thought.
-
-### Judgment structure
+Expose an auditable product-decision sequence without exposing hidden chain-of-thought.
 
 ```text
 observable evidence
-→ explicit business rule
-→ agent judgment
+→ explicit rule
+→ product judgment
 → next action
-```
-
-### Recorded fields
-
-```text
-sequence number
-decision stage
-business question
-evidence considered
-evidence sources
-visual evidence used
-business rule
-agent judgment
-alternatives considered
-rejection reason
-next action
-confidence
-final outcome
 ```
 
 ### Outputs
 
 ```text
 business_judgement_review.md
-business_judgement_review in result JSON
+business_judgement_review result object
 ```
 
 ### Requirement changes
 
-Modify this feature when the review form, equivalence labels, decision stages or audit fields change.
+Modify when review fields or equivalence labels change.
 
 ### Primary modules
 
@@ -714,38 +772,19 @@ src/product_evidence_harness/business_judgement_runtime.py
 
 ---
 
-## 15. Per-job runtime controls
+## 18. Per-job runtime controls
 
 ### Purpose
 
-Allow cost, latency and evidence-depth limits to vary for one job without changing shared process configuration.
-
-### Supported controls
-
-| Control | Range |
-|---|---:|
-| Search credits | 1–3 |
-| Full-page extractions | 1–12 |
-| Extractions per domain | 1–4 |
-| Planner candidate limit | 3–20 |
-| Browser investigation limit | 1–8 |
-| Browser turns per candidate | 1–12 |
-| Browser actions per candidate | 1–24 |
-| Visual assets per reasoning turn | 4–20 |
+Vary evidence depth without mutating shared configuration.
 
 ### Execution profiles
 
-| Profile | Intended trade-off |
-|---|---|
-| `Latency Optimized` | Reduced evidence acquisition for lower elapsed time |
-| `Standard` | Default production operating limits |
-| `Coverage Optimized` | Broader candidate and visual investigation |
-
-Profiles are convenience presets. The submitted values remain visible and independently adjustable.
-
-### Isolation and safety
-
-Controls are context-local and concurrency-safe. They do not mutate `.env`, expose credentials or change identity, feature, durability, source-authority or no-fabrication policies.
+```text
+Latency Optimized
+Standard
+Coverage Optimized
+```
 
 ### Outputs
 
@@ -753,95 +792,83 @@ Controls are context-local and concurrency-safe. They do not mutate `.env`, expo
 run_configuration.json
 requested_runtime_options
 effective_runtime_options
-option_catalog
-safety_contract
 ```
 
 ### Requirement changes
 
-Modify this feature when approved operational controls, ranges or default profiles change.
+Modify when approved controls or ranges change.
 
 ### Primary modules
 
 ```text
 src/product_evidence_harness/runtime_controls.py
 src/product_evidence_harness/runtime_controls_runtime.py
-apps/product_evidence_ui.py
 ```
 
 ---
 
-## 16. Product Evidence Platform UI
+## 19. Product Identification Platform UI
 
 ### Purpose
 
-Provide a browser-based interface for one-product execution and artifact inspection using the same agent API and production contracts as the notebooks.
+Present the identified product before supporting source evidence.
 
-### Interface sections
+### Primary sections
 
 ```text
-runtime health
-runtime controls
-product input
-seven-stage workflow
-live execution state
-decision summary
-workflow and source decision
-business judgment sequence
-evidence and candidate rejection
-runtime control audit
-artifact inventory and downloads
+product identification summary
+product identity
+evidence basis
+alternative hypotheses
+source evidence
+decision audit
+artifacts
+```
+
+### Mandatory UI behavior
+
+```text
+EXACT product + no usable URL = product remains identified
+missing source field = NOT ASSESSED, not FAIL
+URL controls never appear as the primary verdict
 ```
 
 ### Outputs
 
-The UI does not create an alternate result format. It displays the standard agent result and persisted product artifacts.
+The UI displays the standard result object and does not create an alternate product schema.
 
-### Primary files
+### Requirement changes
+
+Modify when result presentation or review workflow changes.
+
+### Primary modules
 
 ```text
 apps/product_evidence_ui.py
-scripts/run_product_evidence_ui.sh
 docs/PRODUCT_EVIDENCE_UI.md
+tests/test_product_evidence_ui.py
 ```
 
 ---
 
-## 17. Batch execution
+## 20. Batch execution
 
 ### Purpose
 
-Process a CSV with bounded product-level parallelism while preserving one complete artifact directory per row.
-
-### Required CSV columns
-
-```text
-main_text
-country_code
-```
-
-### Optional columns
-
-```text
-row_id
-ean
-retailer_name
-language_code
-```
+Process products with bounded parallelism while preserving one product artifact per row.
 
 ### Outputs
 
 ```text
-data/batch_runs/<run_id>/batch_input_normalized.csv
-data/batch_runs/<run_id>/batch_results.csv
-data/batch_runs/<run_id>/batch_failures.csv
-data/batch_runs/<run_id>/batch_artifact_index.csv
-data/batch_runs/<run_id>/batch_run_summary.json
+batch_results.csv
+batch_failures.csv
+batch_artifact_index.csv
+batch_run_summary.json
 ```
 
 ### Requirement changes
 
-Modify this feature when CSV schema, concurrency, retry, ordering or summary metrics change.
+Modify for CSV schema, concurrency or retry behavior.
 
 ### Primary modules
 
@@ -852,11 +879,11 @@ notebooks/02_batch_products.ipynb
 
 ---
 
-## 18. Artifact diagnostics
+## 21. Artifact diagnostics
 
 ### Purpose
 
-Reconstruct an existing product run into an interactive evidence and decision workspace without rerunning search or browser acquisition.
+Reconstruct a product identification from persisted evidence without rerunning paid search.
 
 ### Views
 
@@ -878,7 +905,7 @@ artifact_diagnostic_workbook.xlsx
 
 ### Requirement changes
 
-Modify this feature when artifact schemas, decision-map nodes, diagnostic views or export formats change.
+Modify when artifact schemas or diagnostic views change.
 
 ### Primary modules
 
@@ -890,70 +917,56 @@ notebooks/03_artifact_diagnostics.ipynb
 
 ---
 
-## 19. Artifact inventory
+## 22. Artifact inventory
 
-A product run may produce:
+Primary identity artifacts:
 
 ```text
-business_judgement_review.md
-run_configuration.json
 product_belief.json
 product_understanding.md
-market_decision_path.md
 belief_updates.md
 evidence_ledger.jsonl
+business_judgement_review.md
+```
+
+Supporting discovery and source artifacts:
+
+```text
 adaptive_search_trace.json
 candidate_url_records.json
 candidates.csv
 primary_url_acceptance.json
 mandatory_url_delivery.json
 source_selection.json
+```
+
+Complete result and diagnostics:
+
+```text
 orchestrated_result.json
 single_product_diagnostics.xlsx
-```
-
-A no-safe-URL result additionally produces:
-
-```text
-no_url_resolution.json
-```
-
-Diagnostic execution may additionally produce:
-
-```text
 artifact_diagnostics_interactive.html
 artifact_diagnostic_report.md
 artifact_diagnostic_workbook.xlsx
+run_configuration.json
 ```
 
 ---
 
-## 20. Change-impact index
+## 23. Change-impact index
 
 | Requirement change | Primary change area |
 |---|---|
-| Add a product input field | Contracts, API validation, notebooks, UI |
-| Add or change coded features | Feature-set JSON and feature extraction |
-| Change search order | Adaptive search and source planner |
-| Add a search engine | Search client, planner and environment validation |
-| Change candidate limits | Runtime controls and search orchestration |
-| Add browser actions | Browser contracts, controller and agent prompt |
-| Add visual evidence categories | Browser intent and vision reasoning |
-| Change exact-product rules | Identity verifier and strict acceptance |
-| Change primary-page feature policy | Evidence selector and strict acceptance |
-| Change source priority | Source-authority modules |
-| Change no-safe-URL behavior | Structured outcome and result validator |
+| Add a product input field | Contracts, API, notebooks and UI |
+| Add an identity dimension | Belief contracts, interpretation and evidence extraction |
+| Change hypothesis generation | Belief engine |
+| Change resolution thresholds | Belief scoring and identity verifier |
+| Add a coded feature | Feature schema and feature evidence |
+| Change search strategy | Adaptive search and query builder |
+| Add browser evidence | Browser controller and agentic browser |
+| Add visual evidence | Vision reasoner and evidence ledger |
+| Change URL reuse policy | URL durability modules only |
+| Change source priority | Source-authority modules only |
+| Change UI hierarchy | Product Identification Platform UI |
 | Change audit fields | Business judgment artifact builder |
-| Change UI presentation | Product Evidence Platform UI only |
-| Change batch throughput | Batch runtime, agent workers and browser contexts |
-| Add canonical cost/token metrics | Execution-metrics and LLM-usage instrumentation |
-
-## Related documents
-
-- [Product Evidence Platform UI](PRODUCT_EVIDENCE_UI.md)
-- [System workflow](SYSTEM_WORKFLOW.md)
-- [Final system contract](FINAL_SYSTEM_CONTRACT.md)
-- [Notebook usage](NOTEBOOK_USAGE.md)
-- [Business judgment review](BUSINESS_JUDGEMENT_REVIEW.md)
-- [Azure ML operations](AZUREML_OPERATIONS.md)
-- [Security contract](SECURITY.md)
+| Change batch throughput | Batch runtime and worker configuration |
