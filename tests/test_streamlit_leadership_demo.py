@@ -40,7 +40,7 @@ def test_streamlit_app_is_parseable_and_exposes_full_demo_contract() -> None:
         "Evidence & images",
         "Judgment trace",
         "Artifacts",
-        "NO_SAFE_DIRECT_PRODUCT_URL_FOUND",
+        "No safe direct URL was found within the selected budget",
         "business_judgement_review.md",
         "run_configuration",
     )
@@ -68,7 +68,13 @@ def test_streamlit_app_loads_cleanly_when_agent_is_unavailable(monkeypatch) -> N
     assert app.exception == []
     rendered = "\n".join(
         str(item.value)
-        for collection in (app.markdown, app.info, app.error, app.caption)
+        for collection in (
+            app.markdown,
+            app.subheader,
+            app.info,
+            app.error,
+            app.caption,
+        )
         for item in collection
     )
     assert "Product Evidence Intelligence" in rendered
