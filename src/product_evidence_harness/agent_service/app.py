@@ -9,6 +9,10 @@ from src.product_evidence_harness.compat_patches import (
     apply_compatibility_patches,
     compatibility_patches_applied,
 )
+from src.product_evidence_harness.demo_runtime_options import (
+    normalize_demo_runtime_options,
+    runtime_option_catalog,
+)
 from src.product_evidence_harness.runtime_contract import runtime_capabilities
 
 # The Uvicorn entrypoint must initialize the complete production runtime itself.
@@ -25,7 +29,7 @@ from src.product_evidence_harness.three_stage_environment import validate_runtim
 from src.product_evidence_harness.llm.service import LLMConfig
 
 
-app = FastAPI(title="Product Evidence Agent", version="0.9.0")
+app = FastAPI(title="Product Evidence Agent", version="1.0.0")
 store = InMemoryJobStore()
 executor = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("AGENT_WORKERS", "2"))))
 orchestrator = StrictProductEvidenceOrchestrator()
@@ -62,6 +66,7 @@ def _service_health() -> dict:
         **runtime_capabilities(),
         "compatibility_patches_applied": compatibility_patches_applied(),
         "agent_entrypoint": "src.product_evidence_harness.agent_service.app:app",
+        "demo_runtime_option_catalog": runtime_option_catalog(),
     }
 
 
@@ -100,10 +105,52 @@ def create_job(payload: dict) -> dict:
     _configuration, configuration_error = _validate_runtime()
     if configuration_error:
         raise HTTPException(status_code=503, detail=configuration_error)
-    requested_id = str(payload.get("row_id") or payload.get("product", {}).get("row_id") or "job")
-    record = store.create(payload, requested_id=requested_id)
+
+    try:
+        normalized_options = normalize_demo_runtime_options(payload.get("runtime_options"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    normalized_payload = dict(payload)
+    if normalized_options:
+        normalized_payload["runtime_options"] = normalized_options
+    else:
+        normalized_payload.pop("runtime_options", None)
+
+    product = normalized_payload.get("product")
+    if not isinstance(product, dict):
+        raise HTTPException(
+            status_code=422,
+            detail="product must be an object containing row_id, main_text and country_code",
+        )
+
+    row_id = str(product.get("row_id") or "").strip()
+    main_text = str(product.get("main_text") or "").strip()
+    country_code = str(product.get("country_code") or "").strip()
+    feature_set = str(normalized_payload.get("feature_set") or "").strip()
+    missing = [
+        name
+        for name, value in (
+            ("product.row_id", row_id),
+            ("product.main_text", main_text),
+            ("product.country_code", country_code),
+            ("feature_set", feature_set),
+        )
+        if not value
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail="Missing mandatory field(s): " + ", ".join(missing),
+        )
+
+    record = store.create(normalized_payload, requested_id=row_id)
     executor.submit(_run_job, record.job_id)
-    return {"job_id": record.job_id, "status": record.status.value}
+    return {
+        "job_id": record.job_id,
+        "status": record.status.value,
+        "runtime_options": normalized_options,
+    }
 
 
 @app.get("/v1/jobs/{job_id}")
