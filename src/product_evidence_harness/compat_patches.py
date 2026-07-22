@@ -109,6 +109,7 @@ def apply_compatibility_patches() -> None:
     from src.product_evidence_harness.null_numeric_runtime import apply_null_numeric_runtime_patch
     from src.product_evidence_harness.executive_summary_runtime import apply_executive_summary_patch
     from src.product_evidence_harness.url_delivery_recovery import apply_url_delivery_recovery_patch
+    from src.product_evidence_harness.url_delivery_summary_runtime import apply_url_delivery_summary_patch
 
     apply_precision_search_patches()
     apply_precision_browser_patches()
@@ -166,6 +167,7 @@ def apply_compatibility_patches() -> None:
         "executive_summary": "src.product_evidence_harness.executive_summary",
         "executive_summary_runtime": "src.product_evidence_harness.executive_summary_runtime",
         "url_delivery_recovery": "src.product_evidence_harness.url_delivery_recovery",
+        "url_delivery_summary_runtime": "src.product_evidence_harness.url_delivery_summary_runtime",
     }
     for short_name, source_name in aliases.items():
         module = sys.modules.get(source_name)
@@ -183,3 +185,4 @@ def apply_compatibility_patches() -> None:
     apply_business_judgement_review_patch()
     apply_runtime_controls_patch()
     apply_executive_summary_patch()
+    apply_url_delivery_summary_patch()
