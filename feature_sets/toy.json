@@ -1,0 +1,7 @@
+{
+  "name": "toy",
+  "version": "1.0.0",
+  "required_fields": ["brand", "product_name"],
+  "optional_fields": ["model", "ean", "variant", "pack_configuration", "quantity", "language", "country"],
+  "identity_fields": ["brand", "product_name", "model", "ean", "variant", "pack_configuration", "quantity", "language"]
+}

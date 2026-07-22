@@ -1,4 +1,4 @@
-name: product-evidence-platform
+name: product-url-resolver
 
 services:
   browser:
@@ -6,74 +6,64 @@ services:
       context: .
       dockerfile: docker/browser.Dockerfile
     init: true
-    user: "${RUNTIME_UID:-10002}:${RUNTIME_GID:-10000}"
+    user: "${RUNTIME_UID_BROWSER:-10002}:${RUNTIME_GID:-10000}"
     shm_size: "2gb"
-    expose:
-      - "9000"
     environment:
       HOME: /tmp/browser-home
-      ARTIFACT_ROOT: /data/artifacts
-      BROWSER_HEADLESS: "true"
-      BROWSER_MAX_CONTEXTS: "${BROWSER_MAX_CONTEXTS:-3}"
-      BROWSER_NAVIGATION_TIMEOUT_MS: "${BROWSER_NAVIGATION_TIMEOUT_MS:-60000}"
-      BROWSER_ACTION_TIMEOUT_MS: "${BROWSER_ACTION_TIMEOUT_MS:-8000}"
+      PRODUCT_URL_ARTIFACT_ROOT: /data/artifacts
       BROWSER_API_TOKEN_FILE: /run/secrets/browser_api_token
+      BROWSER_NAVIGATION_TIMEOUT_MS: "${BROWSER_NAVIGATION_TIMEOUT_MS:-60000}"
+      BROWSER_ACTION_TIMEOUT_MS: "${BROWSER_ACTION_TIMEOUT_MS:-10000}"
     volumes:
       - ./data/artifacts:/data/artifacts
-    tmpfs:
-      - /tmp:rw,nosuid,nodev,size=1g
     secrets:
       - browser_api_token
+    expose: ["9000"]
     restart: unless-stopped
-    stop_grace_period: 20s
-    security_opt:
-      - no-new-privileges:true
+    security_opt: ["no-new-privileges:true"]
 
   agent:
     build:
       context: .
       dockerfile: docker/agent.Dockerfile
     init: true
-    user: "${RUNTIME_UID:-10001}:${RUNTIME_GID:-10000}"
-    ports:
-      - "${AGENT_HOST_PORT:-8788}:8000"
-    env_file:
-      - .env
+    user: "${RUNTIME_UID_AGENT:-10001}:${RUNTIME_GID:-10000}"
+    env_file: [.env]
     environment:
-      HOME: /tmp/agent-home
-      ARTIFACT_ROOT: /data/artifacts
-      PRIVATE_FEATURE_ROOT: /data/private
-      BROWSER_BASE_URL: http://browser:9000
+      PRODUCT_URL_CONFIG: /app/config/default.json
+      PRODUCT_URL_ARTIFACT_ROOT: /data/artifacts
+      PRODUCT_URL_FEATURE_SET_ROOT: /app/feature_sets
+      PRODUCT_URL_BROWSER_BASE_URL: http://browser:9000
       BROWSER_API_TOKEN_FILE: /run/secrets/browser_api_token
-      PRODUCT_HARNESS_OUTPUT_DIR: /data/artifacts
-      PRODUCT_HARNESS_ENABLE_BROWSER_SERVICE: "true"
-      PRODUCT_HARNESS_BROWSER_FALLBACK_ONLY: "false"
-      PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER: "${PRODUCT_HARNESS_ENABLE_AGENTIC_BROWSER:-true}"
-      PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER: "${PRODUCT_HARNESS_REQUIRE_AGENTIC_BROWSER:-true}"
-      PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES: "${PRODUCT_HARNESS_MAX_AGENTIC_CANDIDATES:-90}"
-      PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE: "${PRODUCT_HARNESS_AGENTIC_MAX_TURNS_PER_CANDIDATE:-10}"
-      PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE: "${PRODUCT_HARNESS_AGENTIC_MAX_ACTIONS_PER_CANDIDATE:-20}"
-      PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS: "${PRODUCT_HARNESS_AGENTIC_OBSERVATION_CHARS:-12000}"
-      PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS: "${PRODUCT_HARNESS_AGENTIC_MAX_ELEMENTS:-60}"
-      PRODUCT_HARNESS_AGENTIC_MAX_IMAGES: "${PRODUCT_HARNESS_AGENTIC_MAX_IMAGES:-30}"
-      PRODUCT_HARNESS_AGENTIC_IMAGE_DETAIL: "${PRODUCT_HARNESS_AGENTIC_IMAGE_DETAIL:-high}"
-      PRODUCT_HARNESS_ENABLE_VISION_REASONING: "${PRODUCT_HARNESS_ENABLE_VISION_REASONING:-true}"
-      PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT: "${PRODUCT_HARNESS_BROWSER_CANDIDATE_LIMIT:-90}"
     volumes:
       - ./data/artifacts:/data/artifacts
-      - ./inputs/private:/data/private:ro
-    tmpfs:
-      - /tmp:rw,nosuid,nodev,size=512m
     secrets:
       - browser_api_token
+    ports:
+      - "${PRODUCT_URL_HOST_PORT:-8788}:8000"
     depends_on:
       browser:
         condition: service_healthy
         restart: true
     restart: unless-stopped
-    stop_grace_period: 30s
-    security_opt:
-      - no-new-privileges:true
+    security_opt: ["no-new-privileges:true"]
+
+  ui:
+    build:
+      context: .
+      dockerfile: docker/ui.Dockerfile
+    init: true
+    user: "${RUNTIME_UID_UI:-10003}:${RUNTIME_GID:-10000}"
+    environment:
+      PRODUCT_URL_API_URL: http://agent:8000
+    ports:
+      - "${PRODUCT_URL_UI_PORT:-8501}:8501"
+    depends_on:
+      agent:
+        condition: service_healthy
+        restart: true
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
 
 secrets:
   browser_api_token:
