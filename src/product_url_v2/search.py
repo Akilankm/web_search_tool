@@ -3,21 +3,15 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import requests
 
 from product_url_v2.config import RuntimeConfig
 from product_url_v2.interpretation import build_search_context
-from product_url_v2.models import (
-    Interpretation,
-    ProductInput,
-    SearchAction,
-    SearchObservation,
-    SearchResult,
-)
-
+from product_url_v2.models import Interpretation, ProductInput, SearchAction, SearchObservation, SearchResult
+from product_url_v2.trace import search_observation_summary
 
 _BLOCKED_HOSTS = {
     "google.com", "www.google.com", "serpapi.com", "www.serpapi.com",
@@ -27,6 +21,8 @@ _BLOCKED_HOSTS = {
 _TRACKING_KEYS = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "gclid", "fbclid", "ref", "tag"}
 _INDIRECT_PATH_HINTS = ("/search", "/category", "/categories", "/collections", "/blog", "/news", "/support", "/help")
 _PRODUCT_PATH_HINTS = ("/product", "/products", "/item", "/p/", "/dp/", "/sku", "/shop/")
+
+SearchProgress = Callable[[str, Mapping[str, Any]], None]
 
 
 class SearchClient(Protocol):
@@ -73,7 +69,13 @@ class SerpAPIClient:
         return SearchObservation(action, "ERROR", (), error=f"{type(last_error).__name__}: {last_error}")
 
     def _params(self, action: SearchAction, product: ProductInput) -> dict[str, Any]:
-        params: dict[str, Any] = {"api_key": self.api_key, "engine": action.engine, "output": "json", "no_cache": "true", "device": "desktop"}
+        params: dict[str, Any] = {
+            "api_key": self.api_key,
+            "engine": action.engine,
+            "output": "json",
+            "no_cache": "true",
+            "device": "desktop",
+        }
         if action.engine == "google_immersive_product":
             params.update({"page_token": action.page_token, "more_stores": "true"})
             return params
@@ -97,7 +99,13 @@ class InformationGainSearchPlanner:
     def __init__(self, config: RuntimeConfig) -> None:
         self.config = config
 
-    def run(self, product: ProductInput, interpretation: Interpretation, client: SearchClient) -> SearchCampaign:
+    def run(
+        self,
+        product: ProductInput,
+        interpretation: Interpretation,
+        client: SearchClient,
+        progress: SearchProgress | None = None,
+    ) -> SearchCampaign:
         observations: list[SearchObservation] = []
         actions: list[SearchAction] = []
         signatures: set[str] = set()
@@ -108,10 +116,44 @@ class InformationGainSearchPlanner:
                 raise RuntimeError(f"duplicate paid search action rejected: {action.signature}")
             signatures.add(action.signature)
             actions.append(action)
+            if progress:
+                progress(
+                    "SEARCH_ACTION",
+                    {
+                        "credit_number": action.credit_number,
+                        "engine": action.engine,
+                        "purpose": action.purpose,
+                        "scope": action.scope,
+                        "query": action.query,
+                        "page_token_available": bool(action.page_token),
+                        "target_uncertainty": action.target_uncertainty,
+                        "rationale": action.rationale,
+                    },
+                )
             observation = client.execute(action, product)
             observations.append(observation)
             handles.extend(result.page_token for result in observation.results if result.page_token)
-        return SearchCampaign(tuple(actions), tuple(observations), deduplicate_results(observations))
+            if progress:
+                progress("SEARCH_OBSERVATION", search_observation_summary(observation))
+        candidates = deduplicate_results(observations)
+        if progress:
+            progress(
+                "SEARCH_CANDIDATES",
+                {
+                    "candidate_count": len(candidates),
+                    "candidates": [
+                        {
+                            "url": item.url,
+                            "title": item.title,
+                            "position": item.position,
+                            "engine": item.engine,
+                            "source_section": item.source_section,
+                        }
+                        for item in candidates
+                    ],
+                },
+            )
+        return SearchCampaign(tuple(actions), tuple(observations), candidates)
 
     def plan(
         self,
@@ -128,20 +170,57 @@ class InformationGainSearchPlanner:
         final_credit = credit == self.config.search.credit_limit
         if credit == 1 and not final_credit:
             query = " ".join(dict.fromkeys([*(f'"{item}"' for item in anchors), quoted_text])).strip()
-            return SearchAction(credit, "google", "ESTABLISH_IDENTITY", "country", query=query + retailer, rationale="Use exact identifiers and submitted wording before broadening.")
+            return SearchAction(
+                credit,
+                "google",
+                "ESTABLISH_IDENTITY",
+                "country",
+                query=query + retailer,
+                rationale="Use exact identifiers and submitted wording before broadening.",
+            )
         if not final_credit:
             uncertainty = interpretation.unresolved_discriminators[0] if interpretation.unresolved_discriminators else "variant"
             fresh_handle = next((item for item in handles if f"google_immersive_product|{item}" not in used_signatures), "")
             if fresh_handle:
-                return SearchAction(credit, "google_immersive_product", "RESOLVE_UNCERTAINTY", "country", page_token=fresh_handle, target_uncertainty=uncertainty, rationale="Expand a concrete product entity to compare seller and variant evidence.")
+                return SearchAction(
+                    credit,
+                    "google_immersive_product",
+                    "RESOLVE_UNCERTAINTY",
+                    "country",
+                    page_token=fresh_handle,
+                    target_uncertainty=uncertainty,
+                    rationale="Expand a concrete product entity to compare seller and variant evidence.",
+                )
             negatives = " ".join(_negative_query(item) for item in interpretation.negative_constraints)
             query = f'{quoted_text} "{uncertainty.replace("_", " ")}" {negatives}'.strip()
-            return SearchAction(credit, "google_shopping", "RESOLVE_UNCERTAINTY", "country", query=query, target_uncertainty=uncertainty, rationale="Spend the middle credit on the highest-risk product distinction.")
+            return SearchAction(
+                credit,
+                "google_shopping",
+                "RESOLVE_UNCERTAINTY",
+                "country",
+                query=query,
+                target_uncertainty=uncertainty,
+                rationale="Spend the middle credit on the highest-risk product distinction.",
+            )
         fresh_handle = next((item for item in handles if f"google_immersive_product|{item}" not in used_signatures), "")
         if fresh_handle:
-            return SearchAction(credit, "google_immersive_product", "MANDATORY_URL_RECOVERY", "global", page_token=fresh_handle, rationale="Recover direct seller URLs from a distinct product entity.")
+            return SearchAction(
+                credit,
+                "google_immersive_product",
+                "MANDATORY_URL_RECOVERY",
+                "global",
+                page_token=fresh_handle,
+                rationale="Recover direct seller URLs from a distinct product entity.",
+            )
         query = f'{quoted_text} {" ".join(anchors)} official manufacturer retailer product page'.strip()
-        return SearchAction(credit, "google_ai_mode", "MANDATORY_URL_RECOVERY", "global", query=query, rationale="Final credit is reserved for direct external product URL recovery.")
+        return SearchAction(
+            credit,
+            "google_ai_mode",
+            "MANDATORY_URL_RECOVERY",
+            "global",
+            query=query,
+            rationale="Final credit is reserved for direct external product URL recovery.",
+        )
 
 
 def parse_serpapi_response(action: SearchAction, payload: Mapping[str, Any]) -> SearchObservation:
@@ -165,10 +244,34 @@ def parse_serpapi_response(action: SearchAction, payload: Mapping[str, Any]) -> 
                 url = canonical_url(raw)
                 if not url or not is_external_url(url):
                     continue
-                results.append(SearchResult(url, title, snippet, f"{action.engine}:{section}", action.engine, action.query or action.purpose, position, is_product_like_url(url), token))
+                results.append(
+                    SearchResult(
+                        url,
+                        title,
+                        snippet,
+                        f"{action.engine}:{section}",
+                        action.engine,
+                        action.query or action.purpose,
+                        position,
+                        is_product_like_url(url),
+                        token,
+                    )
+                )
             if token and not any(item.page_token == token for item in results):
                 placeholder = f"https://serpapi.local/entity/{token}"
-                results.append(SearchResult(placeholder, title, snippet, f"{action.engine}:{section}:handle", action.engine, action.query or action.purpose, position, False, token))
+                results.append(
+                    SearchResult(
+                        placeholder,
+                        title,
+                        snippet,
+                        f"{action.engine}:{section}:handle",
+                        action.engine,
+                        action.query or action.purpose,
+                        position,
+                        False,
+                        token,
+                    )
+                )
     metadata = payload.get("search_metadata") if isinstance(payload.get("search_metadata"), Mapping) else {}
     return SearchObservation(
         action=action,
@@ -200,7 +303,12 @@ def canonical_url(value: str) -> str:
         return ""
     host = parsed.hostname.lower().removeprefix("www.")
     port = f":{parsed.port}" if parsed.port and parsed.port not in {80, 443} else ""
-    query = [(key, val) for key, values in parse_qs(parsed.query, keep_blank_values=True).items() if key.lower() not in _TRACKING_KEYS for val in values]
+    query = [
+        (key, val)
+        for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
+        if key.lower() not in _TRACKING_KEYS
+        for val in values
+    ]
     path = re.sub(r"/{2,}", "/", parsed.path or "/")
     if path != "/":
         path = path.rstrip("/")
