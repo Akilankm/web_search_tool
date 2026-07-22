@@ -57,6 +57,9 @@ services:
     user: "${RUNTIME_UID_UI:-10003}:${RUNTIME_GID:-10000}"
     environment:
       PRODUCT_URL_API_URL: http://agent:8000
+      PRODUCT_URL_ARTIFACT_ROOT: /data/artifacts
+    volumes:
+      - ./data/artifacts:/data/artifacts:ro
     ports:
       - "${PRODUCT_URL_UI_PORT:-8501}:8501"
     depends_on:
