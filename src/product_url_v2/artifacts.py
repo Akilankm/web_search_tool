@@ -13,8 +13,13 @@ class ArtifactWriter:
         self.root = root
 
     def prepare(self, row_id: str) -> Path:
+        self.root.mkdir(parents=True, exist_ok=True)
         path = self.root / row_id
         path.mkdir(parents=True, exist_ok=True)
+        # Agent and browser containers use distinct UIDs but a shared runtime GID.
+        # The setgid directory keeps browser screenshots and agent artifacts in the
+        # same writable group without running either service as root.
+        path.chmod(0o2775)
         return path
 
     def write_intermediate(
@@ -50,6 +55,7 @@ class ArtifactWriter:
         temporary = path.with_suffix(path.suffix + ".tmp")
         temporary.write_text(json.dumps(to_jsonable(value), ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
         temporary.replace(path)
+        path.chmod(0o664)
 
     @staticmethod
     def _candidate_csv(path: Path, candidates: Sequence[CandidateAssessment]) -> None:
@@ -65,6 +71,7 @@ class ArtifactWriter:
             for item in candidates:
                 data = to_jsonable(item)
                 writer.writerow({key: " | ".join(data[key]) if isinstance(data.get(key), list) else data.get(key) for key in columns})
+        path.chmod(0o664)
 
     @staticmethod
     def _audit(path: Path, result: ResolutionResult) -> None:
@@ -101,3 +108,4 @@ class ArtifactWriter:
             "",
         ]
         path.write_text("\n".join(lines), encoding="utf-8")
+        path.chmod(0o664)
