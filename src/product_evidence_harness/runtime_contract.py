@@ -2,7 +2,7 @@ from __future__ import annotations
 
 # Increment this whenever notebook, agent, UI or bootstrap compatibility changes
 # in a way that requires rebuilding the Docker agent image.
-RUNTIME_CONTRACT_VERSION = "belief-url-resolution-v10-decision-first-ui"
+RUNTIME_CONTRACT_VERSION = "belief-url-resolution-v11-url-delivery-first"
 
 REQUIRED_RUNTIME_CAPABILITIES = {
     "belief_driven_product_resolution": "belief-driven product resolution",
@@ -12,15 +12,15 @@ REQUIRED_RUNTIME_CAPABILITIES = {
     "compatibility_patches_applied": "agent compatibility-patch bootstrap",
     "manufacturer_first_primary_url": "manufacturer-first primary URL selection",
     "business_judgement_review_artifact": "human-comparable business judgment review artifact",
-    "structured_no_url_review_outcome": "structured no-safe-URL review outcome",
+    "structured_no_url_review_outcome": "exceptional zero-candidate escalation artifact",
     "per_job_runtime_controls": "validated concurrency-safe per-job runtime controls",
-    "executive_url_decision_summary": "decision-first source-evidence-identity-usability summary",
+    "executive_url_decision_summary": "source-evidence-identity-usability URL summary",
+    "best_available_review_url_delivery": "best real non-mismatched direct URL recovery",
 }
 
 # The executive summary is additive and self-derived from these canonical result
-# fields. Keeping it outside the legacy result validator preserves compatibility
-# for historical artifacts and test-injected results while the v10 agent always
-# emits executive_summary for new production jobs.
+# fields. Historical artifacts remain readable while every v11 production job
+# emits executive_summary and attempts review-URL recovery before escalation.
 REQUIRED_RESULT_FIELDS = (
     "product_identification",
     "search.market_decision_path",

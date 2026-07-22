@@ -1,247 +1,189 @@
-# Product URL Decision UI
+# Product URL Finder UI
 
 ## Purpose
 
-The browser application answers one operational question first:
-
-> Did the system find a justifiable product URL that is safe to use?
-
-The result is organised through four review pillars:
-
-1. **Source** — where the URL came from and its authority tier.
-2. **Evidence** — what textual, structured, browser and visual evidence was collected.
-3. **Identity** — which exact product was identified and with what confidence.
-4. **Usability** — whether the URL is openable, extractable, exact, complete and reusable.
-
-The complete audit is retained, but it is collapsed by default so the primary decision remains immediately visible.
-
-## Primary outcome
-
-The primary outcome is one of three explicit URL decisions:
-
-| Status | Meaning |
-|---|---|
-| `JUSTIFIABLE_URL_FOUND` | A direct product URL passed the required identity and usability gates and is ready for downstream use. |
-| `URL_FOUND_REVIEW_REQUIRED` | A candidate URL exists, but one or more gates still require human review. |
-| `NO_JUSTIFIABLE_URL_FOUND` | The bounded search completed, but no candidate was safe enough to return. No URL was fabricated. |
-
-The selected URL is displayed at the top of the result when available.
-
-## Decision-first result hierarchy
-
-The visible result order is:
+The browser application exists to return a usable product URL.
 
 ```text
-URL decision
-→ identified product
-→ overall conclusion
-→ Source / Evidence / Identity / Usability metrics
-→ URL usability checks
-→ decision reasons
-→ search work completed when no URL is returned
-→ candidate URL decisions
-→ collapsed review details
+Primary deliverable
+= product URL
+
+Supporting validation
+= Source + Evidence + Identity + Usability
 ```
 
-This hierarchy is designed for high-stakes review: the conclusion is immediate, while the evidence remains inspectable.
+The system uses product identification and evidence gathering to justify the URL. Those are not substitutes for URL delivery.
+
+## Terminal URL outcomes
+
+### Verified URL
+
+```text
+URL_DELIVERED_VERIFIED
+```
+
+A direct product URL passed the strict identity, browser, evidence-coverage and durability gates.
+
+### Review URL
+
+```text
+URL_DELIVERED_REVIEW_REQUIRED
+```
+
+A real direct product URL was delivered, but one or more strict production gates remain incomplete. The URL remains visible and usable for human review.
+
+The application must prefer a best available review URL over an empty result when the candidate is:
+
+- a real external URL;
+- not a search, category, homepage, social or document URL;
+- not a confirmed wrong product;
+- not a confirmed wrong variant;
+- the strongest remaining candidate after ranking source, evidence, identity and usability signals.
+
+### URL delivery failure
+
+```text
+URL_DELIVERY_FAILED
+```
+
+This is an exceptional escalation, not a successful business result.
+
+It is allowed only when the complete search and recovery route contains no non-mismatched direct external product-page candidate. The interface displays a red failure state and keeps recovery evidence inside a collapsed diagnostic section.
+
+## Interface hierarchy
+
+The standard screen contains only:
+
+1. Product URL or URL-delivery failure
+2. Source status
+3. Evidence status
+4. Identity status and confidence
+5. Usability status
+6. Brief justification
+7. Collapsed review details
+
+Detailed search traces, candidate comparisons, evidence ledgers, judgment records and artifacts are not part of the default result view.
 
 ## Source
 
-Source metrics include:
+Source communicates:
 
 ```text
-selected URL
+URL delivered or failed
 source role
 source authority tier
-manufacturer URL availability
-retailer URL availability
-search actions used
-search stages
-results reviewed
-candidate URLs seen
-qualified candidates
+manufacturer or retailer context
 ```
-
-Manufacturer-first selection remains conditional on production gates. A manufacturer URL is not accepted merely because it is official.
 
 ## Evidence
 
-Evidence metrics include:
+Evidence communicates:
 
 ```text
-identity claim count
-web-verified claim count
-atomic evidence items
-browser evidence records
-visual assets
-feature assessments
-required coverage
-critical coverage
-total coverage
+atomic evidence count
+verified claim count
+requested evidence coverage
+visual and browser evidence availability
 ```
-
-The UI does not invent a synthetic evidence score. It displays factual counts and recorded coverage values.
 
 ## Identity
 
-Identity metrics include:
+Identity communicates:
 
 ```text
 identified product
-ResolutionStatus
-posterior confidence
-hypotheses considered
-unresolved items
-contradictions
+identity status
+confidence
+unresolved distinctions
+confirmed contradictions
 ```
 
-Identity remains separately visible when no usable URL exists. This avoids confusing “product understood” with “URL safe to deliver.”
+Confirmed product or variant mismatches can never be promoted as review URLs.
 
 ## Usability
 
-The URL usability decision evaluates:
+Usability checks:
 
-| Check | Meaning |
+1. Browser openable
+2. Text extractable
+3. Direct product page
+4. Exact product identity
+5. Required evidence coverage
+6. Reusable non-expiring URL
+
+A review URL may have incomplete checks, but it must remain a real direct product candidate and must not have a confirmed identity conflict.
+
+## Candidate recovery order
+
+The final URL-delivery layer examines:
+
+```text
+strict primary URL
+product_match URLs
+evidence-set selected URLs
+candidate records
+feature assessments
+browser evidence
+browser investigations
+SERP result URLs
+candidate_url_records.json
+candidate_state.json
+```
+
+Candidates are deduplicated and ranked. Existing strict selections are preferred, followed by verified or probable product pages, manufacturer and retailer authority, browser usability, extraction quality, coverage, confidence and search position.
+
+## Input
+
+Visible fields:
+
+```text
+Product text   required
+Country code   required
+Retailer       optional
+EAN / GTIN     optional
+```
+
+Collapsed advanced fields:
+
+```text
+Search depth
+Language
+```
+
+Run ID and feature set are assigned automatically.
+
+## Search depth
+
+| Profile | Purpose |
 |---|---|
-| Browser openable | The rendered page can be opened. |
-| Text extractable | Product evidence can be extracted from the page. |
-| Direct product page | The page is a product-detail page, not search/category/navigation content. |
-| Exact product identity | The page matches the requested product and variant. |
-| Required evidence coverage | The page contains the required feature evidence. |
-| Reusable non-expiring URL | The URL is durable and not session-bound or signed. |
+| `Focused` | Reduced investigation breadth for faster execution |
+| `Standard` | Default production operating limits |
+| `Extended` | Broader search, extraction and browser investigation |
 
-Each check is displayed as `PASS`, `FAIL` or `NOT ASSESSED`.
+Profiles change evidence-acquisition limits. They do not weaken identity safety or permit fabricated, indirect or confirmed-mismatch URLs.
 
-## No justifiable URL
+## Review details
 
-A no-URL result is not presented as empty output. The UI explicitly displays **Search work completed**:
+A single collapsed **Review details** section contains:
 
-```text
-search actions used / limit
-results reviewed
-candidate URLs seen
-qualified candidates
-pages extracted
-browser investigations completed
-```
-
-The conclusion explains that the system rejected unsafe, indirect, mismatched, blocked, incomplete or expiring candidates rather than promoting a weak URL.
-
-Suggested next actions are shown only after the completed work is quantified.
-
-## Candidate URL decisions
-
-The candidate table summarises the strongest evaluated URLs with:
-
-```text
-decision
-source role
-identity status
-coverage
-browser openability
-text extractability
-URL reusability
-URL
-rejection or selection reason
-```
-
-This allows reviewers to see why an apparently plausible URL was not selected.
-
-## Review evidence and decision details
-
-Detailed information is preserved in one collapsed section:
-
+- Candidates
 - Evidence
 - Search
 - Identity
 - Decision audit
 - Artifacts
 
-Raw technical JSON is nested inside the Artifacts tab and is never the default view.
-
-## Product input
-
-Visible by default:
-
-```text
-product text
-country code
-retailer (optional)
-EAN / GTIN (optional)
-```
-
-Advanced settings are collapsed:
-
-```text
-search depth
-language (optional)
-```
-
-Run ID and feature set are assigned automatically. Users are not asked to manage technical identifiers.
-
-## Search-depth profiles
-
-| Profile | Intent |
-|---|---|
-| `Fast` | Lower investigation breadth for latency-sensitive use. |
-| `Standard` | Default production balance. |
-| `Deep review` | Broader candidate, browser and visual investigation for difficult products. |
-
-Profiles change search breadth only. They never weaken identity, evidence or URL-usability gates.
-
-## Executive summary contract
-
-Every completed agent result contains:
-
-```text
-executive_summary
-```
-
-The same summary is persisted as:
-
-```text
-executive_summary.json
-```
-
-The contract contains:
-
-```text
-overall_status
-headline
-conclusion
-selected_url
-product_name
-identity_status
-identity_confidence
-source_role
-source_tier
-decision_reasons
-next_actions
-work_completed
-pillars.source
-pillars.evidence
-pillars.identity
-pillars.usability
-candidate_summary
-```
-
-This keeps the UI, API, notebooks and artifacts aligned.
-
 ## Runtime compatibility
 
-Current compatibility contract:
-
 ```text
-belief-url-resolution-v10-decision-first-ui
+belief-url-resolution-v11-url-delivery-first
 ```
 
 Required capability:
 
 ```text
-executive_url_decision_summary=true
+best_available_review_url_delivery=true
 ```
-
-Because the executive summary is generated inside the agent container, this version requires a clean agent rebuild after pulling the code.
 
 ## Azure ML VS Code usage
 
@@ -252,18 +194,16 @@ git pull origin master
 bash scripts/run_product_evidence_ui.sh
 ```
 
-Forward port `8501` privately from the VS Code **Ports** panel.
+Forward port `8501` privately through the VS Code **Ports** panel.
 
 ## Acceptance rules
 
 The UI is correct only when:
 
-1. the URL decision is the first visible result;
-2. a selected URL is immediately openable from the result;
-3. Source, Evidence, Identity and Usability are visible together;
-4. the overall conclusion explains whether the URL is safe for downstream use;
-5. a no-URL outcome quantifies the work completed;
-6. candidate rejection reasons remain available;
-7. technical details are collapsed by default;
-8. Run ID, feature set and individual runtime knobs are not exposed as standard user inputs;
-9. no URL, identity or evidence claim is fabricated.
+1. the URL is the first result;
+2. verified and review URLs are both displayed;
+3. a confirmed mismatch is never delivered;
+4. an empty URL is displayed as a failed delivery, not a normal outcome;
+5. Source, Evidence, Identity and Usability remain immediately visible;
+6. detailed diagnostics remain collapsed;
+7. no URL is fabricated.

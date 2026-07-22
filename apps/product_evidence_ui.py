@@ -33,13 +33,13 @@ from product_evidence_harness.runtime_controls import default_runtime_controls  
 
 
 AGENT_URL = os.getenv("PRODUCT_AGENT_URL", "http://127.0.0.1:8788").rstrip("/")
-EXPECTED_RUNTIME = "belief-url-resolution-v10-decision-first-ui"
+EXPECTED_RUNTIME = "belief-url-resolution-v11-url-delivery-first"
 TERMINAL_STATUSES = {"COMPLETED", "REVIEW_REQUIRED", "FAILED"}
 MAX_POLL_SECONDS = 30 * 60
 DEFAULT_FEATURE_SET = os.getenv("PRODUCT_UI_FEATURE_SET", "toy_features")
 
 EXECUTION_PROFILES: dict[str, dict[str, int]] = {
-    "Fast": {
+    "Focused": {
         "serpapi_credits": 2,
         "full_scrapes": 3,
         "scrapes_per_domain": 1,
@@ -50,7 +50,7 @@ EXECUTION_PROFILES: dict[str, dict[str, int]] = {
         "images_in_reasoning": 6,
     },
     "Standard": default_runtime_controls(),
-    "Deep review": {
+    "Extended": {
         "serpapi_credits": 3,
         "full_scrapes": 10,
         "scrapes_per_domain": 3,
@@ -63,14 +63,14 @@ EXECUTION_PROFILES: dict[str, dict[str, int]] = {
 }
 
 PROGRESS_STAGES = (
-    ("UNDERSTAND", "Understand input"),
-    ("SEARCH", "Search sources"),
-    ("IDENTIFY", "Verify product identity"),
-    ("USABILITY", "Validate URL usability"),
+    ("UNDERSTAND", "Understand"),
+    ("SEARCH", "Search"),
+    ("VERIFY", "Verify"),
+    ("DELIVER", "Deliver URL"),
 )
 
 st.set_page_config(
-    page_title="Product URL Decision",
+    page_title="Product URL Finder",
     page_icon="◈",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -104,7 +104,7 @@ def clean_optional(value: Any) -> str | None:
     return text or None
 
 
-def compact(value: Any, limit: int = 240) -> str:
+def compact(value: Any, limit: int = 260) -> str:
     if value in (None, "", [], {}, ()):
         return "—"
     text = (
@@ -128,16 +128,16 @@ def percentage(value: Any) -> str:
     return f"{max(0.0, min(1.0, number)):.1%}"
 
 
+def readable(value: Any) -> str:
+    return str(value or "Not available").replace("_", " ").strip().title()
+
+
 def yes_no(value: Any) -> str:
     if value is True:
         return "Yes"
     if value is False:
         return "No"
     return "Not assessed"
-
-
-def readable(value: Any) -> str:
-    return str(value or "Not available").replace("_", " ").strip().title()
 
 
 def runtime_sidebar() -> dict[str, Any] | None:
@@ -161,9 +161,8 @@ def runtime_sidebar() -> dict[str, Any] | None:
         st.sidebar.code("./scripts/azureml_startup.sh --clean-build")
     else:
         st.sidebar.error(f"Runtime: {health.get('status') or 'unknown'}")
-    st.sidebar.caption(f"Agent: {AGENT_URL}")
     st.sidebar.caption(f"Evidence browser: {browser.get('status') or 'unknown'}")
-    st.sidebar.caption(f"Contract: {contract}")
+    st.sidebar.caption(f"Runtime: {contract}")
     return health
 
 
@@ -173,15 +172,15 @@ def progress_key(stage: str, status: str) -> str:
         return "UNDERSTAND"
     if any(token in value for token in ("SEARCH", "DISCOVER", "SCRAP")):
         return "SEARCH"
-    if any(token in value for token in ("BROWSER", "REASON", "IDENT")):
-        return "IDENTIFY"
-    if any(token in value for token in ("VALIDAT", "WRITING", "COMPLETED", "REVIEW")):
-        return "USABILITY"
+    if any(token in value for token in ("BROWSER", "REASON", "IDENT", "VALIDAT")):
+        return "VERIFY"
+    if any(token in value for token in ("WRITING", "COMPLETED", "REVIEW")):
+        return "DELIVER"
     return "UNDERSTAND"
 
 
 def progress_fraction(key: str) -> float:
-    return {"UNDERSTAND": 0.15, "SEARCH": 0.42, "IDENTIFY": 0.72, "USABILITY": 0.94}.get(key, 0.05)
+    return {"UNDERSTAND": 0.15, "SEARCH": 0.45, "VERIFY": 0.75, "DELIVER": 0.95}.get(key, 0.05)
 
 
 def render_progress(active: str | None = None, complete: bool = False) -> None:
@@ -194,112 +193,65 @@ def render_progress(active: str | None = None, complete: bool = False) -> None:
             st.caption(f"{marker} {label}")
 
 
-def _summary(result: Mapping[str, Any]) -> dict[str, Any]:
+def summary_for(result: Mapping[str, Any]) -> dict[str, Any]:
     existing = result.get("executive_summary")
     return dict(existing) if isinstance(existing, Mapping) else build_executive_summary(result)
 
 
-def render_status_banner(summary: Mapping[str, Any]) -> None:
+def render_status(summary: Mapping[str, Any]) -> None:
     status = str(summary.get("overall_status") or "UNKNOWN")
-    headline = str(summary.get("headline") or "URL decision unavailable")
-    if status == "JUSTIFIABLE_URL_FOUND":
+    headline = str(summary.get("headline") or "URL result unavailable")
+    if status == "URL_DELIVERED_VERIFIED":
         st.success(f"**{headline}**")
-    elif status == "URL_FOUND_REVIEW_REQUIRED":
-        st.warning(f"**{headline}**")
-    elif status == "NO_JUSTIFIABLE_URL_FOUND":
+    elif status == "URL_DELIVERED_REVIEW_REQUIRED":
         st.warning(f"**{headline}**")
     else:
         st.error(f"**{headline}**")
 
 
-def render_work_completed(summary: Mapping[str, Any]) -> None:
-    work = dict(summary.get("work_completed") or {})
-    st.subheader("Search work completed")
-    st.caption(
-        "This quantifies the work performed even when no URL is safe enough to return."
-    )
-    values = (
-        ("Search actions", f"{work.get('search_actions_used', 0)} / {work.get('search_action_limit', 0)}"),
-        ("Results reviewed", work.get("results_seen", 0)),
-        ("Candidate URLs", work.get("candidate_urls_seen", 0)),
-        ("Qualified candidates", work.get("qualified_candidates", 0)),
-        ("Pages extracted", work.get("pages_extracted", 0)),
-        ("Browser investigations", work.get("browser_investigations_completed", 0)),
-    )
-    columns = st.columns(3)
-    for index, (label, value) in enumerate(values):
-        with columns[index % 3]:
-            st.metric(label, value)
-
-
-def render_pillars(summary: Mapping[str, Any]) -> None:
+def render_primary_metrics(summary: Mapping[str, Any]) -> None:
     pillars = dict(summary.get("pillars") or {})
     source = dict(pillars.get("source") or {})
     evidence = dict(pillars.get("evidence") or {})
     identity = dict(pillars.get("identity") or {})
     usability = dict(pillars.get("usability") or {})
 
-    st.subheader("Decision summary")
-    source_col, evidence_col, identity_col, usability_col = st.columns(4)
-
-    with source_col:
-        st.markdown("### Source")
-        st.metric("Status", readable(source.get("status")))
-        st.write(f"**Role:** {readable(source.get('source_role'))}")
-        st.write(f"**Tier:** {readable(source.get('source_tier'))}")
-        st.write(f"**Results reviewed:** {source.get('results_seen', 0)}")
-
-    with evidence_col:
-        st.markdown("### Evidence")
-        st.metric("Status", readable(evidence.get("status")))
-        st.write(f"**Evidence items:** {evidence.get('atomic_evidence_items', 0)}")
-        st.write(f"**Verified claims:** {evidence.get('web_verified_claims', 0)}")
-        st.write(f"**Required coverage:** {percentage(evidence.get('required_coverage'))}")
-
-    with identity_col:
-        st.markdown("### Identity")
-        st.metric("Status", readable(identity.get("status")))
-        st.write(f"**Confidence:** {percentage(identity.get('confidence'))}")
-        st.write(f"**Hypotheses checked:** {identity.get('hypotheses_considered', 0)}")
-        st.write(f"**Unresolved items:** {identity.get('unresolved_items', 0)}")
-
-    with usability_col:
-        st.markdown("### Usability")
-        st.metric("Status", readable(usability.get("status")))
-        assessed = usability.get("assessed_checks", 0)
-        passed = usability.get("passed_checks", 0)
-        st.write(f"**Checks passed:** {passed} / {assessed or 6}")
-        st.write(f"**Strictly verified:** {yes_no(usability.get('strictly_verified'))}")
-        st.write(f"**Downstream ready:** {yes_no(usability.get('coding_ready'))}")
+    columns = st.columns(4)
+    with columns[0]:
+        st.metric("Source", readable(source.get("status")))
+        st.caption(f"{readable(source.get('source_role'))} · {readable(source.get('source_tier'))}")
+    with columns[1]:
+        st.metric("Evidence", readable(evidence.get("status")))
+        st.caption(
+            f"{evidence.get('atomic_evidence_items', 0)} evidence items · "
+            f"{percentage(evidence.get('required_coverage'))} coverage"
+        )
+    with columns[2]:
+        st.metric("Identity", readable(identity.get("status")))
+        st.caption(
+            f"{percentage(identity.get('confidence'))} confidence · "
+            f"{identity.get('unresolved_items', 0)} unresolved"
+        )
+    with columns[3]:
+        st.metric("Usability", readable(usability.get("status")))
+        st.caption(
+            f"{usability.get('passed_checks', 0)} / {usability.get('assessed_checks', 0) or 6} checks passed"
+        )
 
 
-def render_usability_checks(summary: Mapping[str, Any]) -> None:
+def render_usability(summary: Mapping[str, Any]) -> None:
     usability = dict((summary.get("pillars") or {}).get("usability") or {})
-    checks = [dict(item) for item in usability.get("checks") or [] if isinstance(item, Mapping)]
-    if not checks:
-        return
     rows = [
-        {
-            "Check": item.get("label"),
-            "Result": readable(item.get("status")),
-        }
-        for item in checks
+        {"Check": item.get("label"), "Result": readable(item.get("status"))}
+        for item in usability.get("checks") or []
+        if isinstance(item, Mapping)
     ]
-    st.subheader("URL usability checks")
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    if rows:
+        st.subheader("URL usability")
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
 
-def render_reasons(summary: Mapping[str, Any]) -> None:
-    reasons = [str(item) for item in summary.get("decision_reasons") or [] if str(item).strip()]
-    st.subheader("Why this decision is justifiable")
-    if reasons:
-        for item in reasons:
-            st.markdown(f"- {item}")
-    else:
-        st.info("No additional decision reason was recorded.")
-
-
-def render_candidates(summary: Mapping[str, Any]) -> None:
+def render_candidate_table(summary: Mapping[str, Any]) -> None:
     rows = []
     for item in summary.get("candidate_summary") or []:
         if not isinstance(item, Mapping):
@@ -307,73 +259,22 @@ def render_candidates(summary: Mapping[str, Any]) -> None:
         rows.append(
             {
                 "Decision": item.get("decision"),
-                "Source role": readable(item.get("source_role")),
                 "Identity": readable(item.get("identity_status")),
                 "Coverage": percentage(item.get("coverage")),
                 "Openable": yes_no(item.get("browser_openable")),
                 "Extractable": yes_no(item.get("text_scrapable")),
                 "Reusable": yes_no(item.get("durable_url")),
                 "URL": item.get("url"),
-                "Reason": compact(item.get("reason"), 320),
+                "Reason": compact(item.get("reason"), 300),
             }
         )
     if rows:
-        st.subheader("Candidate URL decisions")
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
 
-def render_identity_details(result: Mapping[str, Any]) -> None:
-    identity = dict(result.get("product_identification") or {})
-    hypothesis = identity.get("leading_hypothesis") or identity.get("selected_hypothesis") or {}
-    left, right = st.columns(2)
-    with left:
-        st.markdown("**Selected identity**")
-        st.json(hypothesis or identity, expanded=False)
-    with right:
-        st.markdown("**Identity metrics**")
-        metrics = dict(identity.get("metrics") or {})
-        if metrics:
-            st.dataframe(
-                pd.DataFrame(
-                    {"Metric": [readable(key) for key in metrics], "Value": list(metrics.values())}
-                ),
-                hide_index=True,
-                use_container_width=True,
-            )
-        unresolved = list(identity.get("uncertainties") or []) + list(identity.get("unknowns") or [])
-        if unresolved:
-            st.markdown("**Unresolved details**")
-            for item in unresolved:
-                st.markdown(f"- {compact(item, 300)}")
-
-
-def render_evidence_details(result: Mapping[str, Any]) -> None:
-    identity = dict(result.get("product_identification") or {})
-    evidence_rows = []
-    for item in identity.get("evidence_ledger") or []:
-        if not isinstance(item, Mapping):
-            continue
-        evidence_rows.append(
-            {
-                "Field": item.get("field"),
-                "Value": item.get("value"),
-                "Support": readable(item.get("polarity")),
-                "Reliability": percentage(item.get("source_reliability")),
-                "Confidence": percentage(item.get("extraction_confidence")),
-                "Source": item.get("source_url"),
-                "Excerpt": compact(item.get("excerpt"), 260),
-            }
-        )
-    if evidence_rows:
-        st.dataframe(pd.DataFrame(evidence_rows), hide_index=True, use_container_width=True)
-    else:
-        st.info("No atomic evidence ledger was returned.")
-
-
 def render_search_details(result: Mapping[str, Any]) -> None:
-    search = dict(result.get("search") or {})
     rows = []
-    for index, item in enumerate(search.get("stages") or [], start=1):
+    for index, item in enumerate((result.get("search") or {}).get("stages") or [], start=1):
         if not isinstance(item, Mapping):
             continue
         rows.append(
@@ -385,7 +286,6 @@ def render_search_details(result: Mapping[str, Any]) -> None:
                 "Qualified": item.get("candidates_qualified") or 0,
                 "Extracted": item.get("candidates_scraped") or 0,
                 "Query": compact(item.get("query"), 220),
-                "Decision": compact(item.get("reason"), 260),
             }
         )
     if rows:
@@ -394,9 +294,40 @@ def render_search_details(result: Mapping[str, Any]) -> None:
         st.info("No search-stage trace was returned.")
 
 
+def render_identity_details(result: Mapping[str, Any]) -> None:
+    identity = dict(result.get("product_identification") or {})
+    hypothesis = identity.get("leading_hypothesis") or identity.get("selected_hypothesis") or {}
+    st.json(hypothesis or identity, expanded=False)
+
+
+def render_evidence_details(result: Mapping[str, Any]) -> None:
+    identity = dict(result.get("product_identification") or {})
+    rows = []
+    for item in identity.get("evidence_ledger") or []:
+        if not isinstance(item, Mapping):
+            continue
+        rows.append(
+            {
+                "Field": item.get("field"),
+                "Value": item.get("value"),
+                "Support": readable(item.get("polarity")),
+                "Reliability": percentage(item.get("source_reliability")),
+                "Confidence": percentage(item.get("extraction_confidence")),
+                "Source": item.get("source_url"),
+            }
+        )
+    if rows:
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    else:
+        st.info("No atomic evidence ledger was returned.")
+
+
 def render_audit_details(result: Mapping[str, Any]) -> None:
-    review = dict(result.get("business_judgement_review") or {})
-    steps = [item for item in review.get("steps") or [] if isinstance(item, Mapping)]
+    steps = [
+        item
+        for item in (result.get("business_judgement_review") or {}).get("steps") or []
+        if isinstance(item, Mapping)
+    ]
     if not steps:
         st.info("No structured decision audit was returned.")
         return
@@ -404,30 +335,25 @@ def render_audit_details(result: Mapping[str, Any]) -> None:
         with st.expander(
             f"Step {item.get('sequence_number') or '—'} · {readable(item.get('decision_stage'))}"
         ):
-            st.markdown(f"**Question:** {compact(item.get('business_question'), 500)}")
             st.markdown(f"**Evidence:** {compact(item.get('evidence_considered'), 800)}")
             st.markdown(f"**Rule:** {compact(item.get('business_rule_applied'), 600)}")
             st.markdown(f"**Decision:** {compact(item.get('agent_judgement'), 600)}")
             st.markdown(f"**Effect:** {compact(item.get('effect_on_next_action'), 600)}")
 
 
-def host_artifact_dir(result: Mapping[str, Any]) -> Path | None:
-    row_id = str((result.get("product") or {}).get("row_id") or "").strip()
-    return PROJECT_ROOT / "data" / "artifacts" / row_id if row_id else None
-
-
 def render_artifacts(result: Mapping[str, Any], elapsed_seconds: float | None) -> None:
     if elapsed_seconds is not None:
         st.metric("Elapsed", f"{elapsed_seconds:.1f}s")
-    artifact_root = host_artifact_dir(result)
-    if artifact_root and artifact_root.is_dir():
-        files = sorted(path for path in artifact_root.rglob("*") if path.is_file())
-        st.caption(str(artifact_root))
+    row_id = str((result.get("product") or {}).get("row_id") or "").strip()
+    root = PROJECT_ROOT / "data" / "artifacts" / row_id if row_id else None
+    if root and root.is_dir():
+        files = sorted(path for path in root.rglob("*") if path.is_file())
+        st.caption(str(root))
         st.dataframe(
             pd.DataFrame(
                 [
                     {
-                        "Artifact": str(path.relative_to(artifact_root)),
+                        "Artifact": str(path.relative_to(root)),
                         "Size KB": round(path.stat().st_size / 1024, 2),
                     }
                     for path in files
@@ -442,11 +368,17 @@ def render_artifacts(result: Mapping[str, Any], elapsed_seconds: float | None) -
         st.json(result, expanded=False)
 
 
-def render_review_details(result: Mapping[str, Any], elapsed_seconds: float | None) -> None:
-    with st.expander("Review evidence and decision details", expanded=False):
-        evidence_tab, search_tab, identity_tab, audit_tab, artifact_tab = st.tabs(
-            ["Evidence", "Search", "Identity", "Decision audit", "Artifacts"]
+def render_review_details(
+    result: Mapping[str, Any],
+    summary: Mapping[str, Any],
+    elapsed_seconds: float | None,
+) -> None:
+    with st.expander("Review details", expanded=False):
+        candidate_tab, evidence_tab, search_tab, identity_tab, audit_tab, artifact_tab = st.tabs(
+            ["Candidates", "Evidence", "Search", "Identity", "Decision audit", "Artifacts"]
         )
+        with candidate_tab:
+            render_candidate_table(summary)
         with evidence_tab:
             render_evidence_details(result)
         with search_tab:
@@ -460,47 +392,56 @@ def render_review_details(result: Mapping[str, Any], elapsed_seconds: float | No
 
 
 def render_result(result: dict[str, Any], elapsed_seconds: float | None = None) -> None:
-    summary = _summary(result)
-    st.divider()
-    render_progress("USABILITY", complete=True)
-    render_status_banner(summary)
-
+    summary = summary_for(result)
     selected_url = clean_optional(summary.get("selected_url"))
-    product_name = str(summary.get("product_name") or "Product identity not resolved")
-    identity_status = readable(summary.get("identity_status"))
-    confidence = percentage(summary.get("identity_confidence"))
 
-    st.header(product_name)
-    st.caption(f"Identity: {identity_status} · Confidence: {confidence}")
+    st.divider()
+    render_progress("DELIVER", complete=True)
+    render_status(summary)
 
     if selected_url:
-        st.link_button("Open selected product URL", selected_url, type="primary", use_container_width=True)
+        st.link_button(
+            "Open product URL",
+            selected_url,
+            type="primary",
+            use_container_width=True,
+        )
+        st.code(selected_url, language=None)
         st.caption(
-            f"Selected source: {readable(summary.get('source_role'))} · "
-            f"Authority tier: {readable(summary.get('source_tier'))}"
+            f"Source: {readable(summary.get('source_role'))} · "
+            f"Identity: {readable(summary.get('identity_status'))} · "
+            f"Confidence: {percentage(summary.get('identity_confidence'))}"
         )
     else:
-        st.info(
-            "No URL is displayed because every evaluated candidate failed at least one required identity or usability condition."
+        st.error(
+            "The required product URL was not delivered. This run is not a successful output and requires escalation."
         )
 
-    st.subheader("Overall conclusion")
+    render_primary_metrics(summary)
+
+    st.subheader("Justification")
     st.write(summary.get("conclusion") or "No conclusion was returned.")
 
-    render_pillars(summary)
-    render_usability_checks(summary)
-    render_reasons(summary)
-
-    if not selected_url:
-        render_work_completed(summary)
-        next_actions = [str(item) for item in summary.get("next_actions") or [] if str(item).strip()]
-        if next_actions:
-            st.subheader("What can improve the next attempt")
-            for item in next_actions:
+    if selected_url:
+        render_usability(summary)
+        reasons = [str(item) for item in summary.get("decision_reasons") or [] if str(item).strip()]
+        if reasons:
+            with st.expander("Why this URL was selected", expanded=False):
+                for item in reasons:
+                    st.markdown(f"- {item}")
+    else:
+        with st.expander("URL delivery failure diagnostics", expanded=False):
+            work = dict(summary.get("work_completed") or {})
+            st.write(
+                f"Search actions: {work.get('search_actions_used', 0)} / "
+                f"{work.get('search_action_limit', 0)} · "
+                f"Results reviewed: {work.get('results_seen', 0)} · "
+                f"Candidate URLs: {work.get('candidate_urls_seen', 0)}"
+            )
+            for item in summary.get("next_actions") or []:
                 st.markdown(f"- {item}")
 
-    render_candidates(summary)
-    render_review_details(result, elapsed_seconds)
+    render_review_details(result, summary, elapsed_seconds)
 
 
 def friendly_error(exc: Exception) -> tuple[str, str]:
@@ -511,17 +452,15 @@ def friendly_error(exc: Exception) -> tuple[str, str]:
             "Run ./scripts/azureml_startup.sh --clean-build and reopen the application.",
         )
     return (
-        "The URL decision could not complete.",
-        "Open the technical detail below. No URL or product identity was fabricated.",
+        "The product URL run failed.",
+        "Open the technical detail below and inspect the generated failure artifact.",
     )
 
 
-st.title("Product URL Decision")
+st.title("Product URL Finder")
 st.markdown(
-    "Find a **justifiable product URL** and see the decision through four business views: "
-    "**Source, Evidence, Identity and Usability.**"
+    "Return the strongest usable **product URL** with supporting Source, Evidence, Identity and Usability validation."
 )
-st.caption("The main output is the URL decision. Detailed audit evidence remains available for high-stakes review.")
 
 health = runtime_sidebar()
 
@@ -550,12 +489,9 @@ with st.form("product_url_form", clear_on_submit=False):
             execution_profile = st.selectbox("Search depth", tuple(EXECUTION_PROFILES), index=1)
         with language_col:
             language_code = st.text_input("Language", placeholder="Optional, e.g. de")
-        st.caption(
-            "Run ID and feature set are assigned automatically. Search depth changes investigation breadth, not acceptance rules."
-        )
 
     submitted = st.form_submit_button(
-        "Find justifiable URL",
+        "Find product URL",
         type="primary",
         use_container_width=True,
         disabled=health is None
@@ -631,7 +567,7 @@ if submitted:
             st.session_state.run_row_id = (
                 f"RUN-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
             )
-            progress_bar.progress(1.0, text="URL decision ready")
+            progress_bar.progress(1.0, text="Product URL ready")
             status_box.empty()
             flow_box.empty()
         except Exception as exc:
@@ -651,6 +587,4 @@ if "run_result" in st.session_state:
         st.session_state.get("run_elapsed_seconds"),
     )
 else:
-    st.caption(
-        "Output: selected URL or explicit no-URL decision, identified product, evidence strength, usability checks and search work completed."
-    )
+    st.caption("Output: product URL, source, evidence, identity confidence and usability status.")
