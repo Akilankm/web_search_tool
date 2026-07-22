@@ -107,8 +107,9 @@ def test_result_marks_retailer_fallback_when_no_manufacturer_passes() -> None:
 
 def test_runtime_health_advertises_product_evidence_contracts() -> None:
     capabilities = runtime_capabilities()
-    assert RUNTIME_CONTRACT_VERSION == "belief-url-resolution-v9-product-evidence-ui"
+    assert RUNTIME_CONTRACT_VERSION == "belief-url-resolution-v10-decision-first-ui"
     assert capabilities["manufacturer_first_primary_url"] is True
     assert capabilities["business_judgement_review_artifact"] is True
     assert capabilities["structured_no_url_review_outcome"] is True
     assert capabilities["per_job_runtime_controls"] is True
+    assert capabilities["executive_url_decision_summary"] is True
