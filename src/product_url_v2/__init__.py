@@ -18,13 +18,15 @@ from product_url_v2.models import (
     to_jsonable,
 )
 from product_url_v2.orchestrator import ProductURLOrchestrator
+from product_url_v2.trace import TRACE_CONTRACT, TRACE_NOTICE, candidate_judgment
 
-__version__ = "1.0.2"
+__version__ = "1.1.0"
 
 __all__ = [
     "BrowserEvidence", "CandidateAssessment", "DeliveryDecision", "DeliveryStatus",
     "DeterministicProductInterpreter", "GateStatus", "IdentityMatch", "Interpretation",
     "PageEvidence", "ProductHypothesis", "ProductInput", "ProductURLOrchestrator",
-    "ResolutionResult", "RuntimeConfig", "SourceRole", "build_search_context",
-    "load_config", "load_feature_set", "normalize_product_text", "to_jsonable",
+    "ResolutionResult", "RuntimeConfig", "SourceRole", "TRACE_CONTRACT", "TRACE_NOTICE",
+    "build_search_context", "candidate_judgment", "load_config", "load_feature_set",
+    "normalize_product_text", "to_jsonable",
 ]
