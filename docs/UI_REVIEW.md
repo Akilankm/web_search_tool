@@ -2,7 +2,9 @@
 
 ## Purpose
 
-The UI is a review workspace for product coders. Its purpose is not to display a decorative progress bar; it must let a reviewer understand what the system observed, which alternatives were considered, how each candidate passed or failed independent gates, and why a URL was selected.
+The UI is a product URL delivery workbench for human coders. Its first responsibility is to show whether a usable direct URL was delivered. Evidence quality, identity confidence, browser behavior and coding readiness are secondary independent judgments.
+
+The workspace must not display a stakeholder-facing failure when non-conflicting product-like candidates exist. Incomplete evidence changes the delivery grade to `REVIEW_REQUIRED`; it does not erase the URL.
 
 ## Thinking mode
 
@@ -21,23 +23,39 @@ The wording “thinking mode” is user-facing. The technical contract is intent
 | Browser | Allocation, browser access, final URL, product controls, screenshot and automation errors |
 | Deliver | Candidate ranking, strengths, risks, blockers, selected URL and decision reasons |
 
+## Stakeholder hierarchy
+
+The final screen presents outcomes in this order:
+
+1. **URL delivered — Yes or No**
+2. **Selected direct product URL**
+3. **Delivery grade — Verified or Review Required**
+4. **Identity evidence confidence**
+5. **Candidate, source, browser and coding evidence**
+
+A 0% automated identity-evidence score is not displayed as an overall system failure when a usable URL is delivered. It means the URL requires human identity confirmation.
+
 ## Final workspace
 
 The final result is divided into six tabs:
 
-1. **Decision** — selected URL, confidence, reasons, warnings and selected-candidate gates.
-2. **Identity** — signals, evidence source, hypotheses, probabilities, unknowns and negative constraints.
-3. **Search & sources** — every paid action and every retained source observation.
-4. **Candidate judgments** — side-by-side gates and per-candidate strengths, risks, blockers and structured fields.
-5. **Browser & usability** — browser status, final URL, controls, errors and screenshots.
+1. **Decision** — selected URL, delivery grade, reasons, warnings and selected-candidate gates.
+2. **Candidate evidence** — side-by-side candidates, delivery basis, structured fields, strengths, risks and blockers.
+3. **Identity & hypotheses** — signals, evidence source, hypotheses, probabilities and unresolved discriminators.
+4. **Search sources** — every paid action and retained source observation.
+5. **Browser usability** — browser status, final URL, controls, errors and screenshots.
 6. **Audit & export** — complete trace, result JSON, candidate CSV and artifact directory.
 
 ## Reliability rules
 
+- A non-conflicting product-like candidate must be delivered.
+- Missing identity support is `UNVERIFIED`, not `MISMATCH`.
 - `NOT_ASSESSED` is displayed as unknown, never as failure.
 - Browser automation failure is not labeled as human URL failure.
+- Acquisition failure does not erase the original product-like search URL.
+- A redirect to a homepage, consent page or login page does not replace the original product URL.
 - Missing coding fields do not erase a valid direct product URL.
-- Identity conflicts remain hard blockers.
+- Explicit EAN/model conflicts remain hard blockers.
 - Homepages, categories, search pages and intermediary URLs cannot be selected.
 - The selected candidate is visually distinguished, but rejected candidates remain visible.
 - Evidence screenshots are mounted read-only into the UI container.

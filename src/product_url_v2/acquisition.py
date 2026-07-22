@@ -30,6 +30,7 @@ class PageAcquirer:
         progress: AcquisitionProgress | None = None,
     ) -> dict[str, PageEvidence]:
         selected = self._select(candidates)
+        selected_urls = {item.url for item in selected}
         if progress:
             progress(
                 "ACQUISITION_PLAN",
@@ -42,6 +43,7 @@ class PageAcquirer:
                     "selected_urls": [item.url for item in selected],
                 },
             )
+
         output: dict[str, PageEvidence] = {}
         with ThreadPoolExecutor(max_workers=self.config.max_workers) as pool:
             futures = {pool.submit(self.acquire, item.url): item.url for item in selected}
@@ -68,6 +70,32 @@ class PageAcquirer:
                 output[url] = evidence
                 if progress:
                     progress("PAGE_FETCHED", page_evidence_summary(evidence))
+
+        # Acquisition is a bounded evidence operation, not an admission gate.
+        # Candidates outside the HTTP budget remain first-class URL candidates
+        # with explicit NOT_ASSESSED page evidence so delivery can still return
+        # their original product-like URL for human review.
+        for item in candidates:
+            if item.url in selected_urls:
+                continue
+            evidence = PageEvidence(
+                requested_url=item.url,
+                final_url=item.url,
+                status_code=None,
+                content_type="",
+                title="",
+                description="",
+                visible_text="",
+                jsonld_products=(),
+                metadata={},
+                links=(),
+                images=(),
+                fetch_status=GateStatus.NOT_ASSESSED,
+                fetch_error="Not selected for HTTP acquisition under the bounded evidence budget.",
+            )
+            output[item.url] = evidence
+            if progress:
+                progress("PAGE_FETCHED", page_evidence_summary(evidence))
         return output
 
     def acquire(self, url: str) -> PageEvidence:

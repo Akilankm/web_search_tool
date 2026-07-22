@@ -12,7 +12,7 @@ There is one runtime package: `product_url_v2`. It contains no legacy imports, c
 | `reasoning.py` | Optional structured PCA LLM refinement with strict anti-invention validation |
 | `search.py` | SerpAPI planning, billable-request deduplication, parsing, URL admission and search progress events |
 | `acquisition.py` | Bounded HTTP acquisition, JSON-LD extraction and acquisition progress events |
-| `evaluation.py` | Identity, direct-page, source, country, retailer and coding judgments |
+| `evaluation.py` | Identity, direct-page, source, country, retailer and coding judgments plus mandatory URL-first selection |
 | `trace.py` | Public observable evidence and candidate-judgment summaries |
 | `ui_presenter.py` | Pure UI table/stage/event transformations |
 | `browser.py` | Browser allocation and service client |
@@ -61,6 +61,8 @@ Duplicate identity is calculated from the actual billable request. Reusing an Im
 
 All external observations remain in the search artifact. Only structurally product-like external URLs enter acquisition. Homepages, search/category pages, documents, social/media URLs, Google redirects and SerpAPI intermediary URLs cannot become deliverable candidates.
 
+The admitted search URL is retained as the primary delivery handle. If automated acquisition redirects to a homepage, consent page, login page or other non-product path, the redirect does not replace the original product-like URL.
+
 ## Candidate judgment
 
 Each candidate is evaluated independently across:
@@ -78,6 +80,12 @@ Each candidate is evaluated independently across:
 
 A single weighted score cannot overwrite these axes.
 
+Absence of evidence is represented as `UNVERIFIED` or `NOT_ASSESSED`. `MISMATCH` is reserved for explicit contradictory evidence, such as an EAN/GTIN conflict. Failed acquisition, failed browser automation or missing coding fields are review risks, not proof that the URL is unusable.
+
 ## Delivery invariant
 
-`VERIFIED` and `REVIEW_REQUIRED` always contain a direct URL. A URL can be suppressed only by explicit wrong-product evidence, explicit non-product-page evidence, transient/intermediary URL evidence, or complete absence of a direct candidate after recovery.
+- `VERIFIED` always contains a direct URL and all strict gates pass.
+- `REVIEW_REQUIRED` always contains the strongest non-conflicting product-like URL, even when page, browser, country or coding evidence is incomplete.
+- `FAILED` is valid only when no product-like external URL exists or every discovered URL has an explicit wrong-product, non-product or transient/intermediary blocker.
+
+A run with one or more non-conflicting product-like candidates cannot finish with an empty URL.

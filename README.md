@@ -4,7 +4,7 @@
 
 ## Release
 
-- Version: `1.1.0`
+- Version: `1.1.1`
 - Runtime contract: `product-url-resolver-v1`
 - Observable trace contract: `observable-decision-trace-v1`
 - Python: `3.10–3.12`
@@ -14,10 +14,12 @@
 
 | Status | Contract |
 |---|---|
-| `VERIFIED` | Exact identity and all strict URL/coding gates passed; direct URL is mandatory |
-| `REVIEW_REQUIRED` | Strongest non-mismatched direct product URL is delivered with explicit warnings |
-| `FAILED` | No direct product candidate survived the complete bounded recovery campaign |
+| `VERIFIED` | A direct product URL is delivered and exact identity plus all strict URL/coding gates passed |
+| `REVIEW_REQUIRED` | A real product-like URL is delivered even when identity, acquisition, browser or coding evidence is incomplete |
+| `FAILED` | No usable external product-like URL exists, or every discovered URL has an explicit wrong-product, non-product or transient/intermediary blocker |
 | `TECHNICAL_FAILURE` | Configuration, dependency or runtime defect prevented a valid decision |
+
+**Mandatory URL rule:** when at least one non-conflicting product-like URL survives search, the system must return the strongest URL. Missing evidence is `UNVERIFIED`, not `MISMATCH`. Browser failure, scrape failure, country uncertainty and missing coding fields may downgrade the result to `REVIEW_REQUIRED`, but they cannot erase the URL.
 
 Product identity, URL delivery, browser automation and coding completeness are independent axes. Browser automation failure does not mean a human cannot open a URL. Missing coding fields do not erase a usable product URL. `NOT_ASSESSED` is never rewritten as `FAIL`.
 
@@ -33,7 +35,7 @@ Input
 → bounded HTTP/JSON-LD acquisition
 → identity/source/page/durability evaluation
 → evidence-diverse rendered-browser checks
-→ mandatory URL-delivery policy
+→ mandatory URL-first delivery policy
 → stable JSON/CSV/Markdown artifacts
 → live observable decision trace for human coders
 ```
@@ -62,6 +64,7 @@ The launcher prints the exact addresses after readiness checks. Defaults, when a
 
 The Streamlit workspace includes:
 
+- URL-delivery status and selected URL before secondary evidence metrics;
 - live stage tracker;
 - observable “thinking mode” decision trace;
 - identity signals and competing hypotheses;

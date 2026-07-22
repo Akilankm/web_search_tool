@@ -111,7 +111,20 @@ def candidate_judgment(candidate: CandidateAssessment, *, selected: bool = False
     else:
         risks.append("Identity remains unverified.")
 
-    _classify_gate(candidate.direct_product_page, "Direct product-page evidence", strengths, risks, blockers, fail_is_blocker=True)
+    if candidate.evidence.get("search_product_like"):
+        strengths.append("Search returned a structurally product-like external URL.")
+
+    # A failed page-verification gate is a review risk when the original search
+    # URL remains structurally product-like. It becomes a blocker only when the
+    # candidate is not deliverable under the mandatory URL contract.
+    _classify_gate(
+        candidate.direct_product_page,
+        "Direct product-page evidence",
+        strengths,
+        risks,
+        blockers,
+        fail_is_blocker=not candidate.review_eligible,
+    )
     _classify_gate(candidate.durable_url, "Durable URL", strengths, risks, blockers, fail_is_blocker=True)
     _classify_gate(candidate.country_match, "Country-market alignment", strengths, risks, blockers)
     _classify_gate(candidate.retailer_match, "Requested-retailer alignment", strengths, risks, blockers)
@@ -120,6 +133,7 @@ def candidate_judgment(candidate: CandidateAssessment, *, selected: bool = False
     _classify_gate(candidate.coding_evidence_complete, "Coding-field coverage", strengths, risks, blockers)
 
     blockers.extend(candidate.conflicts)
+    blockers.extend(candidate.hard_url_blockers)
     risks.extend(candidate.warnings)
 
     return {
@@ -134,6 +148,7 @@ def candidate_judgment(candidate: CandidateAssessment, *, selected: bool = False
         "identity_match": candidate.identity_match.value,
         "identity_confidence": candidate.identity_confidence,
         "direct_page_score": candidate.direct_page_score,
+        "delivery_basis": candidate.evidence.get("delivery_basis"),
         "strictly_verified": candidate.strictly_verified,
         "review_eligible": candidate.review_eligible,
         "gates": gate_rows(candidate),

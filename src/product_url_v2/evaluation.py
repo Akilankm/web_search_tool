@@ -20,6 +20,7 @@ from product_url_v2.models import (
     SearchResult,
     SourceRole,
 )
+from product_url_v2.search import is_product_like_url
 
 _MARKETPLACE_HOSTS = ("amazon.", "ebay.", "aliexpress.", "temu.", "etsy.", "kaufland.")
 _PRODUCT_TERMS = re.compile(r"add to cart|buy now|in stock|price|warenkorb|kaufen|lieferbar|ajouter au panier|acquista", re.I)
@@ -34,11 +35,23 @@ def assess_candidate(
     config: RuntimeConfig,
     browser: BrowserEvidence | None = None,
 ) -> CandidateAssessment:
-    url = page.final_url or search.url
+    page_final_url = page.final_url or ""
+    page_final_is_product_like = bool(page_final_url and is_product_like_url(page_final_url))
+    url = page_final_url if page_final_is_product_like else search.url
     domain = (urlparse(url).hostname or "").lower().removeprefix("www.")
+
     fields = product_fields(page)
-    combined = " ".join((page.title, page.description, page.visible_text[:100000], " ".join(str(value) for value in fields.values()))).casefold()
-    support, conflicts, evidence = _identity_score(product, interpretation, combined, fields)
+    combined = " ".join(
+        (
+            page.title,
+            page.description,
+            page.visible_text[:100000],
+            " ".join(str(value) for value in fields.values()),
+            search.title,
+            search.snippet,
+        )
+    ).casefold()
+    support, conflicts, identity_evidence = _identity_score(product, interpretation, combined, fields)
     identity = _identity_match(support, conflicts, config)
     direct_score = _direct_page_score(url, page, fields, combined)
     direct_gate = GateStatus.PASS if direct_score >= config.decision.minimum_direct_page_score else GateStatus.FAIL
@@ -52,15 +65,51 @@ def assess_candidate(
     if browser and browser.access is GateStatus.PASS and browser.visible_text:
         extractable = GateStatus.PASS
     coding = _coding_gate(feature_set, fields, combined + " " + browser_text.casefold())
+
+    hard_url_blockers: list[str] = []
+    if not search.product_like or not is_product_like_url(search.url):
+        hard_url_blockers.append("Search result is not a structurally product-like external URL.")
+    if durable is GateStatus.FAIL:
+        hard_url_blockers.append("URL is transient, intermediary or session-bound.")
+
     warnings: list[str] = []
+    if identity is IdentityMatch.UNVERIFIED:
+        warnings.append("Identity evidence is incomplete; the URL requires human confirmation.")
     if browser_access is GateStatus.NOT_ASSESSED:
         warnings.append("Rendered browser accessibility was not assessed.")
     elif browser_access is GateStatus.FAIL:
         warnings.append("Automation browser failed; this does not prove a human cannot open the URL.")
+    if page.fetch_status is GateStatus.FAIL:
+        warnings.append("Page acquisition failed; the product-like search URL was retained for human review.")
+    elif page.fetch_status is GateStatus.NOT_ASSESSED:
+        warnings.append("Page acquisition was not attempted within the bounded evidence budget; the product-like URL was retained.")
+    if page_final_url and page_final_url != search.url and not page_final_is_product_like:
+        warnings.append("Automated acquisition redirected away from the product path; the original product-like search URL was retained.")
+    if direct_gate is not GateStatus.PASS and search.product_like:
+        warnings.append("Page-level product-detail evidence is incomplete; the structurally product-like URL was retained.")
     if coding is not GateStatus.PASS:
         warnings.append("The selected page may not contain every requested coding field.")
     if country is not GateStatus.PASS:
         warnings.append("Country-market alignment is not fully confirmed.")
+
+    delivery_basis = "verified_page_evidence" if direct_gate is GateStatus.PASS else "product_like_search_evidence"
+    evidence = identity_evidence | {
+        "fields": fields,
+        "page_title": page.title,
+        "status_code": page.status_code,
+        "search_url": search.url,
+        "search_title": search.title,
+        "search_snippet": search.snippet,
+        "search_source_section": search.source_section,
+        "search_engine": search.engine,
+        "search_product_like": bool(search.product_like),
+        "page_final_url": page_final_url,
+        "page_fetch_status": page.fetch_status.value,
+        "page_fetch_error": page.fetch_error,
+        "delivery_basis": delivery_basis,
+        "hard_url_blockers": hard_url_blockers,
+    }
+
     return CandidateAssessment(
         candidate_id=f"C-{abs(hash(url)) % 10_000_000:07d}",
         url=url,
@@ -79,9 +128,9 @@ def assess_candidate(
         text_extractable=extractable,
         coding_evidence_complete=coding,
         source_authority=authority,
-        evidence=evidence | {"fields": fields, "page_title": page.title, "status_code": page.status_code},
+        evidence=evidence,
         conflicts=tuple(conflicts),
-        warnings=tuple(warnings),
+        warnings=tuple(dict.fromkeys(warnings)),
     )
 
 
@@ -93,8 +142,17 @@ def apply_browser_evidence(candidate: CandidateAssessment, browser: BrowserEvide
         candidate,
         browser_access=browser.access,
         text_extractable=GateStatus.PASS if browser.access is GateStatus.PASS and bool(browser.visible_text) else candidate.text_extractable,
-        warnings=tuple(warnings),
-        evidence=dict(candidate.evidence) | {"browser": {"final_url": browser.final_url, "title": browser.title, "product_controls": list(browser.product_controls), "screenshot_path": browser.screenshot_path, "error": browser.error}},
+        warnings=tuple(dict.fromkeys(warnings)),
+        evidence=dict(candidate.evidence)
+        | {
+            "browser": {
+                "final_url": browser.final_url,
+                "title": browser.title,
+                "product_controls": list(browser.product_controls),
+                "screenshot_path": browser.screenshot_path,
+                "error": browser.error,
+            }
+        },
     )
 
 
@@ -108,27 +166,49 @@ def choose_delivery(candidates: Sequence[CandidateAssessment]) -> DeliveryDecisi
             selected.candidate_id,
             selected.identity_confidence,
             True,
-            ("Exact product identity passed strict gates.", "Direct product page, durable URL, browser access, extraction and coding evidence passed."),
+            (
+                "A direct product URL was delivered.",
+                "Exact product identity and all strict URL, browser, extraction and coding gates passed.",
+            ),
             selected.warnings,
         )
-    review = [item for item in candidates if item.review_eligible]
-    if review:
-        selected = max(review, key=_rank)
-        reasons = ["Strongest real direct product URL retained for human review."]
+
+    deliverable = [item for item in candidates if item.review_eligible]
+    if deliverable:
+        selected = max(deliverable, key=_rank)
+        reasons = [
+            "A real product-like URL was found and delivered as the mandatory output.",
+            "The strongest non-conflicting candidate was retained instead of returning an empty result.",
+        ]
         if selected.identity_match is IdentityMatch.EXACT:
             reasons.append("Identity evidence supports the exact product, but one or more operational gates remain incomplete.")
         elif selected.identity_match is IdentityMatch.PROBABLE:
-            reasons.append("Product identity is probable but unresolved evidence remains.")
+            reasons.append("Product identity is probable and requires human confirmation.")
         else:
-            reasons.append("Product identity requires reviewer confirmation.")
-        return DeliveryDecision(DeliveryStatus.REVIEW_REQUIRED, selected.url, selected.candidate_id, selected.identity_confidence, False, tuple(reasons), selected.warnings)
+            reasons.append("Identity could not be fully verified automatically; the URL is delivered for human review.")
+        if selected.direct_product_page is not GateStatus.PASS:
+            reasons.append("The URL is supported by structurally product-like search evidence even though page-level verification was incomplete.")
+        return DeliveryDecision(
+            DeliveryStatus.REVIEW_REQUIRED,
+            selected.url,
+            selected.candidate_id,
+            selected.identity_confidence,
+            False,
+            tuple(reasons),
+            selected.warnings,
+        )
+
+    if not candidates:
+        reason = "No external product-like URL candidate was found after the complete bounded recovery campaign."
+    else:
+        reason = "Every discovered URL had an explicit wrong-product, non-product-page or transient/intermediary blocker."
     return DeliveryDecision(
         DeliveryStatus.FAILED,
         None,
         None,
         0.0,
         False,
-        ("No direct product-page candidate survived explicit wrong-product, wrong-page or transient-URL blockers after the bounded recovery campaign.",),
+        (reason,),
     )
 
 
@@ -168,7 +248,7 @@ def _identity_score(product: ProductInput, interpretation: Interpretation, text:
 
 
 def _identity_match(score: float, conflicts: Sequence[str], config: RuntimeConfig) -> IdentityMatch:
-    if conflicts or score <= config.decision.wrong_product_threshold:
+    if conflicts:
         return IdentityMatch.MISMATCH
     if score >= config.decision.verified_identity_threshold:
         return IdentityMatch.EXACT
@@ -198,10 +278,10 @@ def _direct_page_score(url: str, page: PageEvidence, fields: Mapping[str, str], 
 
 
 def _durability(page: PageEvidence, url: str) -> GateStatus:
-    if page.fetch_status is GateStatus.FAIL:
-        return GateStatus.NOT_ASSESSED
     if any(token in url.casefold() for token in ("session=", "token=", "redirect=", "google.com/url")):
         return GateStatus.FAIL
+    if page.fetch_status is not GateStatus.PASS:
+        return GateStatus.NOT_ASSESSED
     return GateStatus.PASS
 
 
@@ -248,13 +328,22 @@ def _coding_gate(feature_set: Mapping[str, Any], fields: Mapping[str, str], text
 
 
 def _rank(candidate: CandidateAssessment) -> tuple[float, ...]:
+    identity_rank = {
+        IdentityMatch.EXACT: 1.0,
+        IdentityMatch.PROBABLE: 0.75,
+        IdentityMatch.UNVERIFIED: 0.35,
+        IdentityMatch.MISMATCH: 0.0,
+    }[candidate.identity_match]
     return (
-        1.0 if candidate.identity_match is IdentityMatch.EXACT else 0.7 if candidate.identity_match is IdentityMatch.PROBABLE else 0.2,
+        1.0 if candidate.strictly_verified else 0.0,
+        1.0 if candidate.review_eligible else 0.0,
+        identity_rank,
         candidate.identity_confidence,
+        1.0 if candidate.direct_product_page is GateStatus.PASS else 0.5 if candidate.evidence.get("search_product_like") else 0.0,
         candidate.direct_page_score,
         float(candidate.source_authority) / 100.0,
-        1.0 if candidate.country_match is GateStatus.PASS else 0.0,
         1.0 if candidate.retailer_match is GateStatus.PASS else 0.0,
+        1.0 if candidate.country_match is GateStatus.PASS else 0.0,
         1.0 if candidate.browser_access is GateStatus.PASS else 0.0,
         candidate.search_support,
         float(-(candidate.search_rank or 9999)),

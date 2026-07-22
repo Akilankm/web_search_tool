@@ -20,7 +20,7 @@ from product_url_v2.models import (
 from product_url_v2.orchestrator import ProductURLOrchestrator
 from product_url_v2.trace import TRACE_CONTRACT, TRACE_NOTICE, candidate_judgment
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 __all__ = [
     "BrowserEvidence", "CandidateAssessment", "DeliveryDecision", "DeliveryStatus",
