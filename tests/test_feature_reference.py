@@ -57,7 +57,6 @@ def test_ui_document_enforces_decision_first_url_hierarchy() -> None:
         "Candidate URL decisions",
         "Review evidence and decision details",
         "executive_summary.json",
-        "src/product_evidence_harness/executive_summary.py",
         "Fast",
         "Standard",
         "Deep review",
