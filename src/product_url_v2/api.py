@@ -62,7 +62,7 @@ CONFIG: RuntimeConfig = load_config()
 ORCHESTRATOR = ProductURLOrchestrator(CONFIG)
 STORE = JobStore()
 EXECUTOR = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("PRODUCT_URL_JOB_WORKERS") or 2)))
-app = FastAPI(title="Product URL Resolver", version="1.0.0")
+app = FastAPI(title="Product URL Resolver", version="1.0.1")
 
 
 @app.get("/health")
@@ -70,10 +70,17 @@ def health() -> dict[str, Any]:
     browser = BrowserClient.from_env(CONFIG.browser).health()
     return {
         "status": "healthy",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "runtime_contract": CONFIG.runtime_contract,
         "browser": browser,
-        "reasoning": {"enabled": CONFIG.reasoning.enabled, "required": CONFIG.reasoning.required, "model": CONFIG.reasoning.model},
+        "reasoning": {
+            "enabled": CONFIG.reasoning.enabled,
+            "required": CONFIG.reasoning.required,
+            "provider": "azure_openai_compatible",
+            "deployment": CONFIG.reasoning.deployment,
+            "api_version": CONFIG.reasoning.api_version,
+            "consumer_header_configured": bool(CONFIG.reasoning.consumer_id),
+        },
         "feature_set_root": str(CONFIG.feature_set_root),
         "artifact_root": str(CONFIG.artifact_root),
         "profiles": {
@@ -139,22 +146,18 @@ def _run_job(job_id: str) -> None:
             "FAILED": "FAILED",
             "TECHNICAL_FAILURE": "TECHNICAL_FAILURE",
         }[result.decision.status.value]
-        job.stage = "COMPLETE" if job.status in {"COMPLETED", "REVIEW_REQUIRED"} else "FAILED"
-        job.message = result.decision.reasons[0]
-        job.error = result.technical_error
+        job.message = result.decision.status.value
     except Exception as exc:
         job.status = "TECHNICAL_FAILURE"
-        job.stage = "FAILED"
-        job.message = "Unhandled job-service failure"
         job.error = f"{type(exc).__name__}: {exc}"
+        job.message = job.error
     finally:
         job.updated_at = _now()
 
 
 def _product(payload: ProductPayload) -> ProductInput:
-    row_id = payload.row_id or f"RUN-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
     return ProductInput(
-        row_id=row_id,
+        row_id=payload.row_id or f"RUN-{uuid.uuid4().hex[:12].upper()}",
         main_text=payload.main_text,
         country_code=payload.country_code,
         retailer_name=payload.retailer_name,
@@ -168,13 +171,13 @@ def _product(payload: ProductPayload) -> ProductInput:
 def _job_view(job: Job) -> dict[str, Any]:
     return {
         "job_id": job.job_id,
-        "row_id": job.product.row_id,
         "status": job.status,
         "stage": job.stage,
         "message": job.message,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
-        "error": job.error,
+        "row_id": job.product.row_id,
+        "error": job.error or None,
     }
 
 

@@ -37,9 +37,12 @@ class BrowserConfig:
 class ReasoningConfig:
     enabled: bool = False
     required: bool = False
-    model: str = ""
-    base_url: str = ""
+    deployment: str = ""
+    endpoint: str = ""
+    api_version: str = ""
+    consumer_id: str = ""
     timeout_seconds: int = 60
+    max_retries: int = 2
     temperature: float = 0.0
     max_hypotheses: int = 5
 
@@ -132,8 +135,16 @@ def load_config(path: str | Path | None = None) -> RuntimeConfig:
         runtime.reasoning,
         enabled=_as_bool(os.getenv("PRODUCT_URL_REASONING_ENABLED"), runtime.reasoning.enabled),
         required=_as_bool(os.getenv("PRODUCT_URL_REASONING_REQUIRED"), runtime.reasoning.required),
-        model=str(os.getenv("LLM_MODEL") or runtime.reasoning.model),
-        base_url=str(os.getenv("LLM_BASE_URL") or runtime.reasoning.base_url),
+        deployment=_first_env("PCA_LLM_DEPLOYMENT", "LLM_DEPLOYMENT", "LLM_MODEL") or runtime.reasoning.deployment,
+        endpoint=_first_env("PCA_LLM_ENDPOINT", "LLM_ENDPOINT", "LLM_BASE_URL") or runtime.reasoning.endpoint,
+        api_version=_first_env("PCA_LLM_API_VERSION", "LLM_API_VERSION") or runtime.reasoning.api_version,
+        consumer_id=_first_env("PCA_LLM_CONSUMER_ID", "LLM_CONSUMER_ID") or runtime.reasoning.consumer_id,
+        max_retries=_bounded_int(
+            _first_env("PCA_LLM_MAX_RETRIES", "LLM_MAX_RETRIES"),
+            runtime.reasoning.max_retries,
+            0,
+            5,
+        ),
     )
     return replace(runtime, browser=browser, reasoning=reasoning)
 
@@ -178,3 +189,11 @@ def _as_bool(value: Any, default: bool) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     return default
+
+
+def _first_env(*names: str) -> str:
+    for name in names:
+        value = str(os.getenv(name) or "").strip()
+        if value:
+            return value
+    return ""
