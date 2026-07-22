@@ -36,6 +36,7 @@ from src.product_evidence_harness.scraper import CrawlScraper
 from src.product_evidence_harness.schema_io import load_feature_schema
 from src.product_evidence_harness.tournament_pipeline import TournamentAwareProductEvidenceHarness
 from src.product_evidence_harness.compat_patches import apply_compatibility_patches
+from src.product_evidence_harness.source_tier_null_safety import apply_source_tier_null_safety_patch
 from src.product_evidence_harness.artifact_diagnostics_compat import apply_artifact_diagnostics_compatibility
 from src.product_evidence_harness.browser_contracts import AcquisitionMethod, BrowserActionRecord, BrowserEvidenceBundle, BrowserEvidenceRequest, BrowserEvidenceStatus, EvidenceIntent, ProductIdentityPayload, VisualAsset
 from src.product_evidence_harness.browser_client import BrowserEvidenceClient, BrowserServiceConfig, BrowserServiceError
@@ -43,6 +44,7 @@ from src.product_evidence_harness.agent_service.orchestrator import AgentRuntime
 from src.product_evidence_harness.agent_service.strict_orchestrator import StrictProductEvidenceOrchestrator
 
 apply_compatibility_patches()
+apply_source_tier_null_safety_patch()
 apply_artifact_diagnostics_compatibility()
 
 FeatureAwareProductEvidenceHarness = ThreeStageProductEvidenceHarness
