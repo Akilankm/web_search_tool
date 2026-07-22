@@ -1,7 +1,0 @@
-{
-  "description": "Generic page-type and richness signals; no retailer-specific rules.",
-  "product_url_hints": ["/product", "/produkt", "/produit", "/producto", "/p/", "/dp/", "/item", "/details"],
-  "listing_url_hints": ["/search", "?q=", "/category", "/c/", "/catalog", "/collections", "/tag/"],
-  "add_to_cart_phrases": ["add to cart", "add to basket", "buy now", "in den warenkorb", "do košíku", "añadir al carrito", "ajouter au panier"],
-  "soft_404_phrases": ["page not found", "404", "not available", "product no longer available", "seite nicht gefunden", "pagina no encontrada"]
-}

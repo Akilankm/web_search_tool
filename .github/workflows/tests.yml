@@ -1,126 +1,39 @@
 name: tests
-
 on:
   pull_request:
   push:
-    branches:
-      - master
+    branches: [master]
 
 jobs:
   unit-tests:
-    runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11"]
+        python-version: ["3.10", "3.11", "3.12"]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
-          cache-dependency-path: requirements/*.txt
-
-      - name: Install test dependencies
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Compile
+        run: python -m compileall -q src apps
+      - name: Validate JSON
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements/test.txt
-
-      - name: Compile Python sources
-        run: python -m compileall -q src scripts apps
-
-      - name: Validate shell launchers
-        run: |
-          bash -n scripts/azureml_startup.sh
-          bash -n scripts/run_product_evidence_ui.sh
-
-      - name: Validate default toy feature schema
-        run: python -m json.tool inputs/private/toy_features.json >/dev/null
-
-      - name: Validate all notebook JSON and code cells
-        run: |
-          python - <<'PY'
-          import ast
-          import json
-          from pathlib import Path
-
-          expected = [
-              "01_single_product.ipynb",
-              "02_batch_products.ipynb",
-              "03_artifact_diagnostics.ipynb",
-          ]
-          paths = sorted(Path("notebooks").glob("*.ipynb"))
-          assert [path.name for path in paths] == expected
-          for path in paths:
-              notebook = json.loads(path.read_text(encoding="utf-8"))
-              assert notebook.get("nbformat") == 4
-              for index, cell in enumerate(notebook["cells"]):
-                  if cell.get("cell_type") == "code":
-                      ast.parse(
-                          "".join(cell.get("source", [])),
-                          filename=f"{path.name}:cell-{index}",
-                      )
-          PY
-
-      - name: Validate Compose contract
+          python -m json.tool config/default.json >/dev/null
+          for file in feature_sets/*.json; do python -m json.tool "$file" >/dev/null; done
+      - name: Validate shell
+        run: bash -n scripts/start.sh scripts/run_ui.sh scripts/validate_release.sh
+      - name: Validate Compose
         run: |
           cp .env.example .env
-          chmod 600 .env
-          mkdir -p data/artifacts data/runtime data/batch_runs inputs/private secrets
-          printf 'ci-browser-token\n' > secrets/browser_api_token.txt
+          mkdir -p secrets data/artifacts
+          printf 'ci-token\n' > secrets/browser_api_token.txt
           docker compose config --quiet
-
-      - name: Run focused production-contract tests
+      - name: Test
+        run: pytest -q
+      - name: Reject legacy references
         run: |
-          PYTHONPATH=src pytest -q \
-            tests/test_repository_hygiene.py \
-            tests/test_clone_runtime_contract.py \
-            tests/test_automated_bootstrap.py \
-            tests/test_runtime_contract_and_browser_fallback.py \
-            tests/test_agent_entrypoint_runtime_contract.py \
-            tests/test_agent_notebook_dependency_boundary.py \
-            tests/test_structured_no_url_service_outcome.py \
-            tests/test_runtime_controls.py \
-            tests/test_numeric_safety.py \
-            tests/test_null_numeric_runtime_boundaries.py \
-            tests/test_executive_summary.py \
-            tests/test_url_delivery_first_contract.py \
-            tests/test_product_evidence_ui.py \
-            tests/test_feature_reference.py \
-            tests/test_preflight_azureml.py \
-            tests/test_serp_harvester.py \
-            tests/test_adaptive_search.py \
-            tests/test_source_authority_hierarchy.py \
-            tests/test_manufacturer_primary_contract.py \
-            tests/test_business_judgement_artifact.py \
-            tests/test_three_notebook_workflows.py \
-            tests/test_batch_notebook_runtime.py \
-            tests/test_batch_structured_no_url.py \
-            tests/test_artifact_diagnostics.py \
-            tests/test_artifact_diagnostics_route_hotfix.py \
-            tests/test_interactive_artifact_diagnostics.py \
-            tests/test_three_stage_production_contract.py \
-            tests/test_belief_driven_resolution.py \
-            tests/test_mandatory_product_url_policy.py \
-            tests/test_adaptive_notebook_diagnostics.py \
-            tests/test_notebook_result_contract.py \
-            tests/test_one_credit_feature_workflow.py \
-            tests/test_simple_feature_schema.py \
-            tests/test_environment_security.py \
-            tests/test_env_example_contract.py \
-            tests/test_llm_feature_reasoner.py \
-            tests/test_precision_candidate_runtime.py \
-            --junitxml=focused-report-${{ matrix.python-version }}.xml
-
-      - name: Run full unit suite
-        run: PYTHONPATH=src pytest -q --junitxml=pytest-report-${{ matrix.python-version }}.xml
-
-      - name: Upload test reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytest-report-${{ matrix.python-version }}
-          path: |
-            focused-report-${{ matrix.python-version }}.xml
-            pytest-report-${{ matrix.python-version }}.xml
-          if-no-files-found: warn
+          if grep -RInE 'product_evidence_harness|compat_patches|monkey_patch|monkeypatch_runtime' src apps scripts docker docs README.md pyproject.toml docker-compose.yml; then exit 1; fi
