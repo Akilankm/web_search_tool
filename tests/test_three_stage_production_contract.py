@@ -346,7 +346,7 @@ def test_strict_selector_falls_back_to_retailer_when_manufacturer_is_incomplete(
     assert decision.selection_reason == "RETAILER_PRIMARY_BECAUSE_NO_QUALIFIED_MANUFACTURER_PAGE"
 
 
-def test_strict_primary_acceptance_rejects_missing_features() -> None:
+def test_strict_primary_acceptance_returns_incomplete_page_for_review() -> None:
     url = "https://shop.example.co/product/bmw-m3-wagon"
     decision = StrictPrimaryURLSelector().select(
         schema=_schema(),
@@ -356,11 +356,15 @@ def test_strict_primary_acceptance_rejects_missing_features() -> None:
     )
 
     assert decision.accepted is False
-    assert decision.primary_url is None
-    assert any(
-        "PRIMARY_URL_MISSING_REQUESTED_FEATURES" in reason
-        for reason in decision.reasons
-    )
+    assert decision.primary_url == url
+    assert decision.browser_openable is True
+    assert decision.text_scrapable is True
+    assert decision.rendered_product_verified is True
+    assert decision.exact_product_verified is True
+    assert decision.full_feature_coverage is False
+    assert decision.durable_url is True
+    assert decision.selection_reason == "BEST_MEASURED_PRODUCT_URL_REQUIRES_REVIEW"
+    assert decision.reasons == ("PRIMARY_URL_MISSING_REQUESTED_FEATURES",)
 
 
 def test_durability_gate_rejects_ttl_or_signed_urls() -> None:
