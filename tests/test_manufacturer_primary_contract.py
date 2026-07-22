@@ -74,6 +74,33 @@ def test_result_exposes_manufacturer_primary_and_retailer_reference(
     assert artifact["retailer_url"] == retailer
 
 
+def test_null_source_tier_is_normalized_during_output_annotation() -> None:
+    manufacturer = "https://www.lego.com/en-gb/product/r2-d2-75379"
+    result = {
+        "primary_url": manufacturer,
+        "primary_url_acceptance": {
+            "accepted": True,
+            "source_role": "MANUFACTURER",
+            "source_tier": None,
+            "source_tier_name": "LOCAL_MANUFACTURER",
+            "manufacturer_url": manufacturer,
+            "selection_reason": "OFFICIAL_MANUFACTURER_PRIMARY_AFTER_STRICT_GATES",
+        },
+        "product_match": {"product_url": manufacturer},
+        "evidence_set": {"primary_url": manufacturer},
+        "url_delivery": {"required": True, "delivered": True, "url": manufacturer},
+        "search": {"market_decision_path": []},
+    }
+
+    annotated = _annotate_result(_payload(), result)
+
+    assert annotated["primary_url"] == manufacturer
+    assert annotated["primary_url_role"] == "OFFICIAL_MANUFACTURER"
+    assert annotated["source_selection"]["source_tier"] == 0
+    assert annotated["source_selection"]["source_tier_name"] == "LOCAL_MANUFACTURER"
+    assert annotated["primary_url_acceptance"]["source_tier"] == 0
+
+
 def test_result_marks_retailer_fallback_when_no_manufacturer_passes() -> None:
     retailer = "https://www.amazon.co.uk/dp/B0ABC12345"
     result = {
