@@ -272,12 +272,25 @@ class CandidateAssessment:
         )
 
     @property
+    def hard_url_blockers(self) -> tuple[str, ...]:
+        values = self.evidence.get("hard_url_blockers") or ()
+        if isinstance(values, str):
+            values = (values,)
+        return tuple(str(item) for item in values if str(item).strip())
+
+    @property
     def review_eligible(self) -> bool:
+        """A real product-like URL is deliverable unless explicit blockers prove it unsafe.
+
+        Page acquisition, browser automation, country alignment and coding completeness
+        are evidence-quality axes. They may require review but cannot erase a URL.
+        """
         return bool(
             self.identity_match is not IdentityMatch.MISMATCH
-            and self.direct_product_page is GateStatus.PASS
             and self.durable_url is not GateStatus.FAIL
             and not self.conflicts
+            and not self.hard_url_blockers
+            and bool(self.evidence.get("search_product_like") or self.direct_product_page is GateStatus.PASS)
         )
 
     def with_updates(self, **changes: Any) -> "CandidateAssessment":
