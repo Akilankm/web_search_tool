@@ -250,30 +250,33 @@ class CandidateAllocationPolicy:
         ranked = sorted(eligible, key=self._pre_browser_rank, reverse=True)
         selected: list[CandidateAssessment] = []
 
-        def add_best(predicate) -> None:
+        def add_best(predicate) -> bool:
             for candidate in ranked:
                 if len(selected) >= limit:
-                    return
+                    return False
                 if candidate in selected or not predicate(candidate):
                     continue
                 selected.append(candidate)
-                return
+                return True
+            return False
 
         # Cover source-authority and commercial-reference axes first.
         add_best(lambda item: item.source_role in _MANUFACTURER_ROLES)
         add_best(lambda item: item.source_role in _LOCAL_COMMERCIAL_ROLES)
 
-        # Preserve one slot for a competing identity hypothesis or a new domain.
+        # Identity-risk coverage takes precedence over generic domain diversity.
         selected_hypotheses = {
             item.hypothesis_id for item in selected if item.hypothesis_id
         }
-        selected_domains = {item.domain for item in selected}
-        add_best(
+        added_competing_hypothesis = add_best(
             lambda item: bool(
-                (item.hypothesis_id and item.hypothesis_id not in selected_hypotheses)
-                or item.domain not in selected_domains
+                item.hypothesis_id
+                and item.hypothesis_id not in selected_hypotheses
             )
         )
+        if not added_competing_hypothesis:
+            selected_domains = {item.domain for item in selected}
+            add_best(lambda item: item.domain not in selected_domains)
 
         for candidate in ranked:
             if len(selected) >= limit:
