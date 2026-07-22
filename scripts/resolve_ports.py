@@ -54,7 +54,8 @@ def select_available_port(preferred: int, *, reserved: set[int] | None = None, m
 
 
 def resolve_ports(env_values: Mapping[str, str], process_env: Mapping[str, str] | None = None) -> dict[str, int]:
-    process_env = process_env or os.environ
+    if process_env is None:
+        process_env = os.environ
     preferred_agent = _port(process_env.get("PRODUCT_URL_HOST_PORT") or env_values.get("PRODUCT_URL_HOST_PORT"), DEFAULT_AGENT_PORT)
     preferred_ui = _port(process_env.get("PRODUCT_URL_UI_PORT") or env_values.get("PRODUCT_URL_UI_PORT"), DEFAULT_UI_PORT)
     agent_port = select_available_port(preferred_agent)
