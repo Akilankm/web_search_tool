@@ -19,7 +19,7 @@ from product_url_v2.models import (
 )
 from product_url_v2.orchestrator import ProductURLOrchestrator
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 __all__ = [
     "BrowserEvidence", "CandidateAssessment", "DeliveryDecision", "DeliveryStatus",
