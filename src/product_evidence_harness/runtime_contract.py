@@ -2,7 +2,7 @@ from __future__ import annotations
 
 # Increment this whenever notebook, agent, UI or bootstrap compatibility changes
 # in a way that requires rebuilding the Docker agent image.
-RUNTIME_CONTRACT_VERSION = "belief-url-resolution-v9-product-evidence-ui"
+RUNTIME_CONTRACT_VERSION = "belief-url-resolution-v10-decision-first-ui"
 
 REQUIRED_RUNTIME_CAPABILITIES = {
     "belief_driven_product_resolution": "belief-driven product resolution",
@@ -14,6 +14,7 @@ REQUIRED_RUNTIME_CAPABILITIES = {
     "business_judgement_review_artifact": "human-comparable business judgment review artifact",
     "structured_no_url_review_outcome": "structured no-safe-URL review outcome",
     "per_job_runtime_controls": "validated concurrency-safe per-job runtime controls",
+    "executive_url_decision_summary": "decision-first source-evidence-identity-usability summary",
 }
 
 REQUIRED_RESULT_FIELDS = (
@@ -23,6 +24,7 @@ REQUIRED_RESULT_FIELDS = (
     "primary_url_role",
     "source_selection",
     "business_judgement_review",
+    "executive_summary",
 )
 
 REQUIRED_RESULT_KEYS = (
