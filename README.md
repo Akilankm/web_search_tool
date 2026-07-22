@@ -4,7 +4,7 @@
 
 ## Release
 
-- Version: `1.0.1`
+- Version: `1.0.2`
 - Runtime contract: `product-url-resolver-v1`
 - Python: `3.10–3.12`
 - Services: API agent, Playwright browser, Streamlit UI
@@ -62,13 +62,15 @@ All budgets and operational behavior are loaded from `config/default.json` and c
 
 ```bash
 cp .env.example .env
-# Set SERPAPI_API_KEY in .env
+# Set SERPAPI_API_KEY and, when enabled, PCA_LLM_* values in .env
 ./scripts/start.sh --build
 ```
 
 For organization LLM reasoning, keep the supplied values under `PCA_LLM_API_KEY`, `PCA_LLM_API_VERSION`, `PCA_LLM_ENDPOINT`, `PCA_LLM_DEPLOYMENT`, and `PCA_LLM_CONSUMER_ID`, then enable `PRODUCT_URL_REASONING_ENABLED=true`. The runtime uses the Azure OpenAI-compatible request contract and sends `PCA_LLM_CONSUMER_ID` through the `X-NIQ-CIS-Consumer` header. Real credentials must remain only in `.env`.
 
-Open:
+`PRODUCT_URL_HOST_PORT` and `PRODUCT_URL_UI_PORT` are preferred host ports. The launcher stops only the existing `product-url-resolver` Compose project, checks the preferred ports, selects the next available ports when necessary, and writes the non-secret resolved values to `.runtime/ports.env`. It does not rewrite `.env`.
+
+The launcher prints the exact addresses after both services pass readiness checks. The defaults, when available, are:
 
 - UI: `http://127.0.0.1:8501`
 - API health: `http://127.0.0.1:8788/health`
@@ -76,7 +78,9 @@ Open:
 
 ## API
 
-Synchronous:
+Use the agent port printed by `scripts/start.sh` or read it from `.runtime/ports.env`.
+
+Synchronous example using the default port:
 
 ```bash
 curl -X POST http://127.0.0.1:8788/v1/resolve \
