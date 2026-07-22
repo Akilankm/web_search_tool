@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from product_url_v2.config import RuntimeConfig
+from product_url_v2.acquisition import PageAcquirer
+from product_url_v2.config import AcquisitionConfig, RuntimeConfig
 from product_url_v2.evaluation import assess_candidate, choose_delivery
 from product_url_v2.interpretation import DeterministicProductInterpreter
 from product_url_v2.models import (
@@ -126,6 +127,43 @@ def test_incomplete_direct_page_verification_is_a_risk_not_a_blocker() -> None:
     assert candidate.review_eligible is True
     assert any("Direct product-page evidence failed" in risk for risk in judgment["risks"])
     assert not any("Direct product-page evidence failed" in blocker for blocker in judgment["blockers"])
+
+
+def test_candidates_outside_acquisition_budget_remain_deliverable() -> None:
+    class OnePageAcquirer(PageAcquirer):
+        def acquire(self, url: str) -> PageEvidence:
+            return PageEvidence(
+                requested_url=url,
+                final_url=url,
+                status_code=200,
+                content_type="text/html",
+                title="Product",
+                description="",
+                visible_text="Product price",
+                jsonld_products=(),
+                metadata={},
+                links=(),
+                images=(),
+                fetch_status=GateStatus.PASS,
+            )
+
+    urls = (
+        SearchResult("https://one.example.com/product/item-1", "One", "", "fixture", "google", "q", 1, True),
+        SearchResult("https://two.example.com/product/item-2", "Two", "", "fixture", "google", "q", 2, True),
+    )
+    pages = OnePageAcquirer(AcquisitionConfig(max_candidates=1, max_per_domain=1, max_workers=1)).acquire_many(urls)
+
+    assert set(pages) == {item.url for item in urls}
+    assert pages[urls[0].url].fetch_status is GateStatus.PASS
+    assert pages[urls[1].url].fetch_status is GateStatus.NOT_ASSESSED
+
+    product = ProductInput("ROW-3", "MYSTERY PRODUCT", "GB")
+    interpretation = DeterministicProductInterpreter().interpret(product)
+    candidate = assess_candidate(product, interpretation, urls[1], pages[urls[1].url], {}, RuntimeConfig())
+
+    assert candidate.review_eligible is True
+    assert candidate.durable_url is GateStatus.NOT_ASSESSED
+    assert choose_delivery((candidate,)).selected_url == urls[1].url
 
 
 def test_explicit_identifier_conflict_can_still_block_wrong_url() -> None:
