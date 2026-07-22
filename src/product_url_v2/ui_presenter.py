@@ -6,6 +6,7 @@ from product_url_v2.trace import TRACE_CONTRACT, TRACE_NOTICE
 
 STAGE_ORDER = ("INTERPRET", "SEARCH", "ACQUIRE", "EVALUATE", "BROWSER", "DELIVER", "COMPLETE")
 TERMINAL_STATUSES = {"COMPLETED", "REVIEW_REQUIRED", "FAILED", "TECHNICAL_FAILURE"}
+SUCCESSFUL_TERMINAL_STATUSES = {"COMPLETED", "REVIEW_REQUIRED", "FAILED"}
 
 
 def merge_events(existing: Sequence[Mapping[str, Any]], incoming: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -26,7 +27,7 @@ def stage_rows(events: Sequence[Mapping[str, Any]], current_stage: str, status: 
     started = {str(item.get("stage") or "") for item in events}
     rows = []
     for stage in STAGE_ORDER:
-        if stage in completed or (stage == "COMPLETE" and status in TERMINAL_STATUSES):
+        if stage in completed or (stage == "COMPLETE" and status in SUCCESSFUL_TERMINAL_STATUSES):
             state = "COMPLETE"
         elif stage == current_stage:
             state = "ACTIVE"
