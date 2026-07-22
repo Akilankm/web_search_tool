@@ -2,6 +2,12 @@
 
 Unit tests prove contracts; they do not prove product quality. Production cutover requires a frozen, representative product benchmark.
 
+## Mandatory business invariant
+
+Every run with at least one non-conflicting product-like external candidate must deliver a URL as `VERIFIED` or `REVIEW_REQUIRED`. A zero-confidence or incomplete-evidence candidate is not automatically wrong. `FAILED` is allowed only when no product-like URL exists or every candidate has an explicit wrong-product, non-product or transient/intermediary blocker.
+
+The release suite must include a regression where seven candidates exist, page verification is incomplete and identity support is zero; the strongest URL must still be returned as `REVIEW_REQUIRED`.
+
 ## Required metrics
 
 - URL delivery rate
