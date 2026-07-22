@@ -13,6 +13,7 @@ from product_url_v2.models import (
     SearchResult,
     SourceRole,
 )
+from product_url_v2.trace import candidate_judgment
 
 
 def _candidate(index: int, **changes) -> CandidateAssessment:
@@ -60,10 +61,10 @@ def test_seven_candidates_with_incomplete_evidence_still_deliver_a_url() -> None
 
 
 def test_missing_identity_evidence_is_unverified_not_mismatch() -> None:
-    product = ProductInput("ROW-1", "ACME ABC123 PRODUCT", "GB")
+    product = ProductInput("ROW-1", "MYSTERY ZXQ9999 ITEM", "GB")
     interpretation = DeterministicProductInterpreter().interpret(product)
-    url = "https://shop.example.com/product/acme-abc123"
-    search = SearchResult(url, "ACME ABC123", "Product page", "fixture", "google", "query", 1, True)
+    url = "https://shop.example.com/product/listing-48271"
+    search = SearchResult(url, "Retail product listing", "Available product page", "fixture", "google", "query", 1, True)
     page = PageEvidence(
         requested_url=url,
         final_url=url,
@@ -115,6 +116,16 @@ def test_non_product_redirect_does_not_replace_original_product_url() -> None:
     assert candidate.url == search_url
     assert candidate.review_eligible is True
     assert any("original product-like search URL was retained" in warning for warning in candidate.warnings)
+
+
+def test_incomplete_direct_page_verification_is_a_risk_not_a_blocker() -> None:
+    candidate = _candidate(1)
+
+    judgment = candidate_judgment(candidate)
+
+    assert candidate.review_eligible is True
+    assert any("Direct product-page evidence failed" in risk for risk in judgment["risks"])
+    assert not any("Direct product-page evidence failed" in blocker for blocker in judgment["blockers"])
 
 
 def test_explicit_identifier_conflict_can_still_block_wrong_url() -> None:
