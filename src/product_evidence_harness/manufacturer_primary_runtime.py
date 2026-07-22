@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from src.product_evidence_harness.constants import (
     COUNTRY_MATCHED,
@@ -17,6 +17,7 @@ from src.product_evidence_harness.constants import (
     RETAILER_NOT_PROVIDED,
 )
 from src.product_evidence_harness.contracts import ProductQuery, URLCandidate
+from src.product_evidence_harness.numeric_safety import safe_int
 from src.product_evidence_harness.ranker import ProductURLRanker
 from src.product_evidence_harness.selector import FinalSelector
 from src.product_evidence_harness.source_authority import (
@@ -153,22 +154,63 @@ def _selected_card(scorecards: Sequence[Any], url: str | None):
     )
 
 
-def _primary_role(result: dict[str, Any], product: ProductQuery) -> tuple[str, int, str]:
-    acceptance = result.get("primary_url_acceptance") or {}
-    role = str(acceptance.get("source_role") or "UNKNOWN")
-    tier = int(acceptance.get("source_tier", int(SourceTier.UNKNOWN)))
-    tier_name = str(acceptance.get("source_tier_name") or SourceTier.UNKNOWN.name)
-    if role != "UNKNOWN":
-        return role, tier, tier_name
+def _tier_from_name(value: Any) -> int | None:
+    name = str(value or "").strip().upper()
+    member = SourceTier.__members__.get(name)
+    return int(member) if member is not None else None
 
-    primary_url = str(result.get("primary_url") or "")
-    if not primary_url:
-        return role, tier, tier_name
-    decision = SourceAuthorityPolicy().classify(
-        product,
-        URLCandidate(url=primary_url, title=product.main_text),
+
+def _primary_role(result: dict[str, Any], product: ProductQuery) -> tuple[str, int, str]:
+    """Resolve normalized source metadata at the output-writing boundary."""
+
+    raw_acceptance = result.get("primary_url_acceptance")
+    acceptance = dict(raw_acceptance) if isinstance(raw_acceptance, Mapping) else {}
+    role = str(acceptance.get("source_role") or "UNKNOWN").strip().upper()
+    tier_name = str(
+        acceptance.get("source_tier_name") or SourceTier.UNKNOWN.name
+    ).strip().upper()
+
+    named_tier = _tier_from_name(tier_name)
+    tier = safe_int(
+        acceptance.get("source_tier"),
+        named_tier if named_tier is not None else int(SourceTier.UNKNOWN),
+        minimum=int(SourceTier.LOCAL_MANUFACTURER),
+        maximum=int(SourceTier.UNKNOWN),
+        field_name="primary_url_acceptance.source_tier",
     )
-    return decision.source_role, decision.source_tier, decision.source_tier_name
+
+    primary_url = str(result.get("primary_url") or "").strip()
+    metadata_incomplete = (
+        role == "UNKNOWN"
+        or tier == int(SourceTier.UNKNOWN)
+        or tier_name not in SourceTier.__members__
+    )
+    if primary_url and metadata_incomplete:
+        decision = SourceAuthorityPolicy().classify(
+            product,
+            URLCandidate(url=primary_url, title=product.main_text),
+        )
+        if role == "UNKNOWN":
+            role = decision.source_role
+        if tier == int(SourceTier.UNKNOWN):
+            tier = safe_int(
+                decision.source_tier,
+                int(SourceTier.UNKNOWN),
+                minimum=int(SourceTier.LOCAL_MANUFACTURER),
+                maximum=int(SourceTier.UNKNOWN),
+                field_name="classified_source_tier",
+            )
+        if tier_name not in SourceTier.__members__:
+            tier_name = decision.source_tier_name
+
+    if tier_name not in SourceTier.__members__:
+        try:
+            tier_name = SourceTier(tier).name
+        except ValueError:
+            tier = int(SourceTier.UNKNOWN)
+            tier_name = SourceTier.UNKNOWN.name
+
+    return role, tier, tier_name
 
 
 def _public_role(role: str) -> str:
