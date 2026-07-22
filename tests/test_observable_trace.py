@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from product_url_v2.acquisition import PageAcquirer
 from product_url_v2.api import Job, JobStore
+from product_url_v2.artifacts import ArtifactWriter
 from product_url_v2.config import AcquisitionConfig, RuntimeConfig
 from product_url_v2.interpretation import DeterministicProductInterpreter
 from product_url_v2.models import (
@@ -89,6 +92,11 @@ def test_stage_rows_show_current_and_completed_work() -> None:
     assert rows["BROWSER"] == "PENDING"
 
 
+def test_technical_failure_does_not_show_pipeline_complete() -> None:
+    rows = {item["stage"]: item["state"] for item in stage_rows([], "FAILED", "TECHNICAL_FAILURE")}
+    assert rows["COMPLETE"] == "PENDING"
+
+
 def test_job_store_returns_incremental_structured_trace() -> None:
     product = ProductInput("ROW-1", "PKM ME04 BOOSTER", "CH")
     store = JobStore()
@@ -111,6 +119,13 @@ def test_job_store_returns_incremental_structured_trace() -> None:
     incremental = store.trace("JOB-1", after_sequence=1)
     assert [item["sequence"] for item in incremental["events"]] == [2]
     assert incremental["events"][0]["details"]["credit_number"] == 1
+
+
+def test_artifact_run_directory_is_shared_group_writable(tmp_path: Path) -> None:
+    path = ArtifactWriter(tmp_path).prepare("ROW-1")
+    mode = path.stat().st_mode
+    assert mode & 0o2000
+    assert mode & 0o020
 
 
 class FakeSearchClient:
