@@ -26,18 +26,6 @@ print(secrets.token_urlsafe(32))
 PY
 fi
 
-if grep -q '^BROWSER_API_TOKEN=change-me$' .env; then
-  token="$(cat secrets/browser_api_token.txt)"
-  python - "$token" <<'PY'
-from pathlib import Path
-import sys
-path = Path('.env')
-text = path.read_text(encoding='utf-8')
-text = text.replace('BROWSER_API_TOKEN=change-me', f'BROWSER_API_TOKEN={sys.argv[1]}')
-path.write_text(text, encoding='utf-8')
-PY
-fi
-
 compose=(docker compose --env-file .env)
 
 # Reconcile only this Compose project. This releases ports owned by an earlier
