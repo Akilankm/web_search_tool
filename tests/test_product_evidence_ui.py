@@ -35,52 +35,32 @@ def _unavailable(*args, **kwargs):
     raise requests.ConnectionError("agent unavailable for UI test")
 
 
-def _exact_identity_result() -> dict:
+def _no_url_result() -> dict:
     return {
         "job_status": "REVIEW_REQUIRED",
-        "product": {"row_id": "ROW-IDENTITY"},
+        "coding_ready": False,
+        "product": {"row_id": "ROW-NO-URL", "main_text": "LEGO R2-D2 75379"},
         "product_identification": {
             "resolution_status": "EXACT",
-            "metrics": {
-                "identity_completeness": 0.94,
-                "ambiguity_entropy": 0.0,
-                "posterior_margin": 0.88,
-            },
             "leading_hypothesis": {
                 "hypothesis_id": "H-1",
                 "canonical_name": "LEGO Star Wars R2-D2 75379",
                 "posterior_probability": 0.96,
-                "attributes": {
-                    "brand": "LEGO",
-                    "manufacturer": "LEGO Group",
-                    "model_number": "75379",
-                    "product_form": "construction set",
-                },
             },
             "hypotheses": [
                 {
                     "hypothesis_id": "H-1",
                     "canonical_name": "LEGO Star Wars R2-D2 75379",
                     "posterior_probability": 0.96,
-                    "attributes": {},
                 }
             ],
-            "claims": [
-                {
-                    "field": "brand",
-                    "value": "LEGO",
-                    "status": "WEB_VERIFIED",
-                    "confidence": 0.99,
-                }
-            ],
+            "claims": [{"field": "brand", "value": "LEGO", "status": "WEB_VERIFIED"}],
             "evidence_ledger": [
                 {
                     "field": "model_number",
                     "value": "75379",
                     "polarity": "SUPPORTS",
                     "source_url": "https://example.com/evidence",
-                    "source_reliability": 0.9,
-                    "extraction_confidence": 0.95,
                 }
             ],
             "uncertainties": [],
@@ -89,50 +69,108 @@ def _exact_identity_result() -> dict:
         "primary_url": None,
         "manufacturer_url": None,
         "retailer_url": None,
+        "url_delivery": {"delivered": False, "strictly_verified": False, "url": None},
         "primary_url_acceptance": {
+            "accepted": False,
             "browser_openable": False,
             "text_scrapable": False,
             "rendered_product_verified": False,
             "exact_product_verified": False,
             "full_feature_coverage": False,
             "durable_url": False,
+            "reasons": ["NO_SAFE_DIRECT_PRODUCT_URL_FOUND"],
         },
-        "search": {"stages": []},
+        "resolution_outcome": {
+            "message": "No safe direct product page passed all required gates.",
+            "suggested_next_actions": ["Provide a known retailer URL."],
+        },
+        "search": {
+            "serpapi_requests_used": 3,
+            "serpapi_request_limit": 3,
+            "stages": [
+                {
+                    "name": "manufacturer_primary",
+                    "results_returned": 20,
+                    "new_candidate_urls": 5,
+                    "candidates_qualified": 2,
+                    "candidates_scraped": 1,
+                },
+                {
+                    "name": "country_alternative",
+                    "results_returned": 15,
+                    "new_candidate_urls": 4,
+                    "candidates_qualified": 1,
+                    "candidates_scraped": 1,
+                },
+            ],
+        },
+        "agentic_browser": {"candidate_investigations_completed": 2},
         "business_judgement_review": {"steps": []},
     }
 
 
-def test_ui_is_parseable_and_product_identification_first() -> None:
+def _usable_url_result() -> dict:
+    result = _no_url_result()
+    result.update(
+        {
+            "job_status": "COMPLETED",
+            "coding_ready": True,
+            "primary_url": "https://www.lego.com/product/75379",
+            "manufacturer_url": "https://www.lego.com/product/75379",
+            "url_delivery": {
+                "delivered": True,
+                "strictly_verified": True,
+                "url": "https://www.lego.com/product/75379",
+            },
+            "source_selection": {
+                "source_role": "MANUFACTURER",
+                "source_tier_name": "GLOBAL_MANUFACTURER",
+                "selection_reason": "Official manufacturer page passed all required gates.",
+            },
+            "primary_url_acceptance": {
+                "accepted": True,
+                "browser_openable": True,
+                "text_scrapable": True,
+                "rendered_product_verified": True,
+                "exact_product_verified": True,
+                "full_feature_coverage": True,
+                "durable_url": True,
+                "reasons": ["EXACT_PRODUCT_IDENTITY", "DURABLE_URL"],
+            },
+            "evidence_set": {"required_coverage": 1.0},
+        }
+    )
+    return result
+
+
+def test_ui_is_parseable_and_decision_first() -> None:
     source = APP.read_text(encoding="utf-8")
     ast.parse(source, filename=str(APP))
 
     for token in (
-        "Product Identification Platform",
-        "Web pages and URLs are supporting evidence—not the product result",
-        "Product identity",
-        "Evidence basis",
-        "Alternative hypotheses",
-        "Source evidence",
-        "Unresolved distinctions",
-        "VERIFIED",
-        "NOT VERIFIED",
-        "NOT ASSESSED",
-        "Latency Optimized",
-        "Standard",
-        "Coverage Optimized",
-        "Identify product",
+        "Product URL Decision",
+        "justifiable product URL",
+        "Source, Evidence, Identity and Usability",
+        "Overall conclusion",
+        "Decision summary",
+        "Source",
+        "Evidence",
+        "Identity",
+        "Usability",
+        "Why this decision is justifiable",
+        "Search work completed",
+        "Candidate URL decisions",
+        "Review evidence and decision details",
+        "Find justifiable URL",
     ):
         assert token in source
 
     for forbidden in (
-        "Accepted direct product URL",
-        '("browser_openable", "Browser")',
-        '("text_scrapable", "Scrapable")',
-        '("durable_url", "Durable URL")',
-        "Fast demo",
-        "Deep evidence",
-        "leadership",
-        "management",
+        "Runtime controls",
+        'st.text_input("Run ID"',
+        'st.text_input("Feature set"',
+        "Alternative hypotheses",
+        "Source evidence",
     ):
         assert forbidden.lower() not in source.lower()
 
@@ -144,50 +182,42 @@ def test_ui_loads_cleanly_when_agent_is_unavailable(monkeypatch) -> None:
 
     assert app.exception == []
     rendered = _rendered_text(app)
-    assert "Product Identification Platform" in rendered
+    assert "Product URL Decision" in rendered
     assert "Agent unavailable" in rendered
     assert any(button.disabled for button in app.button)
 
 
-def test_exact_product_remains_identified_without_a_usable_url(monkeypatch) -> None:
+def test_no_url_outcome_is_explicit_and_quantifies_work(monkeypatch) -> None:
     monkeypatch.setattr(requests, "request", _unavailable)
     app = AppTest.from_file(str(APP), default_timeout=30)
-    app.session_state["run_result"] = _exact_identity_result()
+    app.session_state["run_result"] = _no_url_result()
     app.session_state["run_elapsed_seconds"] = 2.4
     app.run()
 
     assert app.exception == []
     rendered = _rendered_text(app)
-    assert "Product identified: LEGO Star Wars R2-D2 75379" in rendered
+    assert "No justifiable product URL found" in rendered
     assert "LEGO Star Wars R2-D2 75379" in rendered
-    assert "Source URLs are supporting evidence only" in rendered
-    assert "Accepted direct product URL" not in rendered
-    assert "FAIL" not in rendered
+    assert "Overall conclusion" in rendered
+    assert "Search work completed" in rendered
+    assert "Results reviewed" in rendered
+    assert "No URL is displayed because" in rendered
+    assert "Technical execution failure" not in rendered
 
 
-def test_ui_recovers_null_runtime_control_session_state(monkeypatch) -> None:
+def test_usable_url_is_the_primary_result(monkeypatch) -> None:
     monkeypatch.setattr(requests, "request", _unavailable)
     app = AppTest.from_file(str(APP), default_timeout=30)
-    app.run()
-    assert app.exception == []
-
-    control_keys = (
-        "serpapi_credits",
-        "full_scrapes",
-        "scrapes_per_domain",
-        "planner_candidates",
-        "agentic_candidates",
-        "browser_turns_per_candidate",
-        "browser_actions_per_candidate",
-        "images_in_reasoning",
-    )
-    for key in control_keys:
-        app.session_state[f"control_{key}"] = None
+    app.session_state["run_result"] = _usable_url_result()
+    app.session_state["run_elapsed_seconds"] = 2.4
     app.run()
 
     assert app.exception == []
-    for key in control_keys:
-        assert isinstance(app.session_state[f"control_{key}"], int)
+    rendered = _rendered_text(app)
+    assert "Justifiable product URL found" in rendered
+    assert "Selected source: Manufacturer" in rendered
+    assert "Ready" in rendered
+    assert "Why this decision is justifiable" in rendered
 
 
 def test_ui_launcher_is_valid_shell() -> None:
@@ -219,21 +249,22 @@ def test_streamlit_config_keeps_security_controls_enabled() -> None:
     assert "gatherUsageStats = false" in text
 
 
-def test_ui_document_defines_product_first_contract() -> None:
+def test_ui_document_defines_decision_first_contract() -> None:
     text = DOC.read_text(encoding="utf-8")
     for token in (
-        "Product Identification Platform",
+        "Product URL Decision",
         "Primary outcome",
-        "identified product",
-        "ResolutionStatus",
-        "EXACT",
-        "PROBABLE",
-        "AMBIGUOUS",
-        "Source evidence",
-        "URLs are evidence locations",
-        "Latency Optimized",
+        "justifiable URL",
+        "Source",
+        "Evidence",
+        "Identity",
+        "Usability",
+        "No justifiable URL",
+        "Search work completed",
+        "Review evidence and decision details",
+        "Fast",
         "Standard",
-        "Coverage Optimized",
+        "Deep review",
     ):
         assert token in text
-    assert "Accepted direct product URL" not in text
+    assert "URLs are evidence locations" not in text
