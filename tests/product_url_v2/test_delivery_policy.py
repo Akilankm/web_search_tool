@@ -11,6 +11,7 @@ from product_url_v2 import (
     ProductInput,
     SourceRole,
     build_search_objectives,
+    is_structurally_product_like_url,
 )
 
 
@@ -118,6 +119,33 @@ def test_explicit_wrong_product_is_never_delivered() -> None:
 
     assert decision.status is DeliveryStatus.FAILED
     assert decision.selected_url is None
+
+
+def test_homepage_category_search_and_media_urls_are_never_delivered() -> None:
+    blocked = (
+        "https://www.kaufland.at/",
+        "https://shop.example/category/pokemon",
+        "https://shop.example/search?q=wachsendes+chaos",
+        "https://shop.example/assets/product.pdf",
+        "https://www.google.com/search?q=product",
+    )
+
+    assert all(not is_structurally_product_like_url(url) for url in blocked)
+
+    candidates = [
+        _candidate(f"C{index}", url, direct_product_page=GateStatus.NOT_ASSESSED)
+        for index, url in enumerate(blocked, start=1)
+    ]
+    decision = MandatoryURLDeliveryPolicy().select(candidates)
+
+    assert decision.status is DeliveryStatus.FAILED
+    assert decision.selected_url is None
+
+
+def test_product_slug_under_collection_remains_eligible() -> None:
+    url = "https://zadoys.ch/en/products/pokemon-mega-series-wachsendes-chaos-me04-booster-bundle-de"
+
+    assert is_structurally_product_like_url(url) is True
 
 
 def test_strict_candidate_is_verified_and_coding_ready() -> None:
