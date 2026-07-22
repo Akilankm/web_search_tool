@@ -39,9 +39,12 @@
   "reasoning": {
     "enabled": false,
     "required": false,
-    "model": "",
-    "base_url": "",
+    "deployment": "",
+    "endpoint": "",
+    "api_version": "",
+    "consumer_id": "",
     "timeout_seconds": 60,
+    "max_retries": 2,
     "temperature": 0.0,
     "max_hypotheses": 5
   }
