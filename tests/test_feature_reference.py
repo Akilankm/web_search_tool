@@ -11,7 +11,7 @@ WORKFLOW = ROOT / "docs" / "SYSTEM_WORKFLOW.md"
 UI_DOC = ROOT / "docs" / "PRODUCT_EVIDENCE_UI.md"
 
 
-def test_feature_reference_covers_product_evidence_features() -> None:
+def test_feature_reference_covers_url_delivery_features() -> None:
     text = FEATURE_REFERENCE.read_text(encoding="utf-8")
     for section in (
         "Product input contract",
@@ -29,6 +29,8 @@ def test_feature_reference_covers_product_evidence_features() -> None:
         "Requested-feature coverage",
         "URL durability and usability",
         "Source-authority selection",
+        "Strict URL selection",
+        "Best-available review URL recovery",
         "Structured no-safe-URL outcome",
         "Business judgment sequence",
         "Per-job runtime controls",
@@ -41,25 +43,23 @@ def test_feature_reference_covers_product_evidence_features() -> None:
         assert section in text
 
 
-def test_ui_document_enforces_decision_first_url_hierarchy() -> None:
-    text = UI_DOC.read_text(encoding="utf-8")
+def test_feature_reference_enforces_url_delivery_hierarchy() -> None:
+    text = FEATURE_REFERENCE.read_text(encoding="utf-8")
     for token in (
-        "Product URL Decision UI",
-        "Primary outcome",
-        "justifiable product URL",
-        "Decision-first result hierarchy",
-        "Source",
-        "Evidence",
-        "Identity",
-        "Usability",
-        "No justifiable URL",
-        "Search work completed",
-        "Candidate URL decisions",
-        "Review evidence and decision details",
-        "executive_summary.json",
-        "Fast",
+        "Primary deliverable",
+        "product URL",
+        "URL_DELIVERED_VERIFIED",
+        "URL_DELIVERED_REVIEW_REQUIRED",
+        "URL_DELIVERY_FAILED",
+        "confirmed wrong product",
+        "confirmed wrong variant",
+        "candidate_url_records.json",
+        "candidate_state.json",
+        "url_delivery_recovery.py",
+        "apps/product_evidence_ui.py",
+        "Focused",
         "Standard",
-        "Deep review",
+        "Extended",
     ):
         assert token in text
 
@@ -67,26 +67,28 @@ def test_ui_document_enforces_decision_first_url_hierarchy() -> None:
 def test_workflow_and_ui_docs_match_runtime_contract() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     ui = UI_DOC.read_text(encoding="utf-8")
-    assert RUNTIME_CONTRACT_VERSION == "belief-url-resolution-v10-decision-first-ui"
+    assert RUNTIME_CONTRACT_VERSION == "belief-url-resolution-v11-url-delivery-first"
     assert RUNTIME_CONTRACT_VERSION in ui
     for token in (
         "Product interpretation",
-        "Product hypothesis construction",
         "Adaptive source search",
         "Rendered browser investigation",
         "Exact-product verification",
-        "Product identity resolution",
         "Source-authority selection",
+        "Strict URL selection",
+        "Best-available review URL recovery",
+        "URL delivery",
         "Decision audit sequence",
         "Runtime control flow",
+        "The UI must never present an empty URL as a successful or ordinary result",
     ):
         assert token in workflow
     for token in (
-        "Primary outcome",
-        "JUSTIFIABLE_URL_FOUND",
-        "URL_FOUND_REVIEW_REQUIRED",
-        "NO_JUSTIFIABLE_URL_FOUND",
-        "executive_url_decision_summary=true",
+        "Primary deliverable",
+        "best available review URL",
+        "URL delivery failure",
+        "exceptional escalation",
+        "best_available_review_url_delivery=true",
     ):
         assert token in ui
 
