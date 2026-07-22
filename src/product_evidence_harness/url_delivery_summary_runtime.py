@@ -11,12 +11,18 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 
 def apply_url_delivery_summary_patch() -> None:
-    """Reframe terminal summaries around mandatory URL delivery."""
+    """Install mandatory review-URL recovery and URL-first summaries."""
 
     global _PATCHED
     if _PATCHED:
         return
     _PATCHED = True
+
+    from src.product_evidence_harness.url_delivery_enforcement_runtime import (
+        apply_url_delivery_enforcement_patch,
+    )
+
+    apply_url_delivery_enforcement_patch()
 
     from src.product_evidence_harness import executive_summary
 
