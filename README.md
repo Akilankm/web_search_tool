@@ -4,10 +4,11 @@
 
 ## Release
 
-- Version: `1.0.2`
+- Version: `1.1.0`
 - Runtime contract: `product-url-resolver-v1`
+- Observable trace contract: `observable-decision-trace-v1`
 - Python: `3.10–3.12`
-- Services: API agent, Playwright browser, Streamlit UI
+- Services: FastAPI agent, Playwright browser, Streamlit human-review workspace
 
 ## Business contract
 
@@ -25,38 +26,19 @@ Product identity, URL delivery, browser automation and coding completeness are i
 ```text
 Input
 → deterministic exact-anchor interpretation
-→ optional structured LLM refinement (facts / assumptions / unknowns)
+→ optional PCA LLM hypothesis refinement
 → competing product hypotheses
 → three-credit information-gain search
 → candidate admission and deduplication
 → bounded HTTP/JSON-LD acquisition
-→ identity and direct-page evaluation
+→ identity/source/page/durability evaluation
 → evidence-diverse rendered-browser checks
 → mandatory URL-delivery policy
 → stable JSON/CSV/Markdown artifacts
+→ live observable decision trace for human coders
 ```
 
-## Inputs
-
-Required:
-
-```text
-main_text
-country_code
-```
-
-Optional:
-
-```text
-row_id
-retailer_name
-ean
-language_code
-feature_set
-runtime_options
-```
-
-All budgets and operational behavior are loaded from `config/default.json` and can be overridden per request through validated `runtime_options`. Feature definitions are external JSON files under `feature_sets/`.
+The live trace exposes observable inputs, evidence, hypotheses, gate outcomes and selection judgments. It does not expose or fabricate hidden chain-of-thought.
 
 ## Start
 
@@ -66,19 +48,44 @@ cp .env.example .env
 ./scripts/start.sh --build
 ```
 
-For organization LLM reasoning, keep the supplied values under `PCA_LLM_API_KEY`, `PCA_LLM_API_VERSION`, `PCA_LLM_ENDPOINT`, `PCA_LLM_DEPLOYMENT`, and `PCA_LLM_CONSUMER_ID`, then enable `PRODUCT_URL_REASONING_ENABLED=true`. The runtime uses the Azure OpenAI-compatible request contract and sends `PCA_LLM_CONSUMER_ID` through the `X-NIQ-CIS-Consumer` header. Real credentials must remain only in `.env`.
+For organization LLM reasoning, keep the supplied values under `PCA_LLM_API_KEY`, `PCA_LLM_API_VERSION`, `PCA_LLM_ENDPOINT`, `PCA_LLM_DEPLOYMENT`, and `PCA_LLM_CONSUMER_ID`, then enable `PRODUCT_URL_REASONING_ENABLED=true`. Real credentials remain only in `.env`.
 
-`PRODUCT_URL_HOST_PORT` and `PRODUCT_URL_UI_PORT` are preferred host ports. The launcher stops only the existing `product-url-resolver` Compose project, checks the preferred ports, selects the next available ports when necessary, and writes the non-secret resolved values to `.runtime/ports.env`. It does not rewrite `.env`.
+`PRODUCT_URL_HOST_PORT` and `PRODUCT_URL_UI_PORT` are preferred host ports. The launcher automatically selects free alternatives and writes only those non-secret resolved values to `.runtime/ports.env`.
 
-The launcher prints the exact addresses after both services pass readiness checks. The defaults, when available, are:
+The launcher prints the exact addresses after readiness checks. Defaults, when available:
 
 - UI: `http://127.0.0.1:8501`
 - API health: `http://127.0.0.1:8788/health`
 - API docs: `http://127.0.0.1:8788/docs`
 
+## Human-review UI
+
+The Streamlit workspace includes:
+
+- live stage tracker;
+- observable “thinking mode” decision trace;
+- identity signals and competing hypotheses;
+- every paid search action and retained source;
+- candidate-level identity, page, durability, market, retailer, browser, extraction and coding gates;
+- explicit strengths, risks and blockers;
+- rendered-page screenshots and product controls;
+- selected URL, rejection reasons and downloadable JSON/CSV review artifacts.
+
+See [Human-review UI and trace contract](docs/UI_REVIEW.md).
+
 ## API
 
 Use the agent port printed by `scripts/start.sh` or read it from `.runtime/ports.env`.
+
+```text
+POST /v1/resolve
+POST /v1/jobs
+GET  /v1/jobs/{job_id}
+GET  /v1/jobs/{job_id}/trace?after_sequence=<n>
+GET  /v1/jobs/{job_id}/result
+```
+
+The trace endpoint is incremental: callers pass the last consumed sequence number and receive only newer structured events.
 
 Synchronous example using the default port:
 
@@ -91,14 +98,6 @@ curl -X POST http://127.0.0.1:8788/v1/resolve \
     "language_code": "de",
     "feature_set": "toy"
   }'
-```
-
-Asynchronous:
-
-```text
-POST /v1/jobs
-GET  /v1/jobs/{job_id}
-GET  /v1/jobs/{job_id}/result
 ```
 
 ## CLI
@@ -133,6 +132,8 @@ data/artifacts/<row_id>/
 └── browser/*.png
 ```
 
+The UI mounts this directory read-only so human coders can inspect screenshots without granting the UI write access.
+
 ## Validation
 
 ```bash
@@ -145,5 +146,6 @@ CI compiles all Python, validates JSON and shell entry points, validates Docker 
 ## Documentation
 
 - [Architecture and decision contract](docs/ARCHITECTURE.md)
+- [Human-review UI and trace contract](docs/UI_REVIEW.md)
 - [Operations](docs/OPERATIONS.md)
 - [Release and benchmark gates](docs/RELEASE.md)
