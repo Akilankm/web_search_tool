@@ -41,7 +41,7 @@ def _identity() -> dict:
     }
 
 
-def test_executive_summary_prioritizes_justifiable_url() -> None:
+def test_executive_summary_prioritizes_delivered_url() -> None:
     result = {
         "job_status": "COMPLETED",
         "coding_ready": True,
@@ -108,7 +108,8 @@ def test_executive_summary_prioritizes_justifiable_url() -> None:
 
     summary = build_executive_summary(result)
 
-    assert summary["overall_status"] == "JUSTIFIABLE_URL_FOUND"
+    assert summary["overall_status"] == "URL_DELIVERED_VERIFIED"
+    assert summary["successful_output"] is True
     assert summary["selected_url"] == "https://www.lego.com/product/75379"
     assert summary["product_name"] == "LEGO Star Wars R2-D2 75379"
     assert summary["pillars"]["source"]["source_role"] == "MANUFACTURER"
@@ -116,10 +117,9 @@ def test_executive_summary_prioritizes_justifiable_url() -> None:
     assert summary["pillars"]["identity"]["confidence"] == 0.96
     assert summary["pillars"]["usability"]["passed_checks"] == 6
     assert summary["candidate_summary"][0]["decision"] == "SELECTED"
-    assert "ready for downstream use" in summary["conclusion"]
 
 
-def test_no_url_summary_quantifies_work_and_explains_rejection() -> None:
+def test_no_url_summary_is_failed_delivery_and_quantifies_work() -> None:
     result = {
         "job_status": "REVIEW_REQUIRED",
         "coding_ready": False,
@@ -189,7 +189,8 @@ def test_no_url_summary_quantifies_work_and_explains_rejection() -> None:
 
     summary = build_executive_summary(result)
 
-    assert summary["overall_status"] == "NO_JUSTIFIABLE_URL_FOUND"
+    assert summary["overall_status"] == "URL_DELIVERY_FAILED"
+    assert summary["successful_output"] is False
     assert summary["selected_url"] is None
     assert summary["work_completed"] == {
         "search_stages": 3,
@@ -202,13 +203,13 @@ def test_no_url_summary_quantifies_work_and_explains_rejection() -> None:
         "browser_candidates_admitted": 4,
         "browser_investigations_completed": 3,
     }
-    assert "reviewed 50 results" in summary["conclusion"]
-    assert "instead of inventing or promoting an unsafe link" in summary["conclusion"]
+    assert "not a successful output" in summary["conclusion"]
+    assert summary["delivery_failure"]["requires_escalation"] is True
     assert any("model mismatch" in reason.lower() for reason in summary["decision_reasons"])
-    assert summary["pillars"]["usability"]["status"] == "NOT_AVAILABLE"
+    assert summary["pillars"]["usability"]["status"] == "DELIVERY_FAILED"
 
 
-def test_attach_executive_summary_persists_review_artifact(tmp_path) -> None:
+def test_attach_executive_summary_persists_delivery_failure_artifact(tmp_path) -> None:
     result = {
         "job_status": "REVIEW_REQUIRED",
         "coding_ready": False,
@@ -221,6 +222,7 @@ def test_attach_executive_summary_persists_review_artifact(tmp_path) -> None:
 
     attached = attach_executive_summary(result)
 
-    assert attached["executive_summary"]["overall_status"] == "NO_JUSTIFIABLE_URL_FOUND"
+    assert attached["executive_summary"]["overall_status"] == "URL_DELIVERY_FAILED"
+    assert attached["executive_summary"]["successful_output"] is False
     payload = json.loads((tmp_path / "executive_summary.json").read_text(encoding="utf-8"))
     assert payload == attached["executive_summary"]
