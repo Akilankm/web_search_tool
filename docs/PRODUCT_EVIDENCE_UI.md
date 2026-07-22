@@ -1,287 +1,269 @@
-# Product Identification Platform UI
+# Product URL Decision UI
 
 ## Purpose
 
-The browser application is a product-identification surface.
+The browser application answers one operational question first:
 
-Its primary responsibility is to answer:
+> Did the system find a justifiable product URL that is safe to use?
 
-> Which exact product does this incomplete source text refer to?
+The result is organised through four review pillars:
 
-Web pages, screenshots, retailer pages, manufacturer pages and URLs are evidence sources used to support or contradict a product hypothesis. They are not the primary result.
+1. **Source** — where the URL came from and its authority tier.
+2. **Evidence** — what textual, structured, browser and visual evidence was collected.
+3. **Identity** — which exact product was identified and with what confidence.
+4. **Usability** — whether the URL is openable, extractable, exact, complete and reusable.
 
-```text
-apps/product_evidence_ui.py
-→ Product Evidence Agent API
-→ product interpretation
-→ evidence discovery
-→ hypothesis comparison
-→ product identity resolution
-→ evidence and artifact reporting
-```
+The complete audit is retained, but it is collapsed by default so the primary decision remains immediately visible.
 
 ## Primary outcome
 
-The primary outcome is the identified product and the strength of the evidence supporting it.
-
-```text
-canonical product name
-brand
-manufacturer
-model or series
-product form
-variant
-size
-quantity or pack
-ResolutionStatus
-posterior confidence
-unresolved distinctions
-alternative hypotheses
-```
-
-A product may remain identified even when no single source URL passes every page-usability or durability check.
-
-## Supporting outcome
-
-Source URLs are retained only as supporting evidence locations.
-
-```text
-primary evidence source
-manufacturer evidence source
-retailer evidence source
-search-stage trace
-candidate source assessments
-source-quality metadata
-```
-
-A missing URL does not automatically mean the product was not identified.
-
-## ResolutionStatus
-
-The product-belief contract uses the following resolution states:
+The primary outcome is one of three explicit URL decisions:
 
 | Status | Meaning |
 |---|---|
-| `EXACT` | One product identity is resolved with sufficient evidence and no material competing hypothesis |
-| `PROBABLE` | One product hypothesis leads, but confirmation evidence remains incomplete |
-| `AMBIGUOUS` | Multiple plausible products remain |
-| `CONFLICTING` | Material evidence supports incompatible identities |
-| `INSUFFICIENT_EVIDENCE` | Available evidence cannot support a defensible identity |
-| `IN_PROGRESS` | Identification is still being evaluated |
-| `INITIALIZED` | Interpretation has started but no resolution has been reached |
+| `JUSTIFIABLE_URL_FOUND` | A direct product URL passed the required identity and usability gates and is ready for downstream use. |
+| `URL_FOUND_REVIEW_REQUIRED` | A candidate URL exists, but one or more gates still require human review. |
+| `NO_JUSTIFIABLE_URL_FOUND` | The bounded search completed, but no candidate was safe enough to return. No URL was fabricated. |
 
-The UI headline is based on `product_identification.resolution_status`, not URL acceptance.
+The selected URL is displayed at the top of the result when available.
 
-## Interface hierarchy
+## Decision-first result hierarchy
 
-### 1. Product identification summary
+The visible result order is:
 
-The first result section displays:
+```text
+URL decision
+→ identified product
+→ overall conclusion
+→ Source / Evidence / Identity / Usability metrics
+→ URL usability checks
+→ decision reasons
+→ search work completed when no URL is returned
+→ candidate URL decisions
+→ collapsed review details
+```
+
+This hierarchy is designed for high-stakes review: the conclusion is immediate, while the evidence remains inspectable.
+
+## Source
+
+Source metrics include:
+
+```text
+selected URL
+source role
+source authority tier
+manufacturer URL availability
+retailer URL availability
+search actions used
+search stages
+results reviewed
+candidate URLs seen
+qualified candidates
+```
+
+Manufacturer-first selection remains conditional on production gates. A manufacturer URL is not accepted merely because it is official.
+
+## Evidence
+
+Evidence metrics include:
+
+```text
+identity claim count
+web-verified claim count
+atomic evidence items
+browser evidence records
+visual assets
+feature assessments
+required coverage
+critical coverage
+total coverage
+```
+
+The UI does not invent a synthetic evidence score. It displays factual counts and recorded coverage values.
+
+## Identity
+
+Identity metrics include:
 
 ```text
 identified product
-resolution status
+ResolutionStatus
 posterior confidence
-identity claim count
-evidence item count
-number of competing hypotheses
-number of unresolved distinctions
+hypotheses considered
+unresolved items
+contradictions
 ```
 
-Resolved identity attributes are shown directly below the headline.
+Identity remains separately visible when no usable URL exists. This avoids confusing “product understood” with “URL safe to deliver.”
 
-### 2. Product identity
+## Usability
 
-Displays the selected product hypothesis, its structured attributes, belief-state metrics and unresolved distinctions.
+The URL usability decision evaluates:
 
-### 3. Evidence basis
-
-Displays:
-
-```text
-identity claims
-claim status
-claim confidence
-source tokens
-atomic evidence ledger
-evidence polarity
-source reliability
-extraction confidence
-supporting excerpts
-```
-
-### 4. Alternative hypotheses
-
-Displays competing product identities rather than competing URLs.
-
-Each hypothesis includes:
-
-```text
-canonical product name
-posterior probability
-assumptions
-contradicting evidence count
-selected/not-selected status
-```
-
-### 5. Source evidence
-
-URLs are evidence locations.
-
-The UI presents source quality with three states:
-
-| State | Meaning |
+| Check | Meaning |
 |---|---|
-| `VERIFIED` | The source property was positively established |
-| `NOT VERIFIED` | The source property was checked but not established |
-| `NOT ASSESSED` | No reliable assessment was recorded |
+| Browser openable | The rendered page can be opened. |
+| Text extractable | Product evidence can be extracted from the page. |
+| Direct product page | The page is a product-detail page, not search/category/navigation content. |
+| Exact product identity | The page matches the requested product and variant. |
+| Required evidence coverage | The page contains the required feature evidence. |
+| Reusable non-expiring URL | The URL is durable and not session-bound or signed. |
 
-The application must not convert an absent source-quality field into `FAIL`.
+Each check is displayed as `PASS`, `FAIL` or `NOT ASSESSED`.
 
-The source section may display:
+## No justifiable URL
 
-```text
-rendered evidence
-text evidence
-product-page evidence
-identity support
-requested-feature evidence
-source reusability
-```
-
-These checks describe the evidence source. They do not replace product identification.
-
-### 6. Decision audit
-
-Displays the observable sequence:
+A no-URL result is not presented as empty output. The UI explicitly displays **Search work completed**:
 
 ```text
-observable evidence
-→ explicit rule
-→ product judgment
-→ next action
+search actions used / limit
+results reviewed
+candidate URLs seen
+qualified candidates
+pages extracted
+browser investigations completed
 ```
 
-This is an audit representation and does not expose hidden chain-of-thought.
+The conclusion explains that the system rejected unsafe, indirect, mismatched, blocked, incomplete or expiring candidates rather than promoting a weak URL.
 
-### 7. Artifacts
+Suggested next actions are shown only after the completed work is quantified.
 
-Displays the product artifact directory and the complete technical result.
+## Candidate URL decisions
 
-## Workflow
+The candidate table summarises the strongest evaluated URLs with:
 
 ```text
-Input
-→ Interpret
-→ Discover
-→ Compare
-→ Resolve
-→ Validate
-→ Report
+decision
+source role
+identity status
+coverage
+browser openability
+text extractability
+URL reusability
+URL
+rejection or selection reason
 ```
 
-| Stage | Responsibility |
-|---|---|
-| Input | Validate product and market fields |
-| Interpret | Extract identity claims, assumptions and ambiguity |
-| Discover | Gather relevant text, structured and visual evidence |
-| Compare | Evaluate competing product hypotheses |
-| Resolve | Select the strongest supported product identity |
-| Validate | Check evidence consistency, conflicts and unresolved fields |
-| Report | Persist the identification result and audit artifacts |
+This allows reviewers to see why an apparently plausible URL was not selected.
+
+## Review evidence and decision details
+
+Detailed information is preserved in one collapsed section:
+
+- Evidence
+- Search
+- Identity
+- Decision audit
+- Artifacts
+
+Raw technical JSON is nested inside the Artifacts tab and is never the default view.
 
 ## Product input
 
-Required:
+Visible by default:
 
 ```text
-main product text
+product text
 country code
-run ID
-feature set
+retailer (optional)
+EAN / GTIN (optional)
 ```
 
-Optional:
+Advanced settings are collapsed:
 
 ```text
-retailer context
-EAN / GTIN
-language
+search depth
+language (optional)
 ```
 
-EAN, retailer and country are evidence inputs. None of them independently defines the product.
+Run ID and feature set are assigned automatically. Users are not asked to manage technical identifiers.
 
-## Execution profiles
+## Search-depth profiles
 
 | Profile | Intent |
 |---|---|
-| `Latency Optimized` | Lower evidence-acquisition limits for lower elapsed time |
-| `Standard` | Default production evidence limits |
-| `Coverage Optimized` | Broader candidate, browser and visual investigation |
+| `Fast` | Lower investigation breadth for latency-sensitive use. |
+| `Standard` | Default production balance. |
+| `Deep review` | Broader candidate, browser and visual investigation for difficult products. |
 
-Profiles change evidence depth only. They do not change product-identity rules.
+Profiles change search breadth only. They never weaken identity, evidence or URL-usability gates.
 
-## Runtime controls
+## Executive summary contract
 
-| Control | Range |
-|---|---:|
-| Search credits | 1–3 |
-| Full-page extractions | 1–12 |
-| Extractions per domain | 1–4 |
-| Planner candidate limit | 3–20 |
-| Browser investigation limit | 1–8 |
-| Browser turns per candidate | 1–12 |
-| Browser actions per candidate | 1–24 |
-| Visual assets per reasoning turn | 4–20 |
+Every completed agent result contains:
+
+```text
+executive_summary
+```
+
+The same summary is persisted as:
+
+```text
+executive_summary.json
+```
+
+The contract contains:
+
+```text
+overall_status
+headline
+conclusion
+selected_url
+product_name
+identity_status
+identity_confidence
+source_role
+source_tier
+decision_reasons
+next_actions
+work_completed
+pillars.source
+pillars.evidence
+pillars.identity
+pillars.usability
+candidate_summary
+```
+
+This keeps the UI, API, notebooks and artifacts aligned.
 
 ## Runtime compatibility
 
 Current compatibility contract:
 
 ```text
-belief-url-resolution-v9-product-evidence-ui
+belief-url-resolution-v10-decision-first-ui
 ```
 
-The existing runtime name is retained for backward compatibility. The UI result hierarchy is product-identification-first.
-
-Required capabilities:
+Required capability:
 
 ```text
-per_job_runtime_controls=true
-business_judgement_review_artifact=true
-structured_no_url_review_outcome=true
+executive_url_decision_summary=true
 ```
+
+Because the executive summary is generated inside the agent container, this version requires a clean agent rebuild after pulling the code.
 
 ## Azure ML VS Code usage
 
 ```bash
 git checkout master
 git pull origin master
-bash scripts/run_product_evidence_ui.sh --install   # first use
-bash scripts/run_product_evidence_ui.sh             # later use
+./scripts/azureml_startup.sh --clean-build
+bash scripts/run_product_evidence_ui.sh
 ```
 
 Forward port `8501` privately from the VS Code **Ports** panel.
 
-A clean agent rebuild is not required for a UI-only update when the runtime contract has not changed. Restart the Streamlit process after pulling.
-
-## Acceptance rules for the UI
+## Acceptance rules
 
 The UI is correct only when:
 
-1. the identified product is the first and most prominent result;
-2. resolution status and confidence are visible before source URLs;
-3. alternative product hypotheses are explicitly shown;
-4. unresolved identity distinctions are visible;
-5. URLs are isolated under **Source evidence**;
-6. source checks use `VERIFIED`, `NOT VERIFIED` or `NOT ASSESSED`;
-7. an `EXACT` product remains identified even when every URL-quality check is false;
-8. no source result is fabricated.
-
-## Related documents
-
-- [Feature reference](FEATURE_REFERENCE.md)
-- [System workflow](SYSTEM_WORKFLOW.md)
-- [Final system contract](FINAL_SYSTEM_CONTRACT.md)
-- [Business judgment review](BUSINESS_JUDGEMENT_REVIEW.md)
-- [Azure ML operations](AZUREML_OPERATIONS.md)
+1. the URL decision is the first visible result;
+2. a selected URL is immediately openable from the result;
+3. Source, Evidence, Identity and Usability are visible together;
+4. the overall conclusion explains whether the URL is safe for downstream use;
+5. a no-URL outcome quantifies the work completed;
+6. candidate rejection reasons remain available;
+7. technical details are collapsed by default;
+8. Run ID, feature set and individual runtime knobs are not exposed as standard user inputs;
+9. no URL, identity or evidence claim is fabricated.
