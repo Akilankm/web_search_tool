@@ -29,12 +29,12 @@ class PrimaryURLAcceptance:
     accepted: bool
     primary_url: str | None
     scope: str
-    browser_openable: bool
-    text_scrapable: bool
-    rendered_product_verified: bool
-    exact_product_verified: bool
-    full_feature_coverage: bool
-    durable_url: bool
+    browser_openable: bool | None
+    text_scrapable: bool | None
+    rendered_product_verified: bool | None
+    exact_product_verified: bool | None
+    full_feature_coverage: bool | None
+    durable_url: bool | None
     reasons: tuple[str, ...]
     source_tier: int = int(SourceTier.UNKNOWN)
     source_tier_name: str = SourceTier.UNKNOWN.name
@@ -48,7 +48,7 @@ class PrimaryURLAcceptance:
 
 
 class StrictPrimaryURLSelector:
-    """Select a qualified product URL, preferring official manufacturer truth."""
+    """Select a strict coding URL or the strongest measured URL for review."""
 
     scope_priority = {
         "manufacturer_primary": 4,
@@ -81,18 +81,18 @@ class StrictPrimaryURLSelector:
         scopes = self._scope_index(scorecards)
         authorities = self._authority_index(scorecards)
         accepted: list[tuple[tuple[float, ...], PrimaryURLAcceptance]] = []
-        rejection_reasons: list[str] = []
+        reviewed: list[tuple[tuple[float, ...], PrimaryURLAcceptance]] = []
 
         for assessment in assessments:
             normalized = normalize_url(assessment.url)
             bundle = bundles.get(normalized)
             if bundle is None:
-                rejection_reasons.append(
-                    f"{assessment.url}:BROWSER_EVIDENCE_MISSING"
-                )
+                # A candidate that was not investigated is not a browser failure.
+                # It must remain unassessed and must not contaminate the selected
+                # candidate's measured gate results.
                 continue
 
-            opened_url = bundle.final_url or bundle.requested_url
+            opened_url = bundle.final_url or bundle.requested_url or assessment.url
             durability = self.durability_gate.assess(opened_url)
             browser_openable = bool(bundle.browser_openable)
             text_scrapable = bool(bundle.text_scrapable)
@@ -130,7 +130,7 @@ class StrictPrimaryURLSelector:
             )
             decision = PrimaryURLAcceptance(
                 accepted=not reasons,
-                primary_url=opened_url if not reasons else None,
+                primary_url=opened_url,
                 scope=scope,
                 browser_openable=browser_openable,
                 text_scrapable=text_scrapable,
@@ -143,24 +143,38 @@ class StrictPrimaryURLSelector:
                 source_tier_name=tier_name,
                 source_role=role,
             )
+
+            strict_score = (
+                float(100 - tier),
+                float(self.scope_priority.get(scope, 0)),
+                assessment.required_coverage,
+                assessment.critical_coverage,
+                assessment.coverage,
+                self._scorecard_confidence(normalized, scorecards),
+            )
+            review_score = (
+                float(
+                    browser_openable
+                    and text_scrapable
+                    and rendered_verified
+                    and exact_verified
+                    and durable
+                ),
+                float(exact_verified),
+                float(rendered_verified),
+                float(browser_openable),
+                float(text_scrapable),
+                float(durable),
+                assessment.required_coverage,
+                assessment.critical_coverage,
+                assessment.coverage,
+                float(100 - tier),
+                float(self.scope_priority.get(scope, 0)),
+                self._scorecard_confidence(normalized, scorecards),
+            )
+            reviewed.append((review_score, decision))
             if decision.accepted:
-                # Every candidate in this list has already passed all mandatory
-                # identity, rendered-browser, feature, scrapability, and
-                # durability gates. Authority is therefore the first selection
-                # discriminator: manufacturer beats retailer, never vice versa.
-                score = (
-                    float(100 - tier),
-                    float(self.scope_priority.get(scope, 0)),
-                    assessment.required_coverage,
-                    assessment.critical_coverage,
-                    assessment.coverage,
-                    self._scorecard_confidence(normalized, scorecards),
-                )
-                accepted.append((score, decision))
-            else:
-                rejection_reasons.extend(
-                    f"{assessment.url}:{reason}" for reason in decision.reasons
-                )
+                accepted.append((strict_score, decision))
 
         if accepted:
             selected = max(accepted, key=lambda item: item[0])[1]
@@ -180,19 +194,41 @@ class StrictPrimaryURLSelector:
                 selection_reason=reason,
             )
 
+        if reviewed:
+            # Deliver the strongest actually measured product URL for review.
+            # Missing feature coverage keeps coding_ready=False, but it must not
+            # erase a browser-openable, exact, durable product page.
+            selected = max(reviewed, key=lambda item: item[0])[1]
+            manufacturer_url = (
+                selected.primary_url
+                if selected.source_role == "MANUFACTURER"
+                else None
+            )
+            retailer_url = (
+                selected.primary_url
+                if selected.source_role in _RETAILER_ROLES
+                else None
+            )
+            return replace(
+                selected,
+                accepted=False,
+                manufacturer_url=manufacturer_url,
+                retailer_url=retailer_url,
+                selection_reason="BEST_MEASURED_PRODUCT_URL_REQUIRES_REVIEW",
+            )
+
         return PrimaryURLAcceptance(
             accepted=False,
             primary_url=None,
             scope="unresolved",
-            browser_openable=False,
-            text_scrapable=False,
-            rendered_product_verified=False,
-            exact_product_verified=False,
-            full_feature_coverage=False,
-            durable_url=False,
-            reasons=tuple(dict.fromkeys(rejection_reasons))
-            or ("NO_URL_PASSED_STRICT_PRIMARY_ACCEPTANCE",),
-            selection_reason="NO_URL_PASSED_STRICT_PRIMARY_ACCEPTANCE",
+            browser_openable=None,
+            text_scrapable=None,
+            rendered_product_verified=None,
+            exact_product_verified=None,
+            full_feature_coverage=None,
+            durable_url=None,
+            reasons=("NO_CANDIDATE_COMPLETED_BROWSER_INVESTIGATION",),
+            selection_reason="NO_CANDIDATE_COMPLETED_BROWSER_INVESTIGATION",
         )
 
     def _full_feature_coverage(
