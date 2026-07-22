@@ -4,7 +4,7 @@
 
 ## Release
 
-- Version: `1.0.0`
+- Version: `1.0.1`
 - Runtime contract: `product-url-resolver-v1`
 - Python: `3.10–3.12`
 - Services: API agent, Playwright browser, Streamlit UI
@@ -66,6 +66,8 @@ cp .env.example .env
 ./scripts/start.sh --build
 ```
 
+For organization LLM reasoning, keep the supplied values under `PCA_LLM_API_KEY`, `PCA_LLM_API_VERSION`, `PCA_LLM_ENDPOINT`, `PCA_LLM_DEPLOYMENT`, and `PCA_LLM_CONSUMER_ID`, then enable `PRODUCT_URL_REASONING_ENABLED=true`. The runtime uses the Azure OpenAI-compatible request contract and sends `PCA_LLM_CONSUMER_ID` through the `X-NIQ-CIS-Consumer` header. Real credentials must remain only in `.env`.
+
 Open:
 
 - UI: `http://127.0.0.1:8501`
@@ -107,7 +109,6 @@ product-url resolve \
   --language-code de
 
 product-url batch --input samples/products.csv --output data/results.csv
-
 product-url benchmark --cases benchmark/cases.csv --outcomes benchmark/outcomes.csv --report benchmark/report.json
 ```
 
