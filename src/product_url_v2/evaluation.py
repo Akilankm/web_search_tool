@@ -35,9 +35,6 @@ def assess_candidate(
     config: RuntimeConfig,
     browser: BrowserEvidence | None = None,
 ) -> CandidateAssessment:
-    # The admitted search URL is the primary delivery handle. A page redirect is
-    # adopted only when it is itself a structurally product-like URL. This avoids
-    # replacing a usable PDP with a geo, consent, login or homepage redirect.
     page_final_url = page.final_url or ""
     page_final_is_product_like = bool(page_final_url and is_product_like_url(page_final_url))
     url = page_final_url if page_final_is_product_like else search.url
@@ -84,6 +81,8 @@ def assess_candidate(
         warnings.append("Automation browser failed; this does not prove a human cannot open the URL.")
     if page.fetch_status is GateStatus.FAIL:
         warnings.append("Page acquisition failed; the product-like search URL was retained for human review.")
+    elif page.fetch_status is GateStatus.NOT_ASSESSED:
+        warnings.append("Page acquisition was not attempted within the bounded evidence budget; the product-like URL was retained.")
     if page_final_url and page_final_url != search.url and not page_final_is_product_like:
         warnings.append("Automated acquisition redirected away from the product path; the original product-like search URL was retained.")
     if direct_gate is not GateStatus.PASS and search.product_like:
@@ -249,8 +248,6 @@ def _identity_score(product: ProductInput, interpretation: Interpretation, text:
 
 
 def _identity_match(score: float, conflicts: Sequence[str], config: RuntimeConfig) -> IdentityMatch:
-    # Absence of supporting evidence is uncertainty, not contradictory evidence.
-    # MISMATCH is reserved for explicit identifier or product conflicts.
     if conflicts:
         return IdentityMatch.MISMATCH
     if score >= config.decision.verified_identity_threshold:
@@ -283,7 +280,7 @@ def _direct_page_score(url: str, page: PageEvidence, fields: Mapping[str, str], 
 def _durability(page: PageEvidence, url: str) -> GateStatus:
     if any(token in url.casefold() for token in ("session=", "token=", "redirect=", "google.com/url")):
         return GateStatus.FAIL
-    if page.fetch_status is GateStatus.FAIL:
+    if page.fetch_status is not GateStatus.PASS:
         return GateStatus.NOT_ASSESSED
     return GateStatus.PASS
 
