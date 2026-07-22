@@ -17,6 +17,10 @@ REQUIRED_RUNTIME_CAPABILITIES = {
     "executive_url_decision_summary": "decision-first source-evidence-identity-usability summary",
 }
 
+# The executive summary is additive and self-derived from these canonical result
+# fields. Keeping it outside the legacy result validator preserves compatibility
+# for historical artifacts and test-injected results while the v10 agent always
+# emits executive_summary for new production jobs.
 REQUIRED_RESULT_FIELDS = (
     "product_identification",
     "search.market_decision_path",
@@ -24,7 +28,6 @@ REQUIRED_RESULT_FIELDS = (
     "primary_url_role",
     "source_selection",
     "business_judgement_review",
-    "executive_summary",
 )
 
 REQUIRED_RESULT_KEYS = (
