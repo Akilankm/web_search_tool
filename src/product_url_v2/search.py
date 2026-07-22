@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
 import os
-import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Iterable, Mapping, Protocol, Sequence
 from urllib.parse import parse_qs, urlparse
@@ -11,7 +9,11 @@ from urllib.parse import parse_qs, urlparse
 import requests
 
 from product_url_v2.contracts import ProductInput
-from product_url_v2.interpretation import InterpretationResult, SearchContextPacket, build_search_context
+from product_url_v2.interpretation import (
+    InterpretationResult,
+    SearchContextPacket,
+    build_search_context,
+)
 from product_url_v2.metrics import canonical_url
 from product_url_v2.policy import is_structurally_product_like_url
 
@@ -58,26 +60,29 @@ class SearchAction:
                 raise ValueError("google_immersive_product requires page_token")
         elif not self.query.strip():
             raise ValueError(f"{self.engine.value} requires a query")
-        if self.scope is SearchScope.COUNTRY:
-            if len(self.country_code.strip()) != 2:
-                raise ValueError("country search requires a two-letter country_code")
+        if self.scope is SearchScope.COUNTRY and len(self.country_code.strip()) != 2:
+            raise ValueError("country search requires a two-letter country_code")
 
     @property
     def signature(self) -> str:
-        return "|".join(
-            (
-                self.engine.value,
-                self.scope.value,
-                " ".join(self.query.lower().split()),
-                self.page_token.strip(),
-            )
-        )
+        """Return billable-request identity, not descriptive planner metadata.
+
+        Immersive Product ignores country/global scope in the HTTP request. The
+        page token therefore defines the paid action and cannot be reused under a
+        different scope label.
+        """
+
+        if self.engine is SearchEngine.GOOGLE_IMMERSIVE_PRODUCT:
+            return f"{self.engine.value}|page_token|{self.page_token.strip()}"
+        normalized_query = " ".join(self.query.lower().split())
+        return "|".join((self.engine.value, self.scope.value, normalized_query))
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["engine"] = self.engine.value
         payload["purpose"] = self.purpose.value
         payload["scope"] = self.scope.value
+        payload["signature"] = self.signature
         return payload
 
 
@@ -134,7 +139,15 @@ class SearchObservation:
             "raw_result_count": self.raw_result_count,
             "external_result_count": len(self.results),
             "direct_candidate_count": len(self.direct_candidates),
-            "handles": [asdict(item) | {"source_engine": item.source_engine.value} for item in self.handles],
+            "handles": [
+                {
+                    "kind": item.kind,
+                    "value": item.value,
+                    "source_engine": item.source_engine.value,
+                    "title": item.title,
+                }
+                for item in self.handles
+            ],
             "answer_summary": self.answer_summary[:1000],
             "error": self.error[:500],
         }
@@ -167,21 +180,38 @@ class SerpAPIConfigV2:
             raise ValueError("SERPAPI_API_KEY is required")
         return cls(
             api_key=api_key,
-            endpoint=str(os.getenv("SERPAPI_ENDPOINT") or cls.endpoint).strip(),
+            endpoint=str(
+                os.getenv("SERPAPI_ENDPOINT")
+                or "https://serpapi.com/search.json"
+            ).strip(),
             timeout_seconds=float(os.getenv("SERPAPI_TIMEOUT_SECONDS") or 45),
-            max_retries=max(1, min(5, int(os.getenv("SERPAPI_MAX_RETRIES") or 2))),
-            num_results=max(5, min(100, int(os.getenv("SERPAPI_NUM_RESULTS") or 20))),
-            no_cache=str(os.getenv("SERPAPI_NO_CACHE") or "true").lower() in {"1", "true", "yes", "on"},
+            max_retries=max(
+                1,
+                min(5, int(os.getenv("SERPAPI_MAX_RETRIES") or 2)),
+            ),
+            num_results=max(
+                5,
+                min(100, int(os.getenv("SERPAPI_NUM_RESULTS") or 20)),
+            ),
+            no_cache=str(os.getenv("SERPAPI_NO_CACHE") or "true").lower()
+            in {"1", "true", "yes", "on"},
             device=str(os.getenv("SERPAPI_DEVICE") or "desktop").strip(),
         )
 
 
 class SearchClient(Protocol):
-    def execute(self, action: SearchAction, product: ProductInput) -> SearchObservation: ...
+    def execute(
+        self,
+        action: SearchAction,
+        product: ProductInput,
+    ) -> SearchObservation: ...
 
 
 class StructuredSearchReasoner(Protocol):
-    def choose_search_action(self, payload: Mapping[str, Any]) -> Mapping[str, Any]: ...
+    def choose_search_action(
+        self,
+        payload: Mapping[str, Any],
+    ) -> Mapping[str, Any]: ...
 
 
 class SerpAPIClientV2:
@@ -195,7 +225,11 @@ class SerpAPIClientV2:
         self.session = session or requests.Session()
         self.parser = SerpAPIResponseParserV2()
 
-    def execute(self, action: SearchAction, product: ProductInput) -> SearchObservation:
+    def execute(
+        self,
+        action: SearchAction,
+        product: ProductInput,
+    ) -> SearchObservation:
         params = self._params(action, product)
         last_error: Exception | None = None
         for attempt in range(1, self.config.max_retries + 1):
@@ -210,7 +244,7 @@ class SerpAPIClientV2:
                 if payload.get("error"):
                     raise RuntimeError(str(payload["error"]))
                 return self.parser.parse(action, payload)
-            except Exception as exc:  # network boundary; converted into observed error
+            except Exception as exc:  # external network boundary
                 last_error = exc
                 if attempt >= self.config.max_retries:
                     break
@@ -223,7 +257,11 @@ class SerpAPIClientV2:
             error=f"{type(last_error).__name__}: {last_error}",
         )
 
-    def _params(self, action: SearchAction, product: ProductInput) -> dict[str, Any]:
+    def _params(
+        self,
+        action: SearchAction,
+        product: ProductInput,
+    ) -> dict[str, Any]:
         params: dict[str, Any] = {
             "api_key": self.config.api_key,
             "engine": action.engine.value,
@@ -240,7 +278,9 @@ class SerpAPIClientV2:
         params["q"] = action.query
         params["hl"] = action.language_code or product.language_code or "en"
         if action.scope is SearchScope.COUNTRY:
-            params["gl"] = (action.country_code or product.country_code).lower()
+            params["gl"] = (
+                action.country_code or product.country_code
+            ).lower()
         if action.engine is SearchEngine.GOOGLE:
             params["num"] = self.config.num_results
         return params
@@ -277,7 +317,11 @@ class SerpAPIResponseParserV2:
         "product_page_url",
     )
 
-    def parse(self, action: SearchAction, payload: Mapping[str, Any]) -> SearchObservation:
+    def parse(
+        self,
+        action: SearchAction,
+        payload: Mapping[str, Any],
+    ) -> SearchObservation:
         metadata = payload.get("search_metadata") or {}
         results: list[SearchResultRecord] = []
         handles: list[SearchHandle] = []
@@ -311,7 +355,12 @@ class SerpAPIResponseParserV2:
         action: SearchAction,
         section: str,
     ) -> list[SearchResultRecord]:
-        title = str(record.get("title") or record.get("name") or record.get("product_title") or "")
+        title = str(
+            record.get("title")
+            or record.get("name")
+            or record.get("product_title")
+            or ""
+        )
         snippet = str(
             record.get("snippet")
             or record.get("description")
@@ -319,7 +368,9 @@ class SerpAPIResponseParserV2:
             or record.get("brand")
             or ""
         )
-        position = self._positive_int(record.get("position") or record.get("rank"))
+        position = self._positive_int(
+            record.get("position") or record.get("rank")
+        )
         output: list[SearchResultRecord] = []
         for key in self._URL_KEYS:
             raw_url = record.get(key)
@@ -336,7 +387,9 @@ class SerpAPIResponseParserV2:
                     source_section=f"{action.engine.value}:{section}",
                     position=position,
                     query=action.query or action.purpose.value,
-                    structurally_product_like=is_structurally_product_like_url(url),
+                    structurally_product_like=(
+                        is_structurally_product_like_url(url)
+                    ),
                 )
             )
         return output
@@ -347,36 +400,66 @@ class SerpAPIResponseParserV2:
             yield value
             for nested in value.values():
                 yield from SerpAPIResponseParserV2._records(nested)
-        elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        elif isinstance(value, Sequence) and not isinstance(
+            value,
+            (str, bytes, bytearray),
+        ):
             for item in value:
                 yield from SerpAPIResponseParserV2._records(item)
 
     @staticmethod
-    def _handles(record: Mapping[str, Any], engine: SearchEngine) -> list[SearchHandle]:
+    def _handles(
+        record: Mapping[str, Any],
+        engine: SearchEngine,
+    ) -> list[SearchHandle]:
         title = str(record.get("title") or record.get("name") or "")
         output: list[SearchHandle] = []
         for key in ("immersive_product_page_token", "page_token"):
             value = str(record.get(key) or "").strip()
             if value:
-                output.append(SearchHandle("immersive_product_page_token", value, engine, title))
+                output.append(
+                    SearchHandle(
+                        "immersive_product_page_token",
+                        value,
+                        engine,
+                        title,
+                    )
+                )
         serpapi_link = str(record.get("serpapi_link") or "")
         if serpapi_link:
-            token = parse_qs(urlparse(serpapi_link).query).get("page_token", [""])[0]
+            token = parse_qs(urlparse(serpapi_link).query).get(
+                "page_token",
+                [""],
+            )[0]
             if token:
-                output.append(SearchHandle("immersive_product_page_token", token, engine, title))
+                output.append(
+                    SearchHandle(
+                        "immersive_product_page_token",
+                        token,
+                        engine,
+                        title,
+                    )
+                )
         return output
 
     @staticmethod
-    def _deduplicate_results(results: Sequence[SearchResultRecord]) -> tuple[SearchResultRecord, ...]:
+    def _deduplicate_results(
+        results: Sequence[SearchResultRecord],
+    ) -> tuple[SearchResultRecord, ...]:
         by_url: dict[str, SearchResultRecord] = {}
         for item in results:
             previous = by_url.get(item.url)
-            if previous is None or len(item.title) + len(item.snippet) > len(previous.title) + len(previous.snippet):
+            if previous is None or (
+                len(item.title) + len(item.snippet)
+                > len(previous.title) + len(previous.snippet)
+            ):
                 by_url[item.url] = item
         return tuple(by_url.values())
 
     @staticmethod
-    def _deduplicate_handles(handles: Sequence[SearchHandle]) -> tuple[SearchHandle, ...]:
+    def _deduplicate_handles(
+        handles: Sequence[SearchHandle],
+    ) -> tuple[SearchHandle, ...]:
         output: list[SearchHandle] = []
         seen: set[tuple[str, str]] = set()
         for item in handles:
@@ -388,9 +471,22 @@ class SerpAPIResponseParserV2:
 
     @staticmethod
     def _external(url: str) -> bool:
-        host = (urlparse(url).hostname or "").lower().removeprefix("www.")
-        blocked = ("google.com", "googleusercontent.com", "serpapi.com", "gstatic.com")
-        return bool(host and not any(host == value or host.endswith("." + value) for value in blocked))
+        host = (
+            urlparse(url).hostname or ""
+        ).lower().removeprefix("www.")
+        blocked = (
+            "google.com",
+            "googleusercontent.com",
+            "serpapi.com",
+            "gstatic.com",
+        )
+        return bool(
+            host
+            and not any(
+                host == value or host.endswith("." + value)
+                for value in blocked
+            )
+        )
 
     @staticmethod
     def _positive_int(value: Any) -> int | None:
@@ -428,7 +524,9 @@ class InformationGainSearchPlanner:
         used_signatures: set[str],
     ) -> SearchAction:
         if not 1 <= credit_number <= self.credit_limit:
-            raise ValueError("credit_number is outside the configured budget")
+            raise ValueError(
+                "credit_number is outside the configured budget"
+            )
         context = build_search_context(interpretation)
         if self.reasoner is not None:
             try:
@@ -441,15 +539,28 @@ class InformationGainSearchPlanner:
                     used_signatures=used_signatures,
                 )
                 raw = self.reasoner.choose_search_action(payload)
-                action = self._parse_reasoned_action(raw, product, credit_number)
+                action = self._parse_reasoned_action(
+                    raw,
+                    product,
+                    credit_number,
+                )
                 if action.signature in used_signatures:
-                    raise ValueError("reasoner returned a duplicate search action")
-                if credit_number == self.credit_limit and action.purpose is not SearchPurpose.MANDATORY_URL_RECOVERY:
-                    raise ValueError("final credit must be mandatory URL recovery")
+                    raise ValueError(
+                        "reasoner returned a duplicate search action"
+                    )
+                if (
+                    credit_number == self.credit_limit
+                    and action.purpose
+                    is not SearchPurpose.MANDATORY_URL_RECOVERY
+                ):
+                    raise ValueError(
+                        "final credit must be mandatory URL recovery"
+                    )
                 return action
             except Exception:
                 if self.require_reasoner:
                     raise
+
         action = self._deterministic_action(
             product=product,
             context=context,
@@ -457,7 +568,11 @@ class InformationGainSearchPlanner:
             handles=handles,
         )
         if action.signature in used_signatures:
-            action = self._duplicate_recovery(product, context, credit_number, handles)
+            action = self._duplicate_recovery(
+                product,
+                context,
+                credit_number,
+            )
         if action.signature in used_signatures:
             raise ValueError("no non-duplicate search action remains")
         return action
@@ -473,19 +588,30 @@ class InformationGainSearchPlanner:
         token = self._first_token(handles)
         language = product.language_code or "en"
         if credit_number == 1:
-            query = self._identity_query(product, context)
-            engine = SearchEngine.GOOGLE if any(anchor.isdigit() for anchor in context.exact_anchors) else SearchEngine.GOOGLE_SHOPPING
+            engine = (
+                SearchEngine.GOOGLE
+                if any(anchor.isdigit() for anchor in context.exact_anchors)
+                else SearchEngine.GOOGLE_SHOPPING
+            )
             return SearchAction(
                 credit_number=credit_number,
                 engine=engine,
                 purpose=SearchPurpose.ESTABLISH_IDENTITY,
                 scope=SearchScope.COUNTRY,
-                query=query,
+                query=self._identity_query(product, context),
                 country_code=product.country_code,
                 language_code=language,
-                expected_signals=("EXACT_IDENTIFIER", "MODEL", "DIRECT_PRODUCT_URL"),
-                rationale="Establish exact commercial identity from the strongest supplied and extracted anchors.",
+                expected_signals=(
+                    "EXACT_IDENTIFIER",
+                    "MODEL",
+                    "DIRECT_PRODUCT_URL",
+                ),
+                rationale=(
+                    "Establish exact commercial identity from the strongest "
+                    "supplied and extracted anchors."
+                ),
             )
+
         if credit_number == self.credit_limit:
             if token:
                 return SearchAction(
@@ -495,19 +621,21 @@ class InformationGainSearchPlanner:
                     scope=SearchScope.GLOBAL,
                     page_token=token,
                     language_code=language,
-                    expected_signals=("DIRECT_MERCHANT_URL", "DURABLE_PRODUCT_PAGE"),
-                    rationale="Expand the real product token into direct merchant URLs on the final credit.",
+                    expected_signals=(
+                        "DIRECT_MERCHANT_URL",
+                        "DURABLE_PRODUCT_PAGE",
+                    ),
+                    rationale=(
+                        "Expand the real product token into direct merchant "
+                        "URLs on the final credit."
+                    ),
                 )
-            return SearchAction(
-                credit_number=credit_number,
-                engine=SearchEngine.GOOGLE_AI_MODE,
-                purpose=SearchPurpose.MANDATORY_URL_RECOVERY,
-                scope=SearchScope.GLOBAL,
-                query=self._recovery_query(product, context),
-                language_code=language,
-                expected_signals=("REAL_EXTERNAL_URL", "DIRECT_PRODUCT_PAGE"),
-                rationale="Use the final credit to recover a real direct manufacturer or retailer URL.",
+            return self._ai_recovery_action(
+                product,
+                context,
+                credit_number,
             )
+
         if token:
             return SearchAction(
                 credit_number=credit_number,
@@ -518,8 +646,15 @@ class InformationGainSearchPlanner:
                 country_code=product.country_code,
                 language_code=language,
                 target_uncertainty=self._top_uncertainty(context),
-                expected_signals=("MERCHANT_VARIANTS", "PACK_CONFIGURATION", "DIRECT_PRODUCT_URL"),
-                rationale="Expand the product token to compare merchant titles and pack configurations.",
+                expected_signals=(
+                    "MERCHANT_VARIANTS",
+                    "PACK_CONFIGURATION",
+                    "DIRECT_PRODUCT_URL",
+                ),
+                rationale=(
+                    "Expand the product token to compare merchant titles and "
+                    "pack configurations."
+                ),
             )
         return SearchAction(
             credit_number=credit_number,
@@ -530,8 +665,14 @@ class InformationGainSearchPlanner:
             country_code=product.country_code,
             language_code=language,
             target_uncertainty=self._top_uncertainty(context),
-            expected_signals=("DISCRIMINATING_VARIANT_EVIDENCE", "DIRECT_PRODUCT_URL"),
-            rationale="Target the highest-risk unresolved identity discriminator rather than repeating broad discovery.",
+            expected_signals=(
+                "DISCRIMINATING_VARIANT_EVIDENCE",
+                "DIRECT_PRODUCT_URL",
+            ),
+            rationale=(
+                "Target the highest-risk unresolved identity discriminator "
+                "rather than repeating broad discovery."
+            ),
         )
 
     def reasoning_payload(
@@ -545,33 +686,61 @@ class InformationGainSearchPlanner:
         used_signatures: set[str],
     ) -> dict[str, Any]:
         return {
-            "objective": "Choose one SerpAPI action that maximally reduces exact-product URL uncertainty.",
+            "objective": (
+                "Choose one SerpAPI action that maximally reduces "
+                "exact-product URL uncertainty."
+            ),
             "credit": {
                 "number": credit_number,
                 "limit": self.credit_limit,
-                "remaining_including_this": self.credit_limit - credit_number + 1,
-                "final_credit_requires_mandatory_url_recovery": credit_number == self.credit_limit,
+                "remaining_including_this": (
+                    self.credit_limit - credit_number + 1
+                ),
+                "final_credit_requires_mandatory_url_recovery": (
+                    credit_number == self.credit_limit
+                ),
             },
             "product": asdict(product),
             "search_context": context.to_dict(),
-            "previous_observations": [item.compact_dict() for item in observations],
+            "previous_observations": [
+                item.compact_dict() for item in observations
+            ],
             "available_handles": [
-                {"kind": item.kind, "value": item.value, "title": item.title, "source_engine": item.source_engine.value}
+                {
+                    "kind": item.kind,
+                    "value": item.value,
+                    "title": item.title,
+                    "source_engine": item.source_engine.value,
+                }
                 for item in handles
             ],
             "used_signatures": sorted(used_signatures),
             "allowed_engines": [item.value for item in SearchEngine],
             "rules": [
                 "Choose exactly one action.",
-                "Do not invent URLs, page tokens, identifiers, brands, variants or pack configurations.",
+                (
+                    "Do not invent URLs, page tokens, identifiers, brands, "
+                    "variants or pack configurations."
+                ),
                 "Target the highest-severity unresolved discriminator.",
-                "Use immersive product only with an available page token.",
+                (
+                    "Use immersive product only with an available page token."
+                ),
                 "Do not repeat an engine/query/token signature.",
-                "The final credit must have purpose MANDATORY_URL_RECOVERY.",
+                (
+                    "The final credit must have purpose "
+                    "MANDATORY_URL_RECOVERY."
+                ),
             ],
             "output_schema": {
-                "engine": "google|google_shopping|google_ai_mode|google_immersive_product",
-                "purpose": "ESTABLISH_IDENTITY|RESOLVE_UNCERTAINTY|MANDATORY_URL_RECOVERY",
+                "engine": (
+                    "google|google_shopping|google_ai_mode|"
+                    "google_immersive_product"
+                ),
+                "purpose": (
+                    "ESTABLISH_IDENTITY|RESOLVE_UNCERTAINTY|"
+                    "MANDATORY_URL_RECOVERY"
+                ),
                 "scope": "country|global",
                 "query": "required except immersive product",
                 "page_token": "provided token only",
@@ -587,9 +756,15 @@ class InformationGainSearchPlanner:
         product: ProductInput,
         credit_number: int,
     ) -> SearchAction:
-        engine = SearchEngine(str(raw.get("engine") or "").strip().lower())
-        purpose = SearchPurpose(str(raw.get("purpose") or "").strip().upper())
-        scope = SearchScope(str(raw.get("scope") or "country").strip().lower())
+        engine = SearchEngine(
+            str(raw.get("engine") or "").strip().lower()
+        )
+        purpose = SearchPurpose(
+            str(raw.get("purpose") or "").strip().upper()
+        )
+        scope = SearchScope(
+            str(raw.get("scope") or "country").strip().lower()
+        )
         return SearchAction(
             credit_number=credit_number,
             engine=engine,
@@ -597,10 +772,20 @@ class InformationGainSearchPlanner:
             scope=scope,
             query=str(raw.get("query") or "").strip(),
             page_token=str(raw.get("page_token") or "").strip(),
-            country_code=product.country_code if scope is SearchScope.COUNTRY else "",
+            country_code=(
+                product.country_code
+                if scope is SearchScope.COUNTRY
+                else ""
+            ),
             language_code=product.language_code or "en",
-            target_uncertainty=str(raw.get("target_uncertainty") or "").strip(),
-            expected_signals=tuple(str(item).strip() for item in raw.get("expected_signals") or [] if str(item).strip()),
+            target_uncertainty=str(
+                raw.get("target_uncertainty") or ""
+            ).strip(),
+            expected_signals=tuple(
+                str(item).strip()
+                for item in raw.get("expected_signals") or []
+                if str(item).strip()
+            ),
             rationale=str(raw.get("rationale") or "").strip(),
             planner_source="REASONING_MODEL",
         )
@@ -610,50 +795,130 @@ class InformationGainSearchPlanner:
         product: ProductInput,
         context: SearchContextPacket,
         credit_number: int,
-        handles: Sequence[SearchHandle],
     ) -> SearchAction:
-        purpose = SearchPurpose.MANDATORY_URL_RECOVERY if credit_number == self.credit_limit else SearchPurpose.RESOLVE_UNCERTAINTY
+        if credit_number == self.credit_limit:
+            return self._ai_recovery_action(
+                product,
+                context,
+                credit_number,
+            )
         return SearchAction(
             credit_number=credit_number,
             engine=SearchEngine.GOOGLE_AI_MODE,
-            purpose=purpose,
-            scope=SearchScope.GLOBAL if credit_number == self.credit_limit else SearchScope.COUNTRY,
-            query=self._recovery_query(product, context) + f" search-step-{credit_number}",
-            country_code="" if credit_number == self.credit_limit else product.country_code,
+            purpose=SearchPurpose.RESOLVE_UNCERTAINTY,
+            scope=SearchScope.COUNTRY,
+            query=self._uncertainty_query(product, context),
+            country_code=product.country_code,
             language_code=product.language_code or "en",
             target_uncertainty=self._top_uncertainty(context),
             expected_signals=("CITED_DIRECT_PRODUCT_URL",),
-            rationale="Use a distinct cited-source surface after a duplicate action was rejected.",
+            rationale=(
+                "Use a distinct cited-source surface after a duplicate "
+                "billable action was rejected."
+            ),
+        )
+
+    def _ai_recovery_action(
+        self,
+        product: ProductInput,
+        context: SearchContextPacket,
+        credit_number: int,
+    ) -> SearchAction:
+        return SearchAction(
+            credit_number=credit_number,
+            engine=SearchEngine.GOOGLE_AI_MODE,
+            purpose=SearchPurpose.MANDATORY_URL_RECOVERY,
+            scope=SearchScope.GLOBAL,
+            query=self._recovery_query(product, context),
+            language_code=product.language_code or "en",
+            expected_signals=(
+                "REAL_EXTERNAL_URL",
+                "DIRECT_PRODUCT_PAGE",
+            ),
+            rationale=(
+                "Use the final credit to recover a real direct manufacturer "
+                "or retailer URL."
+            ),
         )
 
     @staticmethod
     def _first_token(handles: Sequence[SearchHandle]) -> str:
-        return next((item.value for item in handles if item.kind == "immersive_product_page_token" and item.value), "")
+        return next(
+            (
+                item.value
+                for item in handles
+                if item.kind == "immersive_product_page_token"
+                and item.value
+            ),
+            "",
+        )
 
     @staticmethod
     def _top_uncertainty(context: SearchContextPacket) -> str:
-        return context.unresolved_discriminators[0] if context.unresolved_discriminators else "exact product identity and pack configuration"
+        if context.unresolved_discriminators:
+            return context.unresolved_discriminators[0]
+        return "exact product identity and pack configuration"
 
     @staticmethod
     def _quoted_terms(values: Sequence[str]) -> str:
         return " ".join(f'"{value}"' for value in values if value)
 
-    def _identity_query(self, product: ProductInput, context: SearchContextPacket) -> str:
+    @staticmethod
+    def _excluded_terms(context: SearchContextPacket) -> tuple[str, ...]:
+        output: list[str] = []
+        for value in context.excluded_interpretations:
+            text = " ".join(str(value).split())
+            if text.lower().startswith("not "):
+                text = text[4:].strip()
+            if text:
+                output.append(text)
+        return tuple(dict.fromkeys(output))
+
+    def _identity_query(
+        self,
+        product: ProductInput,
+        context: SearchContextPacket,
+    ) -> str:
         anchors = self._quoted_terms(context.exact_anchors)
         main = f'"{product.main_text}"'
-        retailer = f' "{product.retailer_name}"' if product.retailer_name else ""
-        return " ".join(value for value in (anchors, main, retailer, "product") if value).strip()
+        retailer = (
+            f'"{product.retailer_name}"'
+            if product.retailer_name
+            else ""
+        )
+        return " ".join(
+            value
+            for value in (anchors, main, retailer, "product")
+            if value
+        )
 
-    def _uncertainty_query(self, product: ProductInput, context: SearchContextPacket) -> str:
+    def _uncertainty_query(
+        self,
+        product: ProductInput,
+        context: SearchContextPacket,
+    ) -> str:
         anchors = self._quoted_terms(context.exact_anchors)
         discriminator = self._top_uncertainty(context)
-        exclusions = " ".join(f'-"{item}"' for item in context.excluded_interpretations[:4])
-        return f'{anchors} "{product.main_text}" {discriminator} {exclusions} product'.strip()
+        exclusions = " ".join(
+            f'-"{item}"'
+            for item in self._excluded_terms(context)[:4]
+        )
+        return (
+            f'{anchors} "{product.main_text}" '
+            f'{discriminator} {exclusions} product'
+        ).strip()
 
-    def _recovery_query(self, product: ProductInput, context: SearchContextPacket) -> str:
+    def _recovery_query(
+        self,
+        product: ProductInput,
+        context: SearchContextPacket,
+    ) -> str:
         anchors = self._quoted_terms(context.exact_anchors)
         known = " ".join(value for _, value in context.known_facts)
-        exclusions = " ".join(f'-"{item}"' for item in context.excluded_interpretations[:4])
+        exclusions = " ".join(
+            f'-"{item}"'
+            for item in self._excluded_terms(context)[:4]
+        )
         return (
             f'{anchors} "{product.main_text}" {known} {exclusions} '
             "direct official manufacturer or retailer product page URL"
@@ -661,9 +926,13 @@ class InformationGainSearchPlanner:
 
 
 class SearchCampaign:
-    """Execute the complete bounded search budget and preserve every observation."""
+    """Execute the complete bounded budget and preserve every observation."""
 
-    def __init__(self, client: SearchClient, planner: InformationGainSearchPlanner) -> None:
+    def __init__(
+        self,
+        client: SearchClient,
+        planner: InformationGainSearchPlanner,
+    ) -> None:
         self.client = client
         self.planner = planner
 
@@ -676,6 +945,7 @@ class SearchCampaign:
         actions: list[SearchAction] = []
         handles: list[SearchHandle] = []
         used_signatures: set[str] = set()
+
         for credit_number in range(1, self.planner.credit_limit + 1):
             action = self.planner.choose(
                 product=product,
@@ -686,7 +956,9 @@ class SearchCampaign:
                 used_signatures=used_signatures,
             )
             if action.signature in used_signatures:
-                raise RuntimeError("duplicate search action escaped planner validation")
+                raise RuntimeError(
+                    "duplicate search action escaped planner validation"
+                )
             used_signatures.add(action.signature)
             actions.append(action)
             observation = self.client.execute(action, product)
@@ -697,7 +969,10 @@ class SearchCampaign:
         for observation in observations:
             for item in observation.direct_candidates:
                 previous = direct_by_url.get(item.url)
-                if previous is None or (item.position or 9999) < (previous.position or 9999):
+                if previous is None or (
+                    (item.position or 9999)
+                    < (previous.position or 9999)
+                ):
                     direct_by_url[item.url] = item
         return SearchCampaignResult(
             actions=tuple(actions),
