@@ -14,6 +14,12 @@ case "${1:-}" in
 esac
 
 mkdir -p data/artifacts secrets .runtime
+# The bind-mount root must allow the non-root agent to create per-run setgid
+# directories. Per-run directories are then restricted to the shared runtime
+# group by ArtifactWriter.
+chmod 1777 data/artifacts
+chmod 0700 secrets
+
 if [[ ! -f .env ]]; then
   cp .env.example .env
   echo "Created .env from .env.example; add SERPAPI and PCA LLM credentials before production use."
@@ -25,6 +31,7 @@ import secrets
 print(secrets.token_urlsafe(32))
 PY
 fi
+chmod 0600 secrets/browser_api_token.txt
 
 compose=(docker compose --env-file .env)
 
@@ -104,6 +111,7 @@ print(f"Agent health : {agent_url}/health")
 print(f"API docs     : {agent_url}/docs")
 print(f"UI           : {ui_url}")
 print("Resolved ports: .runtime/ports.env")
+print(f"Trace contract: {health.get('trace_contract') or 'unavailable'}")
 reasoning = health.get("reasoning") or {}
 print(
     "PCA reasoning : "
