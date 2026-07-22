@@ -34,6 +34,7 @@ services:
       PRODUCT_URL_ARTIFACT_ROOT: /data/artifacts
       PRODUCT_URL_FEATURE_SET_ROOT: /app/feature_sets
       PRODUCT_URL_BROWSER_BASE_URL: http://browser:9000
+      BROWSER_API_TOKEN: ""
       BROWSER_API_TOKEN_FILE: /run/secrets/browser_api_token
     volumes:
       - ./data/artifacts:/data/artifacts
