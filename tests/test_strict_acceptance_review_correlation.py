@@ -174,7 +174,7 @@ def test_ui_summary_shows_only_the_measured_feature_failure() -> None:
         for item in summary["pillars"]["usability"]["checks"]
     }
     assert summary["selected_url"] == url
-    assert summary["overall_status"] == "URL_FOUND_REVIEW_REQUIRED"
+    assert summary["overall_status"] == "URL_DELIVERED_REVIEW_REQUIRED"
     assert checks == {
         "browser_openable": "PASS",
         "text_scrapable": "PASS",
