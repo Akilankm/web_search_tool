@@ -17,7 +17,8 @@ from product_url_v2.models import ProductInput, RunEvent, to_jsonable
 from product_url_v2.orchestrator import ProductURLOrchestrator
 from product_url_v2.trace import TRACE_CONTRACT, TRACE_NOTICE
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
+URL_DELIVERY_POLICY = "mandatory-url-first-v2"
 TERMINAL_JOB_STATUSES = {"COMPLETED", "REVIEW_REQUIRED", "FAILED", "TECHNICAL_FAILURE"}
 
 
@@ -126,6 +127,7 @@ def health() -> dict[str, Any]:
         "status": "healthy",
         "version": VERSION,
         "runtime_contract": CONFIG.runtime_contract,
+        "url_delivery_policy": URL_DELIVERY_POLICY,
         "trace_contract": TRACE_CONTRACT,
         "trace_notice": TRACE_NOTICE,
         "browser": browser,
