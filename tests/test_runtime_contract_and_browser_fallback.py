@@ -84,6 +84,8 @@ def _healthy_payload() -> dict:
         "business_judgement_review_artifact": True,
         "structured_no_url_review_outcome": True,
         "per_job_runtime_controls": True,
+        "executive_url_decision_summary": True,
+        "best_available_review_url_delivery": True,
         "browser_service": {"agentic_tools": True},
         "configuration": {
             "three_stage_contract_enforced": True,
@@ -146,7 +148,7 @@ def test_agentic_llm_failure_falls_back_to_rendered_browser(monkeypatch) -> None
     assert browser.aborted is True
 
 
-def test_health_exposes_v9_runtime_contract(tmp_path: Path) -> None:
+def test_health_exposes_v11_runtime_contract(tmp_path: Path) -> None:
     orchestrator = ProductEvidenceOrchestrator(
         config=AgentRuntimeConfig(
             private_feature_root=tmp_path,
@@ -161,9 +163,10 @@ def test_health_exposes_v9_runtime_contract(tmp_path: Path) -> None:
     assert health["business_judgement_review_artifact"] is True
     assert health["structured_no_url_review_outcome"] is True
     assert health["per_job_runtime_controls"] is True
+    assert health["best_available_review_url_delivery"] is True
 
 
-def test_notebook_rejects_missing_v9_capabilities(monkeypatch) -> None:
+def test_notebook_rejects_missing_v11_capabilities(monkeypatch) -> None:
     import src.product_evidence_harness.notebook_runtime as runtime
 
     missing_contract = _healthy_payload()
@@ -172,13 +175,10 @@ def test_notebook_rejects_missing_v9_capabilities(monkeypatch) -> None:
     with pytest.raises(RuntimeError, match="STALE_AGENT_IMAGE"):
         check_health()
 
-    missing_controls = _healthy_payload()
-    missing_controls.pop("per_job_runtime_controls")
-    monkeypatch.setattr(runtime, "api_json", lambda *args, **kwargs: missing_controls)
-    with pytest.raises(
-        RuntimeError,
-        match="validated concurrency-safe per-job runtime controls",
-    ):
+    missing_delivery = _healthy_payload()
+    missing_delivery.pop("best_available_review_url_delivery")
+    monkeypatch.setattr(runtime, "api_json", lambda *args, **kwargs: missing_delivery)
+    with pytest.raises(RuntimeError, match="best real non-mismatched direct URL recovery"):
         check_health()
 
 
@@ -204,7 +204,7 @@ def test_notebook_auto_recovers_incompatible_agent(monkeypatch, tmp_path: Path) 
     monkeypatch.setattr(runtime, "recover_platform", lambda *args, **kwargs: recovery)
 
     health, result = ensure_platform_ready(tmp_path, auto_recover=True, clean_build=True)
-    assert health["per_job_runtime_controls"] is True
+    assert health["best_available_review_url_delivery"] is True
     assert result.recovered is True
     assert result.clean_build is True
 
