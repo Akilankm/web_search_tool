@@ -34,6 +34,7 @@ from product_url_v2.policy import (
     MandatoryURLDeliveryPolicy,
     SearchObjective,
     build_search_objectives,
+    is_structurally_product_like_url,
 )
 from product_url_v2.state_machine import ProductRunStateMachine
 
@@ -64,4 +65,5 @@ __all__ = [
     "build_search_objectives",
     "canonical_url",
     "evaluate_release",
+    "is_structurally_product_like_url",
 ]
