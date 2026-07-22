@@ -4,7 +4,7 @@ import json
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -13,6 +13,9 @@ from bs4 import BeautifulSoup
 from product_url_v2.config import AcquisitionConfig
 from product_url_v2.models import GateStatus, PageEvidence, SearchResult
 from product_url_v2.search import canonical_url
+from product_url_v2.trace import page_evidence_summary
+
+AcquisitionProgress = Callable[[str, Mapping[str, Any]], None]
 
 
 @dataclass(slots=True)
@@ -21,17 +24,33 @@ class PageAcquirer:
     timeout_seconds: int = 30
     session: requests.Session | None = None
 
-    def acquire_many(self, candidates: Sequence[SearchResult]) -> dict[str, PageEvidence]:
+    def acquire_many(
+        self,
+        candidates: Sequence[SearchResult],
+        progress: AcquisitionProgress | None = None,
+    ) -> dict[str, PageEvidence]:
         selected = self._select(candidates)
+        if progress:
+            progress(
+                "ACQUISITION_PLAN",
+                {
+                    "submitted_candidate_count": len(candidates),
+                    "selected_candidate_count": len(selected),
+                    "max_candidates": self.config.max_candidates,
+                    "max_per_domain": self.config.max_per_domain,
+                    "max_workers": self.config.max_workers,
+                    "selected_urls": [item.url for item in selected],
+                },
+            )
         output: dict[str, PageEvidence] = {}
         with ThreadPoolExecutor(max_workers=self.config.max_workers) as pool:
             futures = {pool.submit(self.acquire, item.url): item.url for item in selected}
             for future in as_completed(futures):
                 url = futures[future]
                 try:
-                    output[url] = future.result()
+                    evidence = future.result()
                 except Exception as exc:
-                    output[url] = PageEvidence(
+                    evidence = PageEvidence(
                         requested_url=url,
                         final_url=url,
                         status_code=None,
@@ -46,6 +65,9 @@ class PageAcquirer:
                         fetch_status=GateStatus.FAIL,
                         fetch_error=f"{type(exc).__name__}: {exc}",
                     )
+                output[url] = evidence
+                if progress:
+                    progress("PAGE_FETCHED", page_evidence_summary(evidence))
         return output
 
     def acquire(self, url: str) -> PageEvidence:
@@ -54,7 +76,10 @@ class PageAcquirer:
         response = session.get(
             url,
             timeout=self.timeout_seconds,
-            headers={"User-Agent": self.config.user_agent, "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.5"},
+            headers={
+                "User-Agent": self.config.user_agent,
+                "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.5",
+            },
             allow_redirects=True,
             stream=True,
         )
@@ -63,12 +88,56 @@ class PageAcquirer:
         content_type = str(response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
         final_url = canonical_url(response.url) or url
         if response.status_code >= 400:
-            return PageEvidence(url, final_url, response.status_code, content_type, "", "", "", (), {}, (), (), GateStatus.FAIL, f"HTTP {response.status_code}", elapsed)
+            return PageEvidence(
+                url,
+                final_url,
+                response.status_code,
+                content_type,
+                "",
+                "",
+                "",
+                (),
+                {},
+                (),
+                (),
+                GateStatus.FAIL,
+                f"HTTP {response.status_code}",
+                elapsed,
+            )
         if content_type == "application/json":
             text = content.decode(response.encoding or "utf-8", errors="replace")
-            return PageEvidence(url, final_url, response.status_code, content_type, "", "", text[:100000], (), {}, (), (), GateStatus.PASS, elapsed_ms=elapsed)
+            return PageEvidence(
+                url,
+                final_url,
+                response.status_code,
+                content_type,
+                "",
+                "",
+                text[:100000],
+                (),
+                {},
+                (),
+                (),
+                GateStatus.PASS,
+                elapsed_ms=elapsed,
+            )
         if "html" not in content_type and not content.lstrip().startswith(b"<"):
-            return PageEvidence(url, final_url, response.status_code, content_type, "", "", "", (), {}, (), (), GateStatus.FAIL, "response is not HTML", elapsed)
+            return PageEvidence(
+                url,
+                final_url,
+                response.status_code,
+                content_type,
+                "",
+                "",
+                "",
+                (),
+                {},
+                (),
+                (),
+                GateStatus.FAIL,
+                "response is not HTML",
+                elapsed,
+            )
         return parse_html_evidence(url, final_url, response.status_code, content_type, content, elapsed)
 
     def _select(self, candidates: Sequence[SearchResult]) -> tuple[SearchResult, ...]:
@@ -102,7 +171,13 @@ def parse_html_evidence(
     description = metadata.get("description") or metadata.get("og:description") or ""
     visible_text = " ".join(soup.get_text(" ", strip=True).split())[:200000]
     products = tuple(_jsonld_products(soup))
-    links = tuple(dict.fromkeys(canonical_url(urljoin(final_url, item.get("href"))) for item in soup.find_all("a", href=True) if canonical_url(urljoin(final_url, item.get("href")))))[:500]
+    links = tuple(
+        dict.fromkeys(
+            canonical_url(urljoin(final_url, item.get("href")))
+            for item in soup.find_all("a", href=True)
+            if canonical_url(urljoin(final_url, item.get("href")))
+        )
+    )[:500]
     images = tuple(dict.fromkeys(urljoin(final_url, item.get("src")) for item in soup.find_all("img", src=True)))[:100]
     return PageEvidence(
         requested_url=requested_url,
