@@ -8,13 +8,17 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from product_url_v2.browser import BrowserClient
 from product_url_v2.config import RuntimeConfig, load_config
 from product_url_v2.models import ProductInput, RunEvent, to_jsonable
 from product_url_v2.orchestrator import ProductURLOrchestrator
+from product_url_v2.trace import TRACE_CONTRACT, TRACE_NOTICE
+
+VERSION = "1.1.0"
+TERMINAL_JOB_STATUSES = {"COMPLETED", "REVIEW_REQUIRED", "FAILED", "TECHNICAL_FAILURE"}
 
 
 class ProductPayload(BaseModel):
@@ -39,30 +43,80 @@ class Job:
     message: str = "Queued"
     result: Mapping[str, Any] | None = None
     error: str = ""
+    events: list[RunEvent] = field(default_factory=list)
 
 
 @dataclass(slots=True)
 class JobStore:
     jobs: dict[str, Job] = field(default_factory=dict)
-    lock: threading.Lock = field(default_factory=threading.Lock)
+    lock: threading.RLock = field(default_factory=threading.RLock)
 
     def put(self, job: Job) -> None:
         with self.lock:
             self.jobs[job.job_id] = job
 
-    def get(self, job_id: str) -> Job:
+    def mark_running(self, job_id: str) -> ProductInput:
         with self.lock:
-            job = self.jobs.get(job_id)
-            if job is None:
-                raise KeyError(job_id)
-            return job
+            job = self._require(job_id)
+            job.status = "RUNNING"
+            job.stage = "INTERPRET"
+            job.message = "Starting product resolution."
+            job.updated_at = _now()
+            return job.product
+
+    def record_event(self, job_id: str, event: RunEvent) -> None:
+        with self.lock:
+            job = self._require(job_id)
+            if not job.events or job.events[-1].sequence < event.sequence:
+                job.events.append(event)
+            job.stage = event.stage.value
+            job.message = event.message
+            job.updated_at = _now()
+
+    def finish(self, job_id: str, result: Mapping[str, Any], status: str, message: str) -> None:
+        with self.lock:
+            job = self._require(job_id)
+            job.result = dict(result)
+            job.status = status
+            job.message = message
+            job.updated_at = _now()
+
+    def fail(self, job_id: str, error: str) -> None:
+        with self.lock:
+            job = self._require(job_id)
+            job.status = "TECHNICAL_FAILURE"
+            job.stage = "FAILED"
+            job.error = error
+            job.message = error
+            job.updated_at = _now()
+
+    def view(self, job_id: str) -> dict[str, Any]:
+        with self.lock:
+            return _job_view(self._require(job_id))
+
+    def trace(self, job_id: str, after_sequence: int = 0) -> dict[str, Any]:
+        with self.lock:
+            return _trace_view(self._require(job_id), after_sequence=after_sequence)
+
+    def result(self, job_id: str) -> dict[str, Any]:
+        with self.lock:
+            job = self._require(job_id)
+            if job.status not in TERMINAL_JOB_STATUSES:
+                raise RuntimeError("job is not complete")
+            return dict(job.result or {})
+
+    def _require(self, job_id: str) -> Job:
+        job = self.jobs.get(job_id)
+        if job is None:
+            raise KeyError(job_id)
+        return job
 
 
 CONFIG: RuntimeConfig = load_config()
 ORCHESTRATOR = ProductURLOrchestrator(CONFIG)
 STORE = JobStore()
 EXECUTOR = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("PRODUCT_URL_JOB_WORKERS") or 2)))
-app = FastAPI(title="Product URL Resolver", version="1.0.2")
+app = FastAPI(title="Product URL Resolver", version=VERSION)
 
 
 @app.get("/health")
@@ -70,8 +124,10 @@ def health() -> dict[str, Any]:
     browser = BrowserClient.from_env(CONFIG.browser).health()
     return {
         "status": "healthy",
-        "version": "1.0.2",
+        "version": VERSION,
         "runtime_contract": CONFIG.runtime_contract,
+        "trace_contract": TRACE_CONTRACT,
+        "trace_notice": TRACE_NOTICE,
         "browser": browser,
         "reasoning": {
             "enabled": CONFIG.reasoning.enabled,
@@ -102,16 +158,26 @@ def create_job(payload: ProductPayload) -> dict[str, Any]:
     product = _product(payload)
     job_id = f"JOB-{uuid.uuid4().hex[:12].upper()}"
     now = _now()
-    job = Job(job_id, "QUEUED", product, now, now)
-    STORE.put(job)
+    STORE.put(Job(job_id, "QUEUED", product, now, now))
     EXECUTOR.submit(_run_job, job_id)
-    return _job_view(job)
+    return STORE.view(job_id)
 
 
 @app.get("/v1/jobs/{job_id}")
 def get_job(job_id: str) -> dict[str, Any]:
     try:
-        return _job_view(STORE.get(job_id))
+        return STORE.view(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+
+
+@app.get("/v1/jobs/{job_id}/trace")
+def get_trace(
+    job_id: str,
+    after_sequence: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    try:
+        return STORE.trace(job_id, after_sequence=after_sequence)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="job not found") from exc
 
@@ -119,40 +185,31 @@ def get_job(job_id: str) -> dict[str, Any]:
 @app.get("/v1/jobs/{job_id}/result")
 def get_result(job_id: str) -> dict[str, Any]:
     try:
-        job = STORE.get(job_id)
+        return STORE.result(job_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="job not found") from exc
-    if job.status not in {"COMPLETED", "REVIEW_REQUIRED", "FAILED", "TECHNICAL_FAILURE"}:
-        raise HTTPException(status_code=409, detail="job is not complete")
-    return dict(job.result or {})
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def _run_job(job_id: str) -> None:
-    job = STORE.get(job_id)
-    job.status = "RUNNING"
-    job.updated_at = _now()
-
-    def progress(event: RunEvent) -> None:
-        job.stage = event.stage.value
-        job.message = event.message
-        job.updated_at = _now()
-
     try:
-        result = ORCHESTRATOR.resolve(job.product, progress=progress)
-        job.result = to_jsonable(result)
-        job.status = {
+        product = STORE.mark_running(job_id)
+
+        def progress(event: RunEvent) -> None:
+            STORE.record_event(job_id, event)
+
+        result = ORCHESTRATOR.resolve(product, progress=progress)
+        rendered = to_jsonable(result)
+        status = {
             "VERIFIED": "COMPLETED",
             "REVIEW_REQUIRED": "REVIEW_REQUIRED",
             "FAILED": "FAILED",
             "TECHNICAL_FAILURE": "TECHNICAL_FAILURE",
         }[result.decision.status.value]
-        job.message = result.decision.status.value
+        STORE.finish(job_id, rendered, status, result.decision.status.value)
     except Exception as exc:
-        job.status = "TECHNICAL_FAILURE"
-        job.error = f"{type(exc).__name__}: {exc}"
-        job.message = job.error
-    finally:
-        job.updated_at = _now()
+        STORE.fail(job_id, f"{type(exc).__name__}: {exc}")
 
 
 def _product(payload: ProductPayload) -> ProductInput:
@@ -169,6 +226,7 @@ def _product(payload: ProductPayload) -> ProductInput:
 
 
 def _job_view(job: Job) -> dict[str, Any]:
+    last_sequence = job.events[-1].sequence if job.events else 0
     return {
         "job_id": job.job_id,
         "status": job.status,
@@ -178,6 +236,25 @@ def _job_view(job: Job) -> dict[str, Any]:
         "updated_at": job.updated_at,
         "row_id": job.product.row_id,
         "error": job.error or None,
+        "event_count": len(job.events),
+        "last_event_sequence": last_sequence,
+        "trace_contract": TRACE_CONTRACT,
+        "trace_url": f"/v1/jobs/{job.job_id}/trace",
+    }
+
+
+def _trace_view(job: Job, *, after_sequence: int = 0) -> dict[str, Any]:
+    events = [event for event in job.events if event.sequence > after_sequence]
+    return {
+        "job_id": job.job_id,
+        "status": job.status,
+        "stage": job.stage,
+        "message": job.message,
+        "event_count": len(job.events),
+        "last_event_sequence": job.events[-1].sequence if job.events else 0,
+        "trace_contract": TRACE_CONTRACT,
+        "notice": TRACE_NOTICE,
+        "events": to_jsonable(events),
     }
 
 
