@@ -62,7 +62,7 @@ CONFIG: RuntimeConfig = load_config()
 ORCHESTRATOR = ProductURLOrchestrator(CONFIG)
 STORE = JobStore()
 EXECUTOR = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("PRODUCT_URL_JOB_WORKERS") or 2)))
-app = FastAPI(title="Product URL Resolver", version="1.0.1")
+app = FastAPI(title="Product URL Resolver", version="1.0.2")
 
 
 @app.get("/health")
@@ -70,7 +70,7 @@ def health() -> dict[str, Any]:
     browser = BrowserClient.from_env(CONFIG.browser).health()
     return {
         "status": "healthy",
-        "version": "1.0.1",
+        "version": "1.0.2",
         "runtime_contract": CONFIG.runtime_contract,
         "browser": browser,
         "reasoning": {
