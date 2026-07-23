@@ -26,7 +26,9 @@ _INDIRECT_PATH_HINTS = (
     "/search", "/category", "/categories", "/collections", "/blog", "/news",
     "/support", "/help", "/login", "/account", "/consent",
 )
-_PRODUCT_PATH_HINTS = ("/product", "/products", "/item", "/p/", "/dp/", "/sku", "/shop/", "/detail/")
+_PRODUCT_PATH_HINTS = (
+    "/product", "/products", "/item", "/p/", "/dp/", "/sku", "/shop/", "/detail/", "/id/",
+)
 
 SearchProgress = Callable[[str, Mapping[str, Any]], None]
 
