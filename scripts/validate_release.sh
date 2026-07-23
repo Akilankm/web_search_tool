@@ -9,5 +9,8 @@ bash -n scripts/start.sh scripts/run_ui.sh scripts/validate_release.sh
 docker compose config --quiet
 
 python scripts/check_architecture.py
-pytest -q tests/test_acceptance_policy.py tests/test_mandatory_url_delivery.py
+pytest -q \
+  tests/test_acceptance_policy.py \
+  tests/test_mandatory_url_delivery.py \
+  tests/test_rendered_source_classification.py
 pytest -q
