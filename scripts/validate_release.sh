@@ -12,5 +12,6 @@ python scripts/check_architecture.py
 pytest -q \
   tests/test_acceptance_policy.py \
   tests/test_mandatory_url_delivery.py \
-  tests/test_rendered_source_classification.py
+  tests/test_rendered_source_classification.py \
+  tests/test_release_consistency.py
 pytest -q
