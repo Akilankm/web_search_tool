@@ -20,10 +20,26 @@ from product_url_v2.models import (
     SearchObservation,
     to_jsonable,
 )
-from product_url_v2.policy import ACCEPTANCE_POLICY_VERSION, choose_delivery, evaluate_acceptance
-from product_url_v2.reasoning import ReasoningPort, ReasoningSettings, StructuredIdentityReasoner
-from product_url_v2.search import InformationGainSearchPlanner, SearchClient, SerpAPIClient
-from product_url_v2.trace import candidate_judgment, candidate_ranking, interpretation_summary
+from product_url_v2.policy import (
+    ACCEPTANCE_POLICY_VERSION,
+    choose_delivery,
+    evaluate_acceptance,
+)
+from product_url_v2.reasoning import (
+    ReasoningPort,
+    ReasoningSettings,
+    StructuredIdentityReasoner,
+)
+from product_url_v2.search import (
+    InformationGainSearchPlanner,
+    SearchClient,
+    SerpAPIClient,
+)
+from product_url_v2.trace import (
+    candidate_judgment,
+    candidate_ranking,
+    interpretation_summary,
+)
 
 ProgressCallback = Callable[[RunEvent], None]
 
@@ -36,7 +52,11 @@ class ProductURLOrchestrator:
     browser_client: BrowserClient | None = None
     reasoner: ReasoningPort | None = None
 
-    def resolve(self, product: ProductInput, progress: ProgressCallback | None = None) -> ResolutionResult:
+    def resolve(
+        self,
+        product: ProductInput,
+        progress: ProgressCallback | None = None,
+    ) -> ResolutionResult:
         started = time.perf_counter()
         runtime = self.config.with_runtime_options(product.runtime_options)
         writer = ArtifactWriter(runtime.artifact_root)
@@ -45,8 +65,19 @@ class ProductURLOrchestrator:
         observations: tuple[SearchObservation, ...] = ()
         candidates = ()
 
-        def emit(stage: PipelineStage, event_type: str, message: str, **details: Any) -> None:
-            event = RunEvent(len(events) + 1, stage, event_type, message, details)
+        def emit(
+            stage: PipelineStage,
+            event_type: str,
+            message: str,
+            **details: Any,
+        ) -> None:
+            event = RunEvent(
+                len(events) + 1,
+                stage,
+                event_type,
+                message,
+                details,
+            )
             events.append(event)
             if progress:
                 progress(event)
@@ -70,22 +101,34 @@ class ProductURLOrchestrator:
             emit(
                 PipelineStage.INTERPRET,
                 "DETERMINISTIC_INTERPRETATION",
-                f"Extracted {len(deterministic.signals)} identity signal(s) and {len(deterministic.hypotheses)} product hypothesis/hypotheses.",
+                (
+                    f"Extracted {len(deterministic.signals)} identity signal(s) "
+                    f"and {len(deterministic.hypotheses)} product hypothesis/hypotheses."
+                ),
                 **interpretation_summary(deterministic),
             )
 
-            reasoner = self.reasoner or StructuredIdentityReasoner(ReasoningSettings.from_runtime(runtime.reasoning))
+            reasoner = self.reasoner or StructuredIdentityReasoner(
+                ReasoningSettings.from_runtime(runtime.reasoning)
+            )
             interpretation = reasoner.refine(product, deterministic)
             emit(
                 PipelineStage.INTERPRET,
                 "INTERPRETATION_READY",
                 "Prepared exact-product hypotheses for manufacturer-first search.",
                 llm_reasoning_enabled=runtime.reasoning.enabled,
-                llm_inference_count=sum(1 for item in interpretation.signals if item.source == "LLM_INFERENCE"),
+                llm_inference_count=sum(
+                    1
+                    for item in interpretation.signals
+                    if item.source == "LLM_INFERENCE"
+                ),
                 **interpretation_summary(interpretation),
             )
 
-            feature_set = load_feature_set(runtime.feature_set_root, product.feature_set)
+            feature_set = load_feature_set(
+                runtime.feature_set_root,
+                product.feature_set,
+            )
             artifact_dir = writer.write_intermediate(
                 product.row_id,
                 input_payload=to_jsonable(product),
@@ -96,7 +139,9 @@ class ProductURLOrchestrator:
                 "COMPLETE",
                 "Exact product interpretation completed.",
                 unresolved=list(interpretation.unresolved_discriminators),
-                required_coding_fields=list(feature_set.get("required_fields") or []),
+                required_coding_fields=list(
+                    feature_set.get("required_fields") or []
+                ),
             )
 
             emit(
@@ -109,13 +154,30 @@ class ProductURLOrchestrator:
             )
             client = self.search_client or SerpAPIClient.from_env(runtime)
 
-            def search_progress(event_type: str, details: Mapping[str, Any]) -> None:
+            def search_progress(
+                event_type: str,
+                details: Mapping[str, Any],
+            ) -> None:
                 messages = {
-                    "SEARCH_ACTION": f"Executing search credit {details.get('credit_number')}: {details.get('purpose')}.",
-                    "SEARCH_OBSERVATION": f"Search credit {details.get('credit_number')} returned {details.get('result_count')} external observation(s).",
-                    "SEARCH_CANDIDATES": f"Admitted {details.get('candidate_count')} direct-product discovery candidate(s).",
+                    "SEARCH_ACTION": (
+                        f"Executing search credit {details.get('credit_number')}: "
+                        f"{details.get('purpose')}."
+                    ),
+                    "SEARCH_OBSERVATION": (
+                        f"Search credit {details.get('credit_number')} returned "
+                        f"{details.get('result_count')} external observation(s)."
+                    ),
+                    "SEARCH_CANDIDATES": (
+                        f"Admitted {details.get('candidate_count')} direct-product "
+                        "discovery candidate(s)."
+                    ),
                 }
-                emit(PipelineStage.SEARCH, event_type, messages.get(event_type, "Search evidence updated."), **dict(details))
+                emit(
+                    PipelineStage.SEARCH,
+                    event_type,
+                    messages.get(event_type, "Search evidence updated."),
+                    **dict(details),
+                )
 
             campaign = InformationGainSearchPlanner(runtime).run(
                 product,
@@ -128,7 +190,10 @@ class ProductURLOrchestrator:
             emit(
                 PipelineStage.SEARCH,
                 "COMPLETE",
-                f"Search completed with {len(campaign.candidates)} direct-product discovery candidate(s).",
+                (
+                    f"Search completed with {len(campaign.candidates)} "
+                    "direct-product discovery candidate(s)."
+                ),
                 search_credit_count=len(campaign.actions),
                 observation_count=len(campaign.observations),
                 candidate_count=len(campaign.candidates),
@@ -142,24 +207,57 @@ class ProductURLOrchestrator:
                 max_per_domain=runtime.acquisition.max_per_domain,
                 max_workers=runtime.acquisition.max_workers,
             )
-            acquirer = self.acquirer or PageAcquirer(runtime.acquisition, runtime.request_timeout_seconds)
+            acquirer = self.acquirer or PageAcquirer(
+                runtime.acquisition,
+                runtime.request_timeout_seconds,
+            )
 
-            def acquisition_progress(event_type: str, details: Mapping[str, Any]) -> None:
+            def acquisition_progress(
+                event_type: str,
+                details: Mapping[str, Any],
+            ) -> None:
                 if event_type == "ACQUISITION_PLAN":
-                    message = f"Selected {details.get('selected_candidate_count')} URL(s) for page acquisition."
+                    message = (
+                        f"Selected {details.get('selected_candidate_count')} URL(s) "
+                        "for page acquisition."
+                    )
                 else:
-                    message = f"Acquisition for {details.get('final_url') or details.get('requested_url')} ended with {details.get('fetch_status')}."
-                emit(PipelineStage.ACQUIRE, event_type, message, **dict(details))
+                    url = details.get("final_url") or details.get("requested_url")
+                    message = (
+                        f"Acquisition for {url} ended with "
+                        f"{details.get('fetch_status')}."
+                    )
+                emit(
+                    PipelineStage.ACQUIRE,
+                    event_type,
+                    message,
+                    **dict(details),
+                )
 
-            pages = acquirer.acquire_many(campaign.candidates, progress=acquisition_progress)
+            pages = acquirer.acquire_many(
+                campaign.candidates,
+                progress=acquisition_progress,
+            )
             emit(
                 PipelineStage.ACQUIRE,
                 "COMPLETE",
                 f"Acquisition completed for {len(pages)} candidate page(s).",
                 fetched_count=len(pages),
-                fetch_pass_count=sum(1 for item in pages.values() if item.fetch_status.value == "PASS"),
-                fetch_fail_count=sum(1 for item in pages.values() if item.fetch_status.value == "FAIL"),
-                fetch_not_assessed_count=sum(1 for item in pages.values() if item.fetch_status.value == "NOT_ASSESSED"),
+                fetch_pass_count=sum(
+                    1
+                    for item in pages.values()
+                    if item.fetch_status.value == "PASS"
+                ),
+                fetch_fail_count=sum(
+                    1
+                    for item in pages.values()
+                    if item.fetch_status.value == "FAIL"
+                ),
+                fetch_not_assessed_count=sum(
+                    1
+                    for item in pages.values()
+                    if item.fetch_status.value == "NOT_ASSESSED"
+                ),
             )
 
             emit(
@@ -174,12 +272,24 @@ class ProductURLOrchestrator:
                 page = pages.get(search_result.url)
                 if page is None:
                     continue
-                candidate = assess_candidate(product, interpretation, search_result, page, feature_set, runtime)
+                candidate = assess_candidate(
+                    product,
+                    interpretation,
+                    search_result,
+                    page,
+                    feature_set,
+                    runtime,
+                )
                 assessed.append(candidate)
                 emit(
                     PipelineStage.EVALUATE,
                     "CANDIDATE_ASSESSED",
-                    f"Assessed {candidate.domain}: identity={candidate.identity_match.value}, page={candidate.direct_product_page.value}, identifier={candidate.exact_identifier_verified}.",
+                    (
+                        f"Assessed {candidate.domain}: "
+                        f"identity={candidate.identity_match.value}, "
+                        f"page={candidate.direct_product_page.value}, "
+                        f"identifier={candidate.exact_identifier_verified}."
+                    ),
                     **candidate_judgment(candidate),
                 )
             candidates = tuple(assessed)
@@ -187,33 +297,66 @@ class ProductURLOrchestrator:
             emit(
                 PipelineStage.EVALUATE,
                 "COMPLETE",
-                f"Candidate evidence evaluation completed for {len(candidates)} page(s).",
-                exact_count=sum(1 for item in candidates if item.identity_match.value == "EXACT"),
-                identifier_verified_count=sum(1 for item in candidates if item.exact_identifier_verified),
-                browser_recoverable_count=len(select_browser_candidates(candidates, runtime.browser.max_candidates)),
+                (
+                    f"Candidate evidence evaluation completed for "
+                    f"{len(candidates)} page(s)."
+                ),
+                exact_count=sum(
+                    1
+                    for item in candidates
+                    if item.identity_match.value == "EXACT"
+                ),
+                identifier_verified_count=sum(
+                    1 for item in candidates if item.exact_identifier_verified
+                ),
+                browser_recoverable_count=len(
+                    select_browser_candidates(
+                        candidates,
+                        runtime.browser.max_candidates,
+                    )
+                ),
             )
 
             emit(
                 PipelineStage.BROWSER,
                 "START",
-                "Opening recoverable candidates to establish rendered accessibility, identity and scrapability.",
+                (
+                    "Opening recoverable candidates to establish rendered "
+                    "accessibility, identity and scrapability."
+                ),
                 browser_enabled=runtime.browser.enabled,
                 browser_required=runtime.browser.required,
                 browser_candidate_limit=runtime.browser.max_candidates,
+                artifact_root=str(runtime.artifact_root),
             )
-            browser_client = self.browser_client or BrowserClient.from_env(runtime.browser)
-            selected = select_browser_candidates(candidates, runtime.browser.max_candidates) if runtime.browser.enabled else ()
+            browser_client = self.browser_client or BrowserClient(
+                runtime.browser,
+                runtime.artifact_root,
+            )
+            selected = (
+                select_browser_candidates(
+                    candidates,
+                    runtime.browser.max_candidates,
+                )
+                if runtime.browser.enabled
+                else ()
+            )
             emit(
                 PipelineStage.BROWSER,
                 "BROWSER_ALLOCATION",
-                f"Allocated {len(selected)} recoverable candidate(s) for rendered-browser validation.",
+                (
+                    f"Allocated {len(selected)} recoverable candidate(s) for "
+                    "rendered-browser validation."
+                ),
                 candidates=[
                     {
                         "candidate_id": item.candidate_id,
                         "url": item.url,
                         "source_role": item.source_role.value,
                         "identity_match": item.identity_match.value,
-                        "exact_identifier_verified_before_browser": item.exact_identifier_verified,
+                        "exact_identifier_verified_before_browser": (
+                            item.exact_identifier_verified
+                        ),
                     }
                     for item in selected
                 ],
@@ -228,14 +371,27 @@ class ProductURLOrchestrator:
                     candidate_id=item.candidate_id,
                     url=item.url,
                 )
-                browser_evidence = browser_client.investigate(item.url, product.row_id, item.candidate_id)
-                updated = apply_browser_evidence(product, interpretation, item, browser_evidence, runtime)
+                browser_evidence = browser_client.investigate(
+                    item.url,
+                    product.row_id,
+                    item.candidate_id,
+                )
+                updated = apply_browser_evidence(
+                    product,
+                    interpretation,
+                    item,
+                    browser_evidence,
+                    runtime,
+                )
                 by_id[item.candidate_id] = updated
                 verdict = evaluate_acceptance(updated)
                 emit(
                     PipelineStage.BROWSER,
                     "BROWSER_COMPLETED",
-                    f"Browser validation for {item.domain} finished with {updated.browser_access.value}.",
+                    (
+                        f"Browser validation for {item.domain} finished with "
+                        f"{updated.browser_access.value}."
+                    ),
                     candidate_id=item.candidate_id,
                     url=updated.url,
                     access=updated.browser_access.value,
@@ -251,34 +407,62 @@ class ProductURLOrchestrator:
                     error=browser_evidence.error,
                 )
 
-            candidates = tuple(by_id[item.candidate_id] for item in candidates)
+            candidates = tuple(
+                by_id[item.candidate_id] for item in candidates
+            )
             writer.write_intermediate(product.row_id, candidates=candidates)
-            final_verdicts = [evaluate_acceptance(item) for item in candidates]
+            final_verdicts = [
+                evaluate_acceptance(item) for item in candidates
+            ]
             emit(
                 PipelineStage.BROWSER,
                 "COMPLETE",
-                f"Rendered-browser validation assessed {len(selected)} candidate(s).",
+                (
+                    f"Rendered-browser validation assessed {len(selected)} "
+                    "candidate(s)."
+                ),
                 assessed_count=len(selected),
-                browser_pass_count=sum(1 for item in candidates if item.browser_access.value == "PASS"),
-                browser_fail_count=sum(1 for item in candidates if item.browser_access.value == "FAIL"),
-                mapping_eligible_count=sum(1 for verdict in final_verdicts if verdict.eligible),
+                browser_pass_count=sum(
+                    1
+                    for item in candidates
+                    if item.browser_access.value == "PASS"
+                ),
+                browser_fail_count=sum(
+                    1
+                    for item in candidates
+                    if item.browser_access.value == "FAIL"
+                ),
+                mapping_eligible_count=sum(
+                    1 for verdict in final_verdicts if verdict.eligible
+                ),
                 acceptance_policy=ACCEPTANCE_POLICY_VERSION,
             )
 
             emit(
                 PipelineStage.DELIVER,
                 "START",
-                "Applying the single canonical acceptance contract and manufacturer-first ranking.",
+                (
+                    "Applying the single canonical acceptance contract and "
+                    "manufacturer-first ranking."
+                ),
                 candidate_count=len(candidates),
-                mapping_eligible_count=sum(1 for verdict in final_verdicts if verdict.eligible),
+                mapping_eligible_count=sum(
+                    1 for verdict in final_verdicts if verdict.eligible
+                ),
                 acceptance_policy=ACCEPTANCE_POLICY_VERSION,
             )
             decision = choose_delivery(candidates)
-            ranking = candidate_ranking(candidates, decision.selected_candidate_id)
+            ranking = candidate_ranking(
+                candidates,
+                decision.selected_candidate_id,
+            )
             emit(
                 PipelineStage.DELIVER,
                 "CANDIDATE_RANKING",
-                "Ranked candidates using the canonical acceptance verdict and source hierarchy.",
+                (
+                    "Ranked candidates using the canonical acceptance verdict "
+                    "and source hierarchy."
+                ),
                 selected_candidate_id=decision.selected_candidate_id,
                 acceptance_policy=ACCEPTANCE_POLICY_VERSION,
                 ranking=ranking,
@@ -296,8 +480,16 @@ class ProductURLOrchestrator:
                 reasons=list(decision.reasons),
                 warnings=list(decision.warnings),
             )
-            emit(PipelineStage.DELIVER, "COMPLETE", "Canonical product-to-URL acceptance policy completed.")
-            emit(PipelineStage.COMPLETE, "COMPLETE", "Product URL resolution completed.")
+            emit(
+                PipelineStage.DELIVER,
+                "COMPLETE",
+                "Canonical product-to-URL acceptance policy completed.",
+            )
+            emit(
+                PipelineStage.COMPLETE,
+                "COMPLETE",
+                "Product URL resolution completed.",
+            )
 
             result = ResolutionResult(
                 runtime_contract=runtime.runtime_contract,
@@ -326,7 +518,10 @@ class ProductURLOrchestrator:
                 None,
                 0.0,
                 False,
-                ("A technical or configuration defect prevented an exact mapping decision.",),
+                (
+                    "A technical or configuration defect prevented an exact "
+                    "mapping decision.",
+                ),
                 (f"{type(exc).__name__}: {exc}",),
             )
             artifact_dir = writer.prepare(product.row_id)
