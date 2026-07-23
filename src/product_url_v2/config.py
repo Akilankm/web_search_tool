@@ -50,7 +50,6 @@ class ReasoningConfig:
 class DecisionConfig:
     verified_identity_threshold: float = 0.86
     review_identity_threshold: float = 0.55
-    wrong_product_threshold: float = 0.30
     minimum_direct_page_score: float = 0.50
 
 
