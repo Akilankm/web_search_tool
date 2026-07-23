@@ -1,40 +1,38 @@
-# Product URL Finder — Absolute Minimal
+# Product URL Resolver — Minimal Notebook Edition
 
-Version `3.0.0`.
+Version `3.0.0` is the stripped-down notebook implementation.
 
-This codebase does one job: find the most defensible product-detail URL from:
+There is no UI, API server, CLI, Docker, job queue, browser service, plugin system, architecture framework, or event-loop patching.
 
-- mandatory `main_text`;
-- mandatory two-letter `country_code`;
-- optional `ean`;
-- optional `retailer_name`.
+## Inputs
 
-## Runtime
+| Field | Required |
+|---|---:|
+| `main_text` | Yes |
+| `country_code` | Yes |
+| `ean` | No |
+| `retailer_name` | No |
+
+## Flow
 
 ```text
-Notebook
-→ optional PCA LLM identity extraction
+input
+→ optional PCA LLM interpretation
 → budgeted SerpAPI searches
-→ budgeted Crawl4AI page rendering
-→ transparent token/EAN/retailer scoring
-→ final URL or REVIEW_REQUIRED
-→ small evidence folder
+→ budgeted Crawl4AI page crawls
+→ simple evidence scoring
+→ optional PCA LLM candidate selection
+→ final URL or explicit failure
+→ run.json, audit.md, crawled Markdown pages
 ```
 
-There is no UI, API server, Docker, CLI application, pipeline framework, queue, polling, browser microservice, thread wrapper, `nest_asyncio`, or monkey patching.
-
-## Complete repository
+## Files that matter
 
 ```text
-.env.example
-.gitignore
-README.md
-environment.yml
-pyproject.toml
-samples/products.csv
-src/product_url_finder.py
 notebooks/01_resolve_one_product.ipynb
 notebooks/02_resolve_csv_batch.ipynb
+src/product_url/resolver.py
+.env
 ```
 
 ## Setup
@@ -43,95 +41,63 @@ notebooks/02_resolve_csv_batch.ipynb
 conda env create -f environment.yml
 conda activate product-url-minimal
 crawl4ai-setup
+crawl4ai-doctor
 python -m ipykernel install --user --name product-url-minimal --display-name "product-url-minimal"
 cp .env.example .env
 jupyter lab
 ```
 
-Set `SERPAPI_API_KEY` in `.env`.
-
-The PCA LLM contract remains unchanged:
+Keep your existing PCA values in `.env`. The code uses the same enterprise variables:
 
 ```dotenv
-PCA_LLM_API_KEY=nokey
-PCA_LLM_API_VERSION=2024-10-21
-PCA_LLM_ENDPOINT=https://cis-rnd-llm-api.cis.nielseniq.com
-PCA_LLM_DEPLOYMENT=sea-ecomm-gpt-4o
-PCA_LLM_CONSUMER_ID=2dc0f06c-d938-4d2d-8ec3-0a6b1b7d600c
+PCA_LLM_API_KEY=
+PCA_LMM_API_VERSION=2024-10-21
+PCA_LLM_ENDPOINT=
+PCA_LLM_DEPLOYMENT=
+PCA_LLM_CONSUMER_ID=
+PCA_LLM_MAX_RETRIES=2
 ```
 
-Enable it with:
+SerpAPI requires:
 
 ```dotenv
-PRODUCT_URL_REASONING_ENABLED=true
-PRODUCT_URL_REASONING_REQUIRED=false
+SERPAPI_API_KEY=
 ```
 
-## Budgets
+## Visible budgets
 
-```dotenv
-SERP_CALL_BUDGET=3
-SERP_RESULTS_PER_CALL=10
-CRAWL_CANDIDATE_BUDGET=5
+Budgets are ordinary notebook values, not hidden configuration:
+
+```python
+Budgets(searches=3, search_results=10, crawls=6, llm_calls=2)
 ```
 
-Hard limits are applied in code:
+- `searches`: maximum paid SerpAPI calls per product
+- `search_results`: maximum results retained per SerpAPI response
+- `crawls`: maximum candidate pages opened with Crawl4AI
+- `llm_calls`: maximum PCA LLM calls; normally one interpretation and one final selection
 
-- SerpAPI calls: 1–5;
-- results per call: 3–20;
-- Crawl4AI candidates: 1–10.
-
-## Execution
-
-For one product, open:
-
-```text
-notebooks/01_resolve_one_product.ipynb
-```
-
-For a CSV batch, open:
-
-```text
-notebooks/02_resolve_csv_batch.ipynb
-```
-
-The batch input requires only:
-
-```text
-main_text,country_code
-```
-
-Optional columns:
-
-```text
-ean,retailer_name,row_id
-```
-
-## Output
+## Outputs
 
 The batch notebook writes:
 
 ```text
-data/product_urls.csv
+data/results/product_urls.csv
 ```
 
-Each product writes only:
+Each product writes:
 
 ```text
 data/artifacts/<row_id>/
-├── input.json
-├── searches.json
-├── candidates.json
-├── result.json
-└── audit.md
+├── run.json
+├── audit.md
+└── pages/
+    ├── C01.md
+    └── ...
 ```
 
-## Debugging order
+`run.json` is the complete debugging record: input, budgets, queries, SerpAPI results, Crawl4AI evidence, scores, LLM selection, final decision, and errors.
 
-1. Check `.env` and the printed budgets.
-2. Check `searches.json` for exact queries and SerpAPI responses.
-3. Check `candidates.json` for Crawl4AI errors, matched tokens, conflicts, and scores.
-4. Check `result.json` for the selected URL and budget usage.
-5. Check `audit.md` for the readable summary.
+## Run locally
 
-The resolver deliberately runs sequentially. A failure therefore belongs to one visible search or one visible URL instead of being hidden inside concurrency infrastructure.
+Open one of the two notebooks and select the `product-url-minimal` kernel. Execute cells from top to bottom. The notebooks use native top-level `await`; they do not call `asyncio.run`, `nest_asyncio`, or any monkey patch.
