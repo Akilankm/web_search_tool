@@ -34,12 +34,13 @@ jobs:
           docker compose config --quiet
       - name: Enforce canonical architecture
         run: python scripts/check_architecture.py
-      - name: Acceptance contract
+      - name: Acceptance and release contract
         run: >-
           pytest -q
           tests/test_acceptance_policy.py
           tests/test_mandatory_url_delivery.py
           tests/test_rendered_source_classification.py
+          tests/test_release_consistency.py
       - name: Test
         shell: bash
         run: |
