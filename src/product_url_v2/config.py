@@ -55,15 +55,6 @@ class DecisionConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class ReleaseGates:
-    url_delivery_rate: float = 0.98
-    correct_product_delivery_rate: float = 0.95
-    candidate_recall_at_k: float = 0.98
-    wrong_product_escape_rate: float = 0.01
-    direct_product_page_rate: float = 0.98
-
-
-@dataclass(frozen=True, slots=True)
 class RuntimeConfig:
     runtime_contract: str = "product-url-notebook-v1"
     artifact_root: Path = Path("data/artifacts")
@@ -74,7 +65,6 @@ class RuntimeConfig:
     browser: BrowserConfig = field(default_factory=BrowserConfig)
     reasoning: ReasoningConfig = field(default_factory=ReasoningConfig)
     decision: DecisionConfig = field(default_factory=DecisionConfig)
-    release_gates: ReleaseGates = field(default_factory=ReleaseGates)
 
     def with_runtime_options(self, options: Mapping[str, Any] | None) -> "RuntimeConfig":
         if not options:
@@ -130,7 +120,6 @@ def load_config(path: str | Path | None = None) -> RuntimeConfig:
         browser=_from_mapping(BrowserConfig, payload.get("browser")),
         reasoning=_from_mapping(ReasoningConfig, payload.get("reasoning")),
         decision=_from_mapping(DecisionConfig, payload.get("decision")),
-        release_gates=_from_mapping(ReleaseGates, payload.get("release_gates")),
     )
 
     browser = replace(
