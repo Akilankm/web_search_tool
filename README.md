@@ -21,17 +21,20 @@ Notebook
 → small evidence folder
 ```
 
-There is no UI, API server, Docker, CLI, pipeline framework, queue, polling, browser microservice, thread wrapper, `nest_asyncio`, or monkey patching.
+There is no UI, API server, Docker, CLI application, pipeline framework, queue, polling, browser microservice, thread wrapper, `nest_asyncio`, or monkey patching.
 
-## Files that matter
+## Complete repository
 
 ```text
+.env.example
+.gitignore
+README.md
+environment.yml
+pyproject.toml
+samples/products.csv
 src/product_url_finder.py
 notebooks/01_resolve_one_product.ipynb
 notebooks/02_resolve_csv_batch.ipynb
-.env.example
-environment.yml
-samples/products.csv
 ```
 
 ## Setup
@@ -39,7 +42,7 @@ samples/products.csv
 ```bash
 conda env create -f environment.yml
 conda activate product-url-minimal
-python -m crawl4ai-setup
+crawl4ai-setup
 python -m ipykernel install --user --name product-url-minimal --display-name "product-url-minimal"
 cp .env.example .env
 jupyter lab
@@ -125,10 +128,10 @@ data/artifacts/<row_id>/
 
 ## Debugging order
 
-1. Check `.env` and printed budgets.
-2. Check `searches.json` for the exact queries and SerpAPI responses.
-3. Check `candidates.json` for Crawl4AI errors, matched tokens, conflicts, and score.
+1. Check `.env` and the printed budgets.
+2. Check `searches.json` for exact queries and SerpAPI responses.
+3. Check `candidates.json` for Crawl4AI errors, matched tokens, conflicts, and scores.
 4. Check `result.json` for the selected URL and budget usage.
-5. Check `audit.md` for the human-readable summary.
+5. Check `audit.md` for the readable summary.
 
-The resolver deliberately runs sequentially. This keeps failures attributable to one search or one page instead of hiding them inside concurrency infrastructure.
+The resolver deliberately runs sequentially. A failure therefore belongs to one visible search or one visible URL instead of being hidden inside concurrency infrastructure.
