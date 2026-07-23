@@ -259,19 +259,6 @@ class CandidateAssessment:
         return self.browser_access is not GateStatus.NOT_ASSESSED
 
     @property
-    def strictly_verified(self) -> bool:
-        return bool(
-            self.identity_match is IdentityMatch.EXACT
-            and self.identity_confidence >= 0.86
-            and self.direct_product_page is GateStatus.PASS
-            and self.durable_url is GateStatus.PASS
-            and self.browser_access is GateStatus.PASS
-            and self.text_extractable is GateStatus.PASS
-            and self.coding_evidence_complete is GateStatus.PASS
-            and not self.conflicts
-        )
-
-    @property
     def hard_url_blockers(self) -> tuple[str, ...]:
         values = self.evidence.get("hard_url_blockers") or ()
         if isinstance(values, str):
@@ -279,19 +266,42 @@ class CandidateAssessment:
         return tuple(str(item) for item in values if str(item).strip())
 
     @property
-    def review_eligible(self) -> bool:
-        """A real product-like URL is deliverable unless explicit blockers prove it unsafe.
+    def exact_identifier_required(self) -> bool:
+        return bool(self.evidence.get("required_identifier"))
 
-        Page acquisition, browser automation, country alignment and coding completeness
-        are evidence-quality axes. They may require review but cannot erase a URL.
-        """
+    @property
+    def exact_identifier_verified(self) -> bool:
+        if not self.exact_identifier_required:
+            return True
+        return bool(self.evidence.get("exact_identifier_verified"))
+
+    @property
+    def mapping_eligible(self) -> bool:
+        """True only when this URL is the exact, openable and scrapable product page."""
         return bool(
-            self.identity_match is not IdentityMatch.MISMATCH
-            and self.durable_url is not GateStatus.FAIL
+            self.identity_match is IdentityMatch.EXACT
+            and self.exact_identifier_verified
+            and self.direct_product_page is GateStatus.PASS
+            and self.durable_url is GateStatus.PASS
+            and self.browser_access is GateStatus.PASS
+            and self.text_extractable is GateStatus.PASS
             and not self.conflicts
             and not self.hard_url_blockers
-            and bool(self.evidence.get("search_product_like") or self.direct_product_page is GateStatus.PASS)
         )
+
+    @property
+    def strictly_verified(self) -> bool:
+        return bool(self.mapping_eligible and self.coding_evidence_complete is GateStatus.PASS)
+
+    @property
+    def review_eligible(self) -> bool:
+        """A review URL must still be an exact, accessible and scrapable mapping.
+
+        REVIEW_REQUIRED is reserved for secondary uncertainty such as coding-field,
+        country or requested-retailer completeness. It is never a fallback for an
+        inaccessible, unverified or conflicting product page.
+        """
+        return self.mapping_eligible
 
     def with_updates(self, **changes: Any) -> "CandidateAssessment":
         return replace(self, **changes)
