@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -26,6 +27,11 @@ class BrowserClient:
 
     config: BrowserConfig
     artifact_root: Path
+
+    @classmethod
+    def from_env(cls, config: BrowserConfig) -> "BrowserClient":
+        root = Path(os.getenv("PRODUCT_URL_ARTIFACT_ROOT") or "data/artifacts")
+        return cls(config=config, artifact_root=root)
 
     def investigate(self, url: str, row_id: str, candidate_id: str) -> BrowserEvidence:
         if not self.config.enabled:
