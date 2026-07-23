@@ -1,152 +1,134 @@
-# Product URL Resolver — Notebook First
+# Product URL Finder — Absolute Minimal
 
-This repository resolves a submitted product description to one defensible direct product URL.
+Version `3.0.0`.
 
-## Release
+This codebase does one job: find the most defensible product-detail URL from:
 
-- Version: `2.0.0`
-- Runtime contract: `product-url-notebook-v1`
-- Acceptance policy: `product-url-acceptance-v1`
-- Primary execution: Jupyter notebooks
-- Browser validation: local Playwright in the notebook process
-- Python: 3.10–3.12
+- mandatory `main_text`;
+- mandatory two-letter `country_code`;
+- optional `ean`;
+- optional `retailer_name`.
 
-## What was intentionally removed
-
-The supported runtime no longer includes:
-
-- Streamlit;
-- FastAPI;
-- Docker Compose;
-- agent, UI, or browser containers;
-- a browser microservice;
-- host-port allocation;
-- job queues or polling;
-- `nest_asyncio`;
-- runtime monkey patches;
-- compatibility wrappers.
-
-The base execution path is now:
+## Runtime
 
 ```text
-notebook
-→ product interpretation
-→ optional PCA LLM refinement
-→ SerpAPI search
-→ HTTP and structured-data acquisition
-→ local Playwright rendering
-→ canonical acceptance policy
-→ one URL or explicit failure
-→ auditable artifacts
+Notebook
+→ optional PCA LLM identity extraction
+→ budgeted SerpAPI searches
+→ budgeted Crawl4AI page rendering
+→ transparent token/EAN/retailer scoring
+→ final URL or REVIEW_REQUIRED
+→ small evidence folder
 ```
 
-## Notebooks
+There is no UI, API server, Docker, CLI, pipeline framework, queue, polling, browser microservice, thread wrapper, `nest_asyncio`, or monkey patching.
 
-| Notebook | Purpose |
-|---|---|
-| `notebooks/01_resolve_one_product.ipynb` | Resolve and inspect one product |
-| `notebooks/02_resolve_csv_batch.ipynb` | Resolve a CSV batch and checkpoint the output |
+## Files that matter
+
+```text
+src/product_url_finder.py
+notebooks/01_resolve_one_product.ipynb
+notebooks/02_resolve_csv_batch.ipynb
+.env.example
+environment.yml
+samples/products.csv
+```
 
 ## Setup
 
-Run from the repository root:
-
 ```bash
 conda env create -f environment.yml
-conda activate product-url-notebook
-python -m ipykernel install --user --name product-url-notebook --display-name "product-url-notebook"
-python -m playwright install chromium
+conda activate product-url-minimal
+python -m crawl4ai-setup
+python -m ipykernel install --user --name product-url-minimal --display-name "product-url-minimal"
 cp .env.example .env
 jupyter lab
 ```
 
-Open either notebook and select the **product-url-notebook** kernel.
+Set `SERPAPI_API_KEY` in `.env`.
 
-Set this mandatory value in `.env`:
+The PCA LLM contract remains unchanged:
 
 ```dotenv
-SERPAPI_API_KEY=<your-key>
+PCA_LLM_API_KEY=nokey
+PCA_LLM_API_VERSION=2024-10-21
+PCA_LLM_ENDPOINT=https://cis-rnd-llm-api.cis.nielseniq.com
+PCA_LLM_DEPLOYMENT=sea-ecomm-gpt-4o
+PCA_LLM_CONSUMER_ID=2dc0f06c-d938-4d2d-8ec3-0a6b1b7d600c
 ```
 
-The deterministic baseline is:
+Enable it with:
 
 ```dotenv
-PRODUCT_URL_BROWSER_ENABLED=true
-PRODUCT_URL_BROWSER_REQUIRED=true
-PRODUCT_URL_REASONING_ENABLED=false
+PRODUCT_URL_REASONING_ENABLED=true
 PRODUCT_URL_REASONING_REQUIRED=false
 ```
 
-PCA LLM reasoning is optional. When enabled, configure the `PCA_LLM_*` values in `.env.example`.
+## Budgets
 
-## Input contract
+```dotenv
+SERP_CALL_BUDGET=3
+SERP_RESULTS_PER_CALL=10
+CRAWL_CANDIDATE_BUDGET=5
+```
 
-| Field | Required | Rule |
-|---|---:|---|
-| `main_text` | Yes | Vendor product description |
-| `country_code` | Yes | Two-letter country code |
-| `retailer_name` | No | Requested retailer; do not guess |
-| `ean` | No | EAN, GTIN, or ISBN; do not guess |
-| `language_code` | No | Two-letter language code |
+Hard limits are applied in code:
 
-## Acceptance contract
+- SerpAPI calls: 1–5;
+- results per call: 3–20;
+- Crawl4AI candidates: 1–10.
 
-A final URL is delivered only when all mandatory gates pass:
+## Execution
 
-1. exact product and edition identity;
-2. supplied EAN, GTIN, or ISBN agreement when provided;
-3. direct product-detail page;
-4. durable canonical URL;
-5. rendered-browser accessibility;
-6. scrapable rendered product content;
-7. no identity or edition conflict.
+For one product, open:
 
-`REVIEW_REQUIRED` is allowed only after the URL itself passes every mandatory mapping gate. `FAILED` contains no delivered URL. `TECHNICAL_FAILURE` is reserved for an operational or configuration defect.
+```text
+notebooks/01_resolve_one_product.ipynb
+```
 
-## Evidence output
+For a CSV batch, open:
 
-Each row writes:
+```text
+notebooks/02_resolve_csv_batch.ipynb
+```
+
+The batch input requires only:
+
+```text
+main_text,country_code
+```
+
+Optional columns:
+
+```text
+ean,retailer_name,row_id
+```
+
+## Output
+
+The batch notebook writes:
+
+```text
+data/product_urls.csv
+```
+
+Each product writes only:
 
 ```text
 data/artifacts/<row_id>/
 ├── input.json
-├── interpretation.json
-├── search.json
+├── searches.json
 ├── candidates.json
-├── candidates.csv
-├── decision.json
 ├── result.json
-├── audit.md
-└── browser/*.png
+└── audit.md
 ```
 
-The batch notebook also writes:
+## Debugging order
 
-```text
-data/results/product_urls.csv
-```
+1. Check `.env` and printed budgets.
+2. Check `searches.json` for the exact queries and SerpAPI responses.
+3. Check `candidates.json` for Crawl4AI errors, matched tokens, conflicts, and score.
+4. Check `result.json` for the selected URL and budget usage.
+5. Check `audit.md` for the human-readable summary.
 
-## Validation
-
-```bash
-python -m pip install -e '.[dev]'
-python -m playwright install chromium
-./scripts/validate_release.sh
-```
-
-The release checks compile the Python package and notebook cells, validate the notebook schema, enforce the single acceptance-policy boundary, reject service infrastructure and monkey-patch references, and run the complete test suite.
-
-## Core modules
-
-| Module | Responsibility |
-|---|---|
-| `interpretation.py` | Product identity signals and hypotheses |
-| `search.py` | Bounded SerpAPI discovery |
-| `acquisition.py` | HTTP and structured product evidence |
-| `browser.py` | Local Playwright rendering without event-loop patches |
-| `evaluation.py` | Candidate evidence production |
-| `policy.py` | The only final URL acceptance and ranking policy |
-| `orchestrator.py` | Straight sequential execution |
-| `artifacts.py` | JSON, CSV, Markdown, and screenshot evidence |
-
-See `notebooks/README.md` for the exact notebook workflow.
+The resolver deliberately runs sequentially. This keeps failures attributable to one search or one page instead of hiding them inside concurrency infrastructure.
