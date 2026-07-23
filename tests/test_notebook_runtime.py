@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 from product_url_v2.browser import BrowserClient
-from product_url_v2.config import BrowserConfig
+from product_url_v2.config import BrowserConfig, ReasoningConfig, RuntimeConfig
 from product_url_v2.models import BrowserEvidence, GateStatus
 
 
@@ -46,3 +46,23 @@ def test_browser_client_uses_local_artifact_root(tmp_path: Path) -> None:
 
     assert client.artifact_root == tmp_path
     assert not hasattr(client.config, "base_url")
+
+
+def test_notebook_budget_options_do_not_override_runtime_modes() -> None:
+    runtime = RuntimeConfig(
+        browser=BrowserConfig(enabled=True, required=True),
+        reasoning=ReasoningConfig(enabled=True, required=False),
+    )
+
+    resolved = runtime.with_runtime_options(
+        {
+            "search_credits": 2,
+            "max_candidates": 8,
+            "browser_candidates": 3,
+        }
+    )
+
+    assert resolved.browser.enabled is True
+    assert resolved.browser.required is True
+    assert resolved.reasoning.enabled is True
+    assert resolved.reasoning.required is False
