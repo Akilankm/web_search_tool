@@ -76,13 +76,12 @@ class AcceptanceVerdict:
 def evaluate_acceptance(candidate: CandidateAssessment | Mapping[str, Any]) -> AcceptanceVerdict:
     """Evaluate the only authoritative final URL acceptance contract.
 
-    Search, acquisition, browser, trace and UI layers must consume this verdict.
-    They must not independently reconstruct mapping eligibility.
+    Search, acquisition, browser, trace and UI layers consume this verdict.
+    Free-form warnings never participate in acceptance or delivery status.
     """
 
     evidence = _mapping(_get(candidate, "evidence"))
     conflicts = _strings(_get(candidate, "conflicts"))
-    warnings = _strings(_get(candidate, "warnings"))
     required_identifier = str(evidence.get("required_identifier") or "").strip()
     identifier_required = bool(required_identifier)
     identifier_verified = bool(evidence.get("exact_identifier_verified")) if identifier_required else True
@@ -107,44 +106,16 @@ def evaluate_acceptance(candidate: CandidateAssessment | Mapping[str, Any]) -> A
         AcceptanceGate(
             "supplied_identifier",
             "Supplied EAN/GTIN/ISBN",
-            (
-                GateStatus.PASS.value
-                if identifier_verified
-                else GateStatus.FAIL.value
-            )
+            (GateStatus.PASS.value if identifier_verified else GateStatus.FAIL.value)
             if identifier_required
             else "NOT_REQUIRED",
             True,
-            (
-                f"required_identifier={required_identifier}"
-                if identifier_required
-                else "No identifier was supplied."
-            ),
+            f"required_identifier={required_identifier}" if identifier_required else "No identifier was supplied.",
         ),
-        AcceptanceGate(
-            "direct_product_page",
-            "Direct product page",
-            direct_status or GateStatus.NOT_ASSESSED.value,
-            True,
-        ),
-        AcceptanceGate(
-            "durable_url",
-            "Durable canonical URL",
-            durable_status or GateStatus.NOT_ASSESSED.value,
-            True,
-        ),
-        AcceptanceGate(
-            "browser_access",
-            "Rendered browser accessibility",
-            browser_status or GateStatus.NOT_ASSESSED.value,
-            True,
-        ),
-        AcceptanceGate(
-            "scrapable_content",
-            "Scrapable rendered product content",
-            extractable_status or GateStatus.NOT_ASSESSED.value,
-            True,
-        ),
+        AcceptanceGate("direct_product_page", "Direct product page", direct_status or GateStatus.NOT_ASSESSED.value, True),
+        AcceptanceGate("durable_url", "Durable canonical URL", durable_status or GateStatus.NOT_ASSESSED.value, True),
+        AcceptanceGate("browser_access", "Rendered browser accessibility", browser_status or GateStatus.NOT_ASSESSED.value, True),
+        AcceptanceGate("scrapable_content", "Scrapable rendered product content", extractable_status or GateStatus.NOT_ASSESSED.value, True),
         AcceptanceGate(
             "no_identity_conflicts",
             "No identity or edition conflicts",
@@ -152,24 +123,9 @@ def evaluate_acceptance(candidate: CandidateAssessment | Mapping[str, Any]) -> A
             True,
             "; ".join(conflicts),
         ),
-        AcceptanceGate(
-            "coding_evidence",
-            "Downstream coding evidence",
-            coding_status or GateStatus.NOT_ASSESSED.value,
-            False,
-        ),
-        AcceptanceGate(
-            "country_alignment",
-            "Country-market alignment",
-            country_status or GateStatus.NOT_ASSESSED.value,
-            False,
-        ),
-        AcceptanceGate(
-            "requested_retailer_alignment",
-            "Requested-retailer alignment",
-            retailer_status or GateStatus.NOT_ASSESSED.value,
-            False,
-        ),
+        AcceptanceGate("coding_evidence", "Downstream coding evidence", coding_status or GateStatus.NOT_ASSESSED.value, False),
+        AcceptanceGate("country_alignment", "Country-market alignment", country_status or GateStatus.NOT_ASSESSED.value, False),
+        AcceptanceGate("requested_retailer_alignment", "Requested-retailer alignment", retailer_status or GateStatus.NOT_ASSESSED.value, False),
     )
 
     mandatory = tuple(gate for gate in gates if gate.mandatory)
@@ -177,11 +133,7 @@ def evaluate_acceptance(candidate: CandidateAssessment | Mapping[str, Any]) -> A
     strictly_verified = eligible and coding_status == GateStatus.PASS.value
 
     strengths = [f"{gate.label} passed." for gate in mandatory if gate.passed]
-    blockers = [
-        f"{gate.label} failed or was not completed."
-        for gate in mandatory
-        if not gate.passed
-    ]
+    blockers = [f"{gate.label} failed or was not completed." for gate in mandatory if not gate.passed]
     blockers.extend(conflicts)
 
     review_reasons: list[str] = []
@@ -191,7 +143,6 @@ def evaluate_acceptance(candidate: CandidateAssessment | Mapping[str, Any]) -> A
         review_reasons.append("Country-market alignment is not fully confirmed.")
     if eligible and retailer_status == GateStatus.FAIL.value:
         review_reasons.append("The requested retailer did not match; an allowed fallback source was selected.")
-    review_reasons.extend(warnings)
 
     if eligible:
         strengths.append("Candidate satisfies the complete product-to-URL acceptance contract.")
@@ -212,13 +163,7 @@ def evaluate_acceptance(candidate: CandidateAssessment | Mapping[str, Any]) -> A
 
 
 def browser_precheck(candidate: CandidateAssessment) -> bool:
-    """Return whether browser rendering can still resolve this candidate.
-
-    Missing page-only identity or identifier evidence is intentionally not a
-    pre-browser blocker because JavaScript-rendered content may provide it.
-    Explicit mismatch, transient URL, or a non-product discovery result remains
-    disqualifying.
-    """
+    """Return whether browser rendering can still resolve this candidate."""
 
     evidence = _mapping(candidate.evidence)
     return bool(
@@ -270,10 +215,11 @@ def choose_delivery(candidates: Sequence[CandidateAssessment]) -> DeliveryDecisi
             f"No candidate passed {ACCEPTANCE_POLICY_VERSION}.",
             "A final URL requires exact identity, identifier agreement when supplied, a direct durable page, rendered-browser access, and scrapable rendered product content.",
         ]
-        if candidates:
-            reasons.append("Discovery candidates were preserved for audit and recovery but were not reported as successful mappings.")
-        else:
-            reasons.append("The search campaign produced no admissible direct-product candidate.")
+        reasons.append(
+            "Discovery candidates were preserved for audit and recovery but were not reported as successful mappings."
+            if candidates
+            else "The search campaign produced no admissible direct-product candidate."
+        )
         return DeliveryDecision(
             status=DeliveryStatus.FAILED,
             selected_url=None,
@@ -285,10 +231,7 @@ def choose_delivery(candidates: Sequence[CandidateAssessment]) -> DeliveryDecisi
 
     selected = max(eligible, key=final_rank)
     verdict = verdicts[selected.candidate_id]
-    manufacturer = selected.source_role in {
-        SourceRole.LOCAL_MANUFACTURER,
-        SourceRole.GLOBAL_MANUFACTURER,
-    }
+    manufacturer = selected.source_role in {SourceRole.LOCAL_MANUFACTURER, SourceRole.GLOBAL_MANUFACTURER}
     reasons = [
         f"The candidate passed every mandatory gate in {ACCEPTANCE_POLICY_VERSION}.",
         "Identity was proven from acquired or rendered product evidence, never from the search snippet alone.",
@@ -299,12 +242,7 @@ def choose_delivery(candidates: Sequence[CandidateAssessment]) -> DeliveryDecisi
         ),
     ]
     coding_ready = selected.coding_evidence_complete is GateStatus.PASS
-    warnings = tuple(_dedupe([*verdict.review_reasons, *selected.warnings]))
-    status = (
-        DeliveryStatus.VERIFIED
-        if verdict.strictly_verified and not verdict.review_reasons
-        else DeliveryStatus.REVIEW_REQUIRED
-    )
+    status = DeliveryStatus.VERIFIED if verdict.strictly_verified and not verdict.review_reasons else DeliveryStatus.REVIEW_REQUIRED
     if status is DeliveryStatus.REVIEW_REQUIRED:
         reasons.append("The product-to-URL mapping is valid; review is limited to secondary evidence.")
 
@@ -315,7 +253,7 @@ def choose_delivery(candidates: Sequence[CandidateAssessment]) -> DeliveryDecisi
         confidence=selected.identity_confidence,
         coding_ready=coding_ready,
         reasons=tuple(reasons),
-        warnings=warnings,
+        warnings=verdict.review_reasons,
     )
 
 
