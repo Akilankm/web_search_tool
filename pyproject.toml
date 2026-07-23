@@ -3,34 +3,20 @@ requires = ["setuptools>=75", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "product-url-resolver"
-version = "2.0.0"
-description = "Notebook-first exact product URL resolver"
+name = "product-url-finder"
+version = "3.0.0"
+description = "Minimal notebook product URL finder using SerpAPI and Crawl4AI"
 requires-python = ">=3.10,<3.13"
 dependencies = [
-  "beautifulsoup4>=4.12,<5",
+  "crawl4ai>=0.9,<1",
+  "ipykernel>=6,<8",
+  "jupyterlab>=4,<5",
   "openai>=1,<3",
-  "playwright>=1.52,<2",
+  "pandas>=2.2,<3",
+  "python-dotenv>=1,<2",
   "requests>=2.32,<3"
 ]
 
-[project.optional-dependencies]
-notebook = [
-  "ipykernel>=6,<8",
-  "jupyterlab>=4,<5",
-  "nbformat>=5.10,<6",
-  "pandas>=2.2,<3",
-  "python-dotenv>=1.0,<2"
-]
-dev = [
-  "pytest>=8,<9",
-  "nbformat>=5.10,<6"
-]
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
-addopts = "-q"
+[tool.setuptools]
+py-modules = ["product_url_finder"]
+package-dir = {"" = "src"}
