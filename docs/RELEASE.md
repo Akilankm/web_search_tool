@@ -1,94 +1,67 @@
-# Release and benchmark gates
-
-Unit tests prove contracts; they do not prove production product quality. Production cutover also requires a frozen representative benchmark with human-verified exact URLs.
+# Notebook-first release gates
 
 ## Release invariant
 
-A delivered URL must satisfy `product-url-acceptance-v1`:
+A delivered URL must satisfy:
 
 - exact product and edition identity;
-- supplied EAN, GTIN or ISBN verified when provided;
-- no conflicting page, field or URL-path identifier;
+- supplied EAN, GTIN, or ISBN verification when applicable;
+- no conflicting identifier;
 - direct durable product page;
-- rendered-browser accessibility;
+- local Playwright accessibility;
 - scrapable rendered product content;
-- manufacturer-first ranking applied only among accepted candidates.
+- source ranking only after all mandatory gates pass.
 
-A discovery URL that fails any mandatory gate cannot be emitted as `VERIFIED` or `REVIEW_REQUIRED`.
+A candidate that fails any mandatory gate must not be emitted as `VERIFIED` or `REVIEW_REQUIRED`.
 
-Free-form warnings, search snippets and query purpose cannot determine acceptance or source authority.
+## Repository simplicity gate
 
-## Required release order
+The supported release must contain:
 
-Every release must pass:
+- the core `product_url_v2` package;
+- `notebooks/01_resolve_one_product.ipynb`;
+- `notebooks/02_resolve_csv_batch.ipynb`;
+- configuration, feature sets, samples, tests, and documentation.
 
-1. Python compilation;
-2. JSON validation;
-3. shell validation;
-4. Docker Compose validation;
-5. canonical architecture guard;
-6. acceptance-contract suite;
-7. complete unit and integration suite;
-8. legacy and monkey-patch reference rejection.
+The supported release must not contain:
 
-CI runs the complete order on Python 3.10, 3.11 and 3.12.
+- Streamlit or FastAPI runtime dependencies;
+- Docker Compose;
+- service Dockerfiles;
+- UI, API, or browser-service modules;
+- port-resolution scripts;
+- `nest_asyncio`;
+- monkey patches or compatibility wrappers.
 
-## Architecture gate
+## Notebook gates
 
-`scripts/check_architecture.py` must prove:
+CI must:
 
-- acceptance functions exist only in `policy.py`;
-- source priority exists only in `policy.py`;
-- data models contain no business eligibility properties;
-- ad hoc hard-blocker state is absent.
+1. parse every `.ipynb` with `nbformat`;
+2. validate the notebook schema;
+3. compile every Python code cell;
+4. confirm both supported notebook names exist;
+5. reject service startup and monkey-patch references;
+6. verify the notebooks call `ProductURLOrchestrator` and `evaluate_acceptance` directly.
 
-This is a merge blocker, not a documentation recommendation.
+## Regression cases
 
-## Required regressions
+The suite must continue to prove:
 
-The acceptance suite must prove:
+1. conflicting URL-path identifiers are rejected;
+2. search snippets cannot prove final identity;
+3. inaccessible pages are not delivered;
+4. browser failures are not delivered;
+5. non-scrapable pages are not delivered;
+6. wrong editions are rejected;
+7. exact retailers can recover when manufacturers lack the edition;
+8. exact manufacturers outrank exact retailers;
+9. browser-rendered identity can recover incomplete HTTP evidence;
+10. local browser calls work from an already-running asyncio loop without patching it.
 
-1. Each mandatory gate independently blocks delivery.
-2. A URL path containing a conflicting ISBN is rejected for the supplied EAN.
-3. A search snippet containing the EAN cannot substitute for page or rendered evidence.
-4. Browser failure blocks delivery even after successful HTTP acquisition.
-5. Missing rendered product content blocks delivery.
-6. A publisher print edition is rejected for a supplied eBook EAN.
-7. An exact country-retailer page is selectable when no exact manufacturer edition exists.
-8. An accepted manufacturer page outranks an accepted retailer page.
-9. A failed manufacturer page cannot outrank an accepted retailer page.
-10. HTTP 403 may proceed to browser recovery when rendered content can prove the exact product.
-11. Search purpose cannot promote a retailer result to manufacturer authority.
-12. All identifier-based search credits retain the submitted identifier.
-13. Tracking parameters such as `srsltid` are removed.
-14. Typed candidates and serialized UI candidates receive identical policy verdicts.
+## Validation command
 
-## Required benchmark metrics
-
-- exact product mapping rate;
-- exact identifier verification rate;
-- exact URL top-1 accuracy;
-- correct-product delivery rate;
-- candidate recall@K;
-- wrong-product escape rate;
-- direct product-page rate;
-- rendered-browser success rate;
-- scrapable-page rate;
-- manufacturer-source selection rate when an exact manufacturer page exists;
-- human review acceptance rate;
-- latency and cost per accepted mapping.
-
-## Default production gates
-
-| Metric | Gate |
-|---|---:|
-| Exact product mapping rate | ≥ 95% |
-| Exact identifier verification among delivered identifier cases | 100% |
-| Correct-product delivery rate | ≥ 99% |
-| Wrong-product escape rate on supplied-identifier cases | 0% |
-| Browser-accessible rate among delivered URLs | 100% |
-| Scrapable-page rate among delivered URLs | 100% |
-| Direct product-page rate among delivered URLs | 100% |
-| Candidate recall@K | ≥ 98% |
-
-The benchmark must include identifier-present and identifier-absent products, multilingual and partial text, edition conflicts, bundles/displays, manufacturer-versus-retailer alternatives, JavaScript-rendered pages, unavailable retailers, anti-bot pages, redirects, dead links and browser-unavailable conditions.
+```bash
+python -m pip install -e '.[dev]'
+./scripts/validate_release.sh
+```
