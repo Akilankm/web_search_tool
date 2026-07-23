@@ -30,9 +30,6 @@ dev = [
   "nbformat>=5.10,<6"
 ]
 
-[project.scripts]
-product-url = "product_url_v2.cli:main"
-
 [tool.setuptools.packages.find]
 where = ["src"]
 
