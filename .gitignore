@@ -1,12 +1,12 @@
 .env
-.runtime/
 .venv/
 __pycache__/
+.ipynb_checkpoints/
 .pytest_cache/
 .coverage
 htmlcov/
 data/artifacts/
-secrets/
+data/results/
 *.pyc
 *.pyo
 *.pyd
