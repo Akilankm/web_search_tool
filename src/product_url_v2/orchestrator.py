@@ -54,11 +54,11 @@ class ProductURLOrchestrator:
             emit(
                 PipelineStage.INTERPRET,
                 "START",
-                "Interpreting submitted product identity and commercial-form uncertainty.",
+                "Interpreting the exact submitted product and edition constraints.",
                 row_id=product.row_id,
                 country_code=product.country_code,
                 retailer_name=product.retailer_name,
-                ean_supplied=bool(product.ean),
+                ean=product.ean,
                 language_code=product.language_code,
                 feature_set=product.feature_set,
                 reasoning_enabled=runtime.reasoning.enabled,
@@ -68,19 +68,18 @@ class ProductURLOrchestrator:
             emit(
                 PipelineStage.INTERPRET,
                 "DETERMINISTIC_INTERPRETATION",
-                f"Extracted {len(deterministic.signals)} identity signal(s) and {len(deterministic.hypotheses)} initial hypothesis/hypotheses.",
+                f"Extracted {len(deterministic.signals)} identity signal(s) and {len(deterministic.hypotheses)} product hypothesis/hypotheses.",
                 **interpretation_summary(deterministic),
             )
 
             reasoner = self.reasoner or StructuredIdentityReasoner(ReasoningSettings.from_runtime(runtime.reasoning))
             interpretation = reasoner.refine(product, deterministic)
-            llm_inference_count = sum(1 for item in interpretation.signals if item.source == "LLM_INFERENCE")
             emit(
                 PipelineStage.INTERPRET,
                 "INTERPRETATION_READY",
-                f"Prepared {len(interpretation.hypotheses)} competing product hypothesis/hypotheses for search.",
+                "Prepared exact-product hypotheses for manufacturer-first search.",
                 llm_reasoning_enabled=runtime.reasoning.enabled,
-                llm_inference_count=llm_inference_count,
+                llm_inference_count=sum(1 for item in interpretation.signals if item.source == "LLM_INFERENCE"),
                 **interpretation_summary(interpretation),
             )
 
@@ -93,7 +92,7 @@ class ProductURLOrchestrator:
             emit(
                 PipelineStage.INTERPRET,
                 "COMPLETE",
-                "Identity interpretation and hypothesis construction completed.",
+                "Exact product interpretation completed.",
                 unresolved=list(interpretation.unresolved_discriminators),
                 required_coding_fields=list(feature_set.get("required_fields") or []),
             )
@@ -101,9 +100,10 @@ class ProductURLOrchestrator:
             emit(
                 PipelineStage.SEARCH,
                 "START",
-                "Running the bounded hypothesis-driven paid search campaign.",
+                "Running manufacturer-first exact-product search with retailer recovery.",
                 credit_limit=runtime.search.credit_limit,
                 results_per_search=runtime.search.results_per_search,
+                identifier_lock=product.ean,
             )
             client = self.search_client or SerpAPIClient.from_env(runtime)
 
@@ -111,7 +111,7 @@ class ProductURLOrchestrator:
                 messages = {
                     "SEARCH_ACTION": f"Executing search credit {details.get('credit_number')}: {details.get('purpose')}.",
                     "SEARCH_OBSERVATION": f"Search credit {details.get('credit_number')} returned {details.get('result_count')} external observation(s).",
-                    "SEARCH_CANDIDATES": f"Admitted {details.get('candidate_count')} structurally product-like URL candidate(s).",
+                    "SEARCH_CANDIDATES": f"Admitted {details.get('candidate_count')} direct-product discovery candidate(s).",
                 }
                 emit(PipelineStage.SEARCH, event_type, messages.get(event_type, "Search evidence updated."), **dict(details))
 
@@ -126,7 +126,7 @@ class ProductURLOrchestrator:
             emit(
                 PipelineStage.SEARCH,
                 "COMPLETE",
-                f"Search completed with {len(campaign.candidates)} admitted direct-product candidate(s).",
+                f"Search completed with {len(campaign.candidates)} direct-product discovery candidate(s).",
                 search_credit_count=len(campaign.actions),
                 observation_count=len(campaign.observations),
                 candidate_count=len(campaign.candidates),
@@ -135,7 +135,7 @@ class ProductURLOrchestrator:
             emit(
                 PipelineStage.ACQUIRE,
                 "START",
-                "Acquiring structured and visible page evidence from the bounded candidate set.",
+                "Acquiring page content to prove exact identity and scrapability.",
                 max_candidates=runtime.acquisition.max_candidates,
                 max_per_domain=runtime.acquisition.max_per_domain,
                 max_workers=runtime.acquisition.max_workers,
@@ -144,10 +144,9 @@ class ProductURLOrchestrator:
 
             def acquisition_progress(event_type: str, details: Mapping[str, Any]) -> None:
                 if event_type == "ACQUISITION_PLAN":
-                    message = f"Selected {details.get('selected_candidate_count')} URL(s) for bounded acquisition."
+                    message = f"Selected {details.get('selected_candidate_count')} URL(s) for page acquisition."
                 else:
-                    state = details.get("fetch_status")
-                    message = f"Fetched {details.get('final_url') or details.get('requested_url')} with status {state}."
+                    message = f"Acquisition for {details.get('final_url') or details.get('requested_url')} ended with {details.get('fetch_status')}."
                 emit(PipelineStage.ACQUIRE, event_type, message, **dict(details))
 
             pages = acquirer.acquire_many(campaign.candidates, progress=acquisition_progress)
@@ -158,33 +157,27 @@ class ProductURLOrchestrator:
                 fetched_count=len(pages),
                 fetch_pass_count=sum(1 for item in pages.values() if item.fetch_status.value == "PASS"),
                 fetch_fail_count=sum(1 for item in pages.values() if item.fetch_status.value == "FAIL"),
+                fetch_not_assessed_count=sum(1 for item in pages.values() if item.fetch_status.value == "NOT_ASSESSED"),
             )
 
             emit(
                 PipelineStage.EVALUATE,
                 "START",
-                "Evaluating each candidate across identity, source, page, durability and coding gates.",
+                "Evaluating exact identity, direct-page evidence, durability and source hierarchy.",
                 candidate_count=len(campaign.candidates),
             )
             assessed = []
             for search_result in campaign.candidates:
                 page = pages.get(search_result.url)
                 if page is None:
-                    emit(
-                        PipelineStage.EVALUATE,
-                        "CANDIDATE_SKIPPED",
-                        "Candidate had no acquired page evidence and could not be assessed.",
-                        url=search_result.url,
-                    )
                     continue
                 candidate = assess_candidate(product, interpretation, search_result, page, feature_set, runtime)
                 assessed.append(candidate)
-                judgment = candidate_judgment(candidate)
                 emit(
                     PipelineStage.EVALUATE,
                     "CANDIDATE_ASSESSED",
-                    f"Assessed {candidate.domain}: identity={candidate.identity_match.value}, direct_page={candidate.direct_product_page.value}.",
-                    **judgment,
+                    f"Assessed {candidate.domain}: identity={candidate.identity_match.value}, page={candidate.direct_product_page.value}, identifier={candidate.exact_identifier_verified}.",
+                    **candidate_judgment(candidate),
                 )
             candidates = tuple(assessed)
             writer.write_intermediate(product.row_id, candidates=candidates)
@@ -193,15 +186,20 @@ class ProductURLOrchestrator:
                 "COMPLETE",
                 f"Candidate evaluation completed for {len(candidates)} page(s).",
                 exact_count=sum(1 for item in candidates if item.identity_match.value == "EXACT"),
-                probable_count=sum(1 for item in candidates if item.identity_match.value == "PROBABLE"),
-                mismatch_count=sum(1 for item in candidates if item.identity_match.value == "MISMATCH"),
-                review_eligible_count=sum(1 for item in candidates if item.review_eligible),
+                identifier_verified_count=sum(1 for item in candidates if item.exact_identifier_verified),
+                acquisition_eligible_count=sum(
+                    1
+                    for item in candidates
+                    if item.identity_match.value == "EXACT"
+                    and item.direct_product_page.value == "PASS"
+                    and item.durable_url.value == "PASS"
+                ),
             )
 
             emit(
                 PipelineStage.BROWSER,
                 "START",
-                "Allocating rendered-browser checks by source authority and evidence diversity.",
+                "Opening exact candidates in the rendered browser to verify accessibility and extractability.",
                 browser_enabled=runtime.browser.enabled,
                 browser_required=runtime.browser.required,
                 browser_candidate_limit=runtime.browser.max_candidates,
@@ -211,80 +209,80 @@ class ProductURLOrchestrator:
             emit(
                 PipelineStage.BROWSER,
                 "BROWSER_ALLOCATION",
-                f"Allocated {len(selected)} candidate(s) for rendered-browser investigation.",
+                f"Allocated {len(selected)} exact page candidate(s) for rendered-browser validation.",
                 candidates=[
                     {
                         "candidate_id": item.candidate_id,
                         "url": item.url,
                         "source_role": item.source_role.value,
                         "identity_match": item.identity_match.value,
-                        "identity_confidence": item.identity_confidence,
+                        "exact_identifier_verified": item.exact_identifier_verified,
                     }
                     for item in selected
                 ],
             )
+
             by_id = {item.candidate_id: item for item in candidates}
             for item in selected:
                 emit(
                     PipelineStage.BROWSER,
                     "BROWSER_STARTED",
-                    f"Opening {item.domain} in the rendered browser.",
+                    f"Opening {item.url} in the rendered browser.",
                     candidate_id=item.candidate_id,
                     url=item.url,
                 )
                 browser_evidence = browser_client.investigate(item.url, product.row_id, item.candidate_id)
-                updated = apply_browser_evidence(item, browser_evidence)
+                updated = apply_browser_evidence(product, interpretation, item, browser_evidence, runtime)
                 by_id[item.candidate_id] = updated
                 emit(
                     PipelineStage.BROWSER,
                     "BROWSER_COMPLETED",
-                    f"Browser investigation for {item.domain} finished with {browser_evidence.access.value}.",
+                    f"Browser validation for {item.domain} finished with {updated.browser_access.value}.",
                     candidate_id=item.candidate_id,
-                    url=item.url,
-                    access=browser_evidence.access.value,
+                    url=updated.url,
+                    access=updated.browser_access.value,
+                    exact_identifier_verified=updated.exact_identifier_verified,
+                    extractable=updated.text_extractable.value,
+                    mapping_eligible=updated.mapping_eligible,
                     final_url=browser_evidence.final_url,
                     title=browser_evidence.title,
                     product_controls=list(browser_evidence.product_controls),
                     screenshot_path=browser_evidence.screenshot_path,
                     error=browser_evidence.error,
                 )
+
             candidates = tuple(by_id[item.candidate_id] for item in candidates)
             writer.write_intermediate(product.row_id, candidates=candidates)
-            if runtime.browser.required and not selected:
-                raise RuntimeError("browser investigation is required but no candidate was eligible")
-            if runtime.browser.required and selected and not any(item.browser_access.value == "PASS" for item in candidates):
-                raise RuntimeError("browser investigation is required but no candidate passed")
             emit(
                 PipelineStage.BROWSER,
                 "COMPLETE",
-                f"Rendered-browser investigation assessed {len(selected)} candidate(s); unexecuted checks remain NOT_ASSESSED.",
+                f"Rendered-browser validation assessed {len(selected)} candidate(s).",
                 assessed_count=len(selected),
                 browser_pass_count=sum(1 for item in candidates if item.browser_access.value == "PASS"),
                 browser_fail_count=sum(1 for item in candidates if item.browser_access.value == "FAIL"),
-                browser_not_assessed_count=sum(1 for item in candidates if item.browser_access.value == "NOT_ASSESSED"),
+                mapping_eligible_count=sum(1 for item in candidates if item.mapping_eligible),
             )
 
             emit(
                 PipelineStage.DELIVER,
                 "START",
-                "Applying the canonical mandatory URL-delivery policy.",
+                "Selecting one exact, accessible and scrapable product URL with manufacturer-first priority.",
                 candidate_count=len(candidates),
-                review_eligible_count=sum(1 for item in candidates if item.review_eligible),
+                mapping_eligible_count=sum(1 for item in candidates if item.mapping_eligible),
             )
-            provisional = choose_delivery(candidates)
-            ranking = candidate_ranking(candidates, provisional.selected_candidate_id)
+            decision = choose_delivery(candidates)
+            ranking = candidate_ranking(candidates, decision.selected_candidate_id)
             emit(
                 PipelineStage.DELIVER,
                 "CANDIDATE_RANKING",
-                "Compared surviving candidates using independent identity, usability and source gates.",
-                selected_candidate_id=provisional.selected_candidate_id,
+                "Ranked only exact usable mappings; discovery-only candidates remain rejected.",
+                selected_candidate_id=decision.selected_candidate_id,
                 ranking=ranking,
             )
-            decision = provisional
             emit(
                 PipelineStage.DELIVER,
                 "DECISION_COMPLETE",
-                f"Delivery decision: {decision.status.value}.",
+                f"Mapping decision: {decision.status.value}.",
                 status=decision.status.value,
                 selected_url=decision.selected_url,
                 selected_candidate_id=decision.selected_candidate_id,
@@ -293,8 +291,9 @@ class ProductURLOrchestrator:
                 reasons=list(decision.reasons),
                 warnings=list(decision.warnings),
             )
-            emit(PipelineStage.DELIVER, "COMPLETE", "Canonical URL-delivery policy completed.")
+            emit(PipelineStage.DELIVER, "COMPLETE", "Exact product-to-URL mapping policy completed.")
             emit(PipelineStage.COMPLETE, "COMPLETE", "Product URL resolution completed.")
+
             result = ResolutionResult(
                 runtime_contract=runtime.runtime_contract,
                 product=product,
@@ -322,7 +321,7 @@ class ProductURLOrchestrator:
                 None,
                 0.0,
                 False,
-                ("A technical or configuration defect prevented a valid delivery decision.",),
+                ("A technical or configuration defect prevented an exact mapping decision.",),
                 (f"{type(exc).__name__}: {exc}",),
             )
             artifact_dir = writer.prepare(product.row_id)

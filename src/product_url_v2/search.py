@@ -18,9 +18,17 @@ _BLOCKED_HOSTS = {
     "facebook.com", "www.facebook.com", "instagram.com", "www.instagram.com",
     "youtube.com", "www.youtube.com", "tiktok.com", "www.tiktok.com",
 }
-_TRACKING_KEYS = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "gclid", "fbclid", "ref", "tag"}
-_INDIRECT_PATH_HINTS = ("/search", "/category", "/categories", "/collections", "/blog", "/news", "/support", "/help")
-_PRODUCT_PATH_HINTS = ("/product", "/products", "/item", "/p/", "/dp/", "/sku", "/shop/")
+_TRACKING_KEYS = {
+    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+    "gclid", "fbclid", "ref", "tag", "srsltid", "mc_cid", "mc_eid",
+}
+_INDIRECT_PATH_HINTS = (
+    "/search", "/category", "/categories", "/collections", "/blog", "/news",
+    "/support", "/help", "/login", "/account", "/consent",
+)
+_PRODUCT_PATH_HINTS = (
+    "/product", "/products", "/item", "/p/", "/dp/", "/sku", "/shop/", "/detail/", "/id/",
+)
 
 SearchProgress = Callable[[str, Mapping[str, Any]], None]
 
@@ -163,63 +171,91 @@ class InformationGainSearchPlanner:
         handles: Sequence[str],
         used_signatures: set[str],
     ) -> SearchAction:
+        if product.ean:
+            return self._plan_exact_identifier(credit, product, interpretation)
+
         context = build_search_context(product, interpretation)
         anchors = [str(item) for item in context["exact_anchors"]]
         quoted_text = f'"{interpretation.normalized_text}"'
         retailer = f' "{product.retailer_name}"' if product.retailer_name else ""
         final_credit = credit == self.config.search.credit_limit
+
         if credit == 1 and not final_credit:
             query = " ".join(dict.fromkeys([*(f'"{item}"' for item in anchors), quoted_text])).strip()
             return SearchAction(
                 credit,
                 "google",
-                "ESTABLISH_IDENTITY",
+                "MANUFACTURER_IDENTITY_DISCOVERY",
                 "country",
-                query=query + retailer,
-                rationale="Use exact identifiers and submitted wording before broadening.",
+                query=f"{query} official manufacturer brand product{retailer}".strip(),
+                rationale="Find the official exact-product source before retailer alternatives.",
             )
+
         if not final_credit:
             uncertainty = interpretation.unresolved_discriminators[0] if interpretation.unresolved_discriminators else "variant"
-            fresh_handle = next((item for item in handles if f"google_immersive_product|{item}" not in used_signatures), "")
-            if fresh_handle:
-                return SearchAction(
-                    credit,
-                    "google_immersive_product",
-                    "RESOLVE_UNCERTAINTY",
-                    "country",
-                    page_token=fresh_handle,
-                    target_uncertainty=uncertainty,
-                    rationale="Expand a concrete product entity to compare seller and variant evidence.",
-                )
             negatives = " ".join(_negative_query(item) for item in interpretation.negative_constraints)
-            query = f'{quoted_text} "{uncertainty.replace("_", " ")}" {negatives}'.strip()
+            query = f'{quoted_text} "{uncertainty.replace("_", " ")}" {negatives}{retailer}'.strip()
             return SearchAction(
                 credit,
                 "google_shopping",
-                "RESOLVE_UNCERTAINTY",
+                "COUNTRY_RETAILER_RECOVERY",
                 "country",
                 query=query,
                 target_uncertainty=uncertainty,
-                rationale="Spend the middle credit on the highest-risk product distinction.",
+                rationale="Find the exact commercial variant at the requested or country retailer.",
             )
-        fresh_handle = next((item for item in handles if f"google_immersive_product|{item}" not in used_signatures), "")
-        if fresh_handle:
-            return SearchAction(
-                credit,
-                "google_immersive_product",
-                "MANDATORY_URL_RECOVERY",
-                "global",
-                page_token=fresh_handle,
-                rationale="Recover direct seller URLs from a distinct product entity.",
-            )
-        query = f'{quoted_text} {" ".join(anchors)} official manufacturer retailer product page'.strip()
+
+        query = f'{quoted_text} {" ".join(anchors)} exact product page manufacturer retailer'.strip()
         return SearchAction(
             credit,
             "google_ai_mode",
-            "MANDATORY_URL_RECOVERY",
+            "GLOBAL_EXACT_RECOVERY",
             "global",
             query=query,
-            rationale="Final credit is reserved for direct external product URL recovery.",
+            rationale="Final credit recovers a directly cited exact-product page when organic discovery was insufficient.",
+        )
+
+    def _plan_exact_identifier(
+        self,
+        credit: int,
+        product: ProductInput,
+        interpretation: Interpretation,
+    ) -> SearchAction:
+        identifier = product.ean or ""
+        title = f'"{interpretation.normalized_text}"'
+        retailer = f' "{product.retailer_name}"' if product.retailer_name else ""
+        final_credit = credit == self.config.search.credit_limit
+
+        if credit == 1 and not final_credit:
+            return SearchAction(
+                credit,
+                "google",
+                "EXACT_IDENTIFIER_MANUFACTURER",
+                "country",
+                query=f'"{identifier}" {title} official manufacturer publisher product'.strip(),
+                rationale="Manufacturer or publisher first, but only for the exact supplied EAN/GTIN edition.",
+                target_uncertainty="exact_identifier_and_edition",
+            )
+
+        if not final_credit:
+            return SearchAction(
+                credit,
+                "google_shopping",
+                "EXACT_IDENTIFIER_COUNTRY_RETAILER",
+                "country",
+                query=f'"{identifier}" {title}{retailer}'.strip(),
+                rationale="Recover an exact-EAN product page from the requested retailer or a country retailer.",
+                target_uncertainty="exact_identifier_and_accessibility",
+            )
+
+        return SearchAction(
+            credit,
+            "google",
+            "EXACT_IDENTIFIER_GLOBAL_RECOVERY",
+            "global",
+            query=f'"{identifier}" {title} product page'.strip(),
+            rationale="Final exact-identifier recovery across manufacturer and retailer sources; identifier broadening is forbidden.",
+            target_uncertainty="exact_identifier_and_scrapability",
         )
 
 
@@ -246,15 +282,15 @@ def parse_serpapi_response(action: SearchAction, payload: Mapping[str, Any]) -> 
                     continue
                 results.append(
                     SearchResult(
-                        url,
-                        title,
-                        snippet,
-                        f"{action.engine}:{section}",
-                        action.engine,
-                        action.query or action.purpose,
-                        position,
-                        is_product_like_url(url),
-                        token,
+                        url=url,
+                        title=title,
+                        snippet=snippet,
+                        source_section=f"{action.engine}:{section}:{action.purpose}",
+                        engine=action.engine,
+                        query=action.query or action.purpose,
+                        position=position,
+                        product_like=is_product_like_url(url),
+                        page_token=token,
                     )
                 )
             if token and not any(item.page_token == token for item in results):
@@ -264,7 +300,7 @@ def parse_serpapi_response(action: SearchAction, payload: Mapping[str, Any]) -> 
                         placeholder,
                         title,
                         snippet,
-                        f"{action.engine}:{section}:handle",
+                        f"{action.engine}:{section}:{action.purpose}:handle",
                         action.engine,
                         action.query or action.purpose,
                         position,
@@ -333,6 +369,17 @@ def is_product_like_url(url: str) -> bool:
         return True
     segments = [item for item in path.split("/") if item]
     return len(segments) >= 2 and bool(re.search(r"[a-z].*\d|\d.*[a-z]", segments[-1], flags=re.I))
+
+
+def explicit_identifier_from_url(url: str) -> tuple[str, ...]:
+    """Return identifiers explicitly labelled as ISBN/EAN/GTIN in the URL path."""
+    path = urlparse(url).path
+    return tuple(
+        dict.fromkeys(
+            match.group(1)
+            for match in re.finditer(r"(?:isbn|ean|gtin)[-_/]?(\d{8}|\d{12,14})(?:\D|$)", path, flags=re.I)
+        )
+    )
 
 
 def _negative_query(value: str) -> str:

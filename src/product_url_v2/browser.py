@@ -65,7 +65,7 @@ class BrowserClient:
                 error=str(data.get("error") or ""),
             )
         except Exception as exc:
-            return BrowserEvidence(url=url, access=GateStatus.NOT_ASSESSED, error=f"{type(exc).__name__}: {exc}")
+            return BrowserEvidence(url=url, access=GateStatus.FAIL, error=f"{type(exc).__name__}: {exc}")
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.token}"} if self.token else {}
@@ -77,16 +77,34 @@ def select_browser_candidates(
 ) -> tuple[CandidateAssessment, ...]:
     if limit <= 0:
         return ()
+
     eligible = [
-        item for item in candidates
+        item
+        for item in candidates
         if item.browser_access is GateStatus.NOT_ASSESSED
-        and item.direct_product_page is not GateStatus.FAIL
+        and item.direct_product_page is GateStatus.PASS
+        and item.durable_url is GateStatus.PASS
         and item.identity_match.value != "MISMATCH"
+        and str(item.evidence.get("page_fetch_status") or "") == GateStatus.PASS.value
         and not item.conflicts
+        and not item.hard_url_blockers
     ]
+
+    source_priority = {
+        SourceRole.LOCAL_MANUFACTURER: 6,
+        SourceRole.GLOBAL_MANUFACTURER: 5,
+        SourceRole.REQUESTED_RETAILER: 4,
+        SourceRole.COUNTRY_RETAILER: 3,
+        SourceRole.GLOBAL_RETAILER: 2,
+        SourceRole.MARKETPLACE: 1,
+        SourceRole.UNKNOWN: 0,
+    }
     ranked = sorted(
         eligible,
         key=lambda item: (
+            1.0 if item.exact_identifier_verified else 0.0,
+            1.0 if item.identity_match.value == "EXACT" else 0.0,
+            float(source_priority[item.source_role]),
             item.identity_confidence,
             item.direct_page_score,
             item.source_authority,
@@ -95,23 +113,4 @@ def select_browser_candidates(
         ),
         reverse=True,
     )
-    selected: list[CandidateAssessment] = []
-
-    def add(predicate) -> None:
-        for item in ranked:
-            if len(selected) >= limit:
-                return
-            if item not in selected and predicate(item):
-                selected.append(item)
-                return
-
-    add(lambda item: item.source_role in {SourceRole.LOCAL_MANUFACTURER, SourceRole.GLOBAL_MANUFACTURER})
-    add(lambda item: item.source_role in {SourceRole.REQUESTED_RETAILER, SourceRole.COUNTRY_RETAILER})
-    selected_domains = {item.domain for item in selected}
-    add(lambda item: item.domain not in selected_domains)
-    for item in ranked:
-        if len(selected) >= limit:
-            break
-        if item not in selected:
-            selected.append(item)
-    return tuple(selected)
+    return tuple(ranked[:limit])

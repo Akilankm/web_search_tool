@@ -103,34 +103,32 @@ def candidate_judgment(candidate: CandidateAssessment, *, selected: bool = False
     blockers: list[str] = []
 
     if candidate.identity_match is IdentityMatch.EXACT:
-        strengths.append("Exact identity threshold passed.")
+        strengths.append("Exact product identity passed.")
     elif candidate.identity_match is IdentityMatch.PROBABLE:
-        strengths.append("Identity evidence is probable.")
+        risks.append("Identity evidence is probable but not exact.")
     elif candidate.identity_match is IdentityMatch.MISMATCH:
-        blockers.append("Identity evidence indicates a different product.")
+        blockers.append("Identity evidence indicates a different product or edition.")
     else:
-        risks.append("Identity remains unverified.")
+        blockers.append("Exact identity remains unverified.")
 
-    if candidate.evidence.get("search_product_like"):
-        strengths.append("Search returned a structurally product-like external URL.")
+    if candidate.exact_identifier_required:
+        if candidate.exact_identifier_verified:
+            strengths.append("Supplied EAN/GTIN was verified from product-page evidence.")
+        else:
+            blockers.append("Supplied EAN/GTIN was not verified from the page or rendered page.")
 
-    # A failed page-verification gate is a review risk when the original search
-    # URL remains structurally product-like. It becomes a blocker only when the
-    # candidate is not deliverable under the mandatory URL contract.
-    _classify_gate(
-        candidate.direct_product_page,
-        "Direct product-page evidence",
-        strengths,
-        risks,
-        blockers,
-        fail_is_blocker=not candidate.review_eligible,
-    )
+    _classify_gate(candidate.direct_product_page, "Direct product-page evidence", strengths, risks, blockers, fail_is_blocker=True)
     _classify_gate(candidate.durable_url, "Durable URL", strengths, risks, blockers, fail_is_blocker=True)
+    _classify_gate(candidate.browser_access, "Rendered browser accessibility", strengths, risks, blockers, fail_is_blocker=True)
+    _classify_gate(candidate.text_extractable, "Scrapable product text", strengths, risks, blockers, fail_is_blocker=True)
     _classify_gate(candidate.country_match, "Country-market alignment", strengths, risks, blockers)
     _classify_gate(candidate.retailer_match, "Requested-retailer alignment", strengths, risks, blockers)
-    _classify_gate(candidate.browser_access, "Rendered browser usability", strengths, risks, blockers)
-    _classify_gate(candidate.text_extractable, "Text extraction", strengths, risks, blockers)
     _classify_gate(candidate.coding_evidence_complete, "Coding-field coverage", strengths, risks, blockers)
+
+    if candidate.mapping_eligible:
+        strengths.append("Candidate satisfies the exact-and-usable mapping contract.")
+    else:
+        blockers.append("Candidate is discovery evidence only and cannot be delivered as the final mapping.")
 
     blockers.extend(candidate.conflicts)
     blockers.extend(candidate.hard_url_blockers)
@@ -147,8 +145,11 @@ def candidate_judgment(candidate: CandidateAssessment, *, selected: bool = False
         "search_support": candidate.search_support,
         "identity_match": candidate.identity_match.value,
         "identity_confidence": candidate.identity_confidence,
+        "exact_identifier_required": candidate.exact_identifier_required,
+        "exact_identifier_verified": candidate.exact_identifier_verified,
         "direct_page_score": candidate.direct_page_score,
         "delivery_basis": candidate.evidence.get("delivery_basis"),
+        "mapping_eligible": candidate.mapping_eligible,
         "strictly_verified": candidate.strictly_verified,
         "review_eligible": candidate.review_eligible,
         "gates": gate_rows(candidate),
@@ -161,25 +162,41 @@ def candidate_judgment(candidate: CandidateAssessment, *, selected: bool = False
 
 def gate_rows(candidate: CandidateAssessment) -> list[dict[str, Any]]:
     return [
-        {"gate": "Identity", "status": candidate.identity_match.value, "score": candidate.identity_confidence},
+        {"gate": "Exact identity", "status": candidate.identity_match.value, "score": candidate.identity_confidence},
+        {
+            "gate": "Supplied identifier",
+            "status": "PASS" if candidate.exact_identifier_verified else "FAIL" if candidate.exact_identifier_required else "NOT_REQUIRED",
+            "score": None,
+        },
         {"gate": "Direct product page", "status": candidate.direct_product_page.value, "score": candidate.direct_page_score},
         {"gate": "Durable URL", "status": candidate.durable_url.value, "score": None},
+        {"gate": "Browser accessibility", "status": candidate.browser_access.value, "score": None},
+        {"gate": "Scrapable text", "status": candidate.text_extractable.value, "score": None},
         {"gate": "Country match", "status": candidate.country_match.value, "score": None},
         {"gate": "Retailer match", "status": candidate.retailer_match.value, "score": None},
-        {"gate": "Browser usability", "status": candidate.browser_access.value, "score": None},
-        {"gate": "Text extractable", "status": candidate.text_extractable.value, "score": None},
         {"gate": "Coding evidence", "status": candidate.coding_evidence_complete.value, "score": None},
+        {"gate": "Final mapping eligible", "status": "PASS" if candidate.mapping_eligible else "FAIL", "score": None},
     ]
 
 
 def candidate_ranking(candidates: Sequence[CandidateAssessment], selected_candidate_id: str | None = None) -> list[dict[str, Any]]:
     rows = [candidate_judgment(item, selected=item.candidate_id == selected_candidate_id) for item in candidates]
+    source_priority = {
+        "LOCAL_MANUFACTURER": 6,
+        "GLOBAL_MANUFACTURER": 5,
+        "REQUESTED_RETAILER": 4,
+        "COUNTRY_RETAILER": 3,
+        "GLOBAL_RETAILER": 2,
+        "MARKETPLACE": 1,
+        "UNKNOWN": 0,
+    }
     return sorted(
         rows,
         key=lambda item: (
             bool(item["selected"]),
+            bool(item["mapping_eligible"]),
+            int(source_priority.get(str(item["source_role"]), 0)),
             bool(item["strictly_verified"]),
-            bool(item["review_eligible"]),
             float(item["identity_confidence"]),
             float(item["direct_page_score"]),
             int(item["source_authority"]),
@@ -203,6 +220,8 @@ def _classify_gate(
         blockers.append(f"{label} failed.")
     elif status is GateStatus.FAIL:
         risks.append(f"{label} failed.")
+    elif fail_is_blocker:
+        blockers.append(f"{label} was not assessed.")
     else:
         risks.append(f"{label} was not assessed.")
 

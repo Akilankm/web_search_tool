@@ -21,14 +21,14 @@ class AcquisitionConfig:
     max_per_domain: int = 2
     max_workers: int = 6
     max_response_bytes: int = 3_000_000
-    user_agent: str = "Mozilla/5.0 ProductURLResolver/1.0"
+    user_agent: str = "Mozilla/5.0 ProductURLResolver/1.2"
 
 
 @dataclass(frozen=True, slots=True)
 class BrowserConfig:
     enabled: bool = True
-    required: bool = False
-    max_candidates: int = 3
+    required: bool = True
+    max_candidates: int = 6
     base_url: str = "http://browser:9000"
     timeout_seconds: int = 90
 
@@ -95,7 +95,7 @@ class RuntimeConfig:
             self.browser,
             enabled=_as_bool(options.get("browser_enabled"), self.browser.enabled),
             required=_as_bool(options.get("browser_required"), self.browser.required),
-            max_candidates=_bounded_int(options.get("browser_candidates"), self.browser.max_candidates, 0, 10),
+            max_candidates=_bounded_int(options.get("browser_candidates"), self.browser.max_candidates, 1, 12),
         )
         reasoning = replace(
             self.reasoning,
