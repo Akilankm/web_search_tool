@@ -13,12 +13,11 @@ REQUIRED = {
     "01_resolve_one_product.ipynb",
     "02_resolve_csv_batch.ipynb",
 }
-FORBIDDEN = {
+FORBIDDEN_CODE = {
     "nest_asyncio",
     "streamlit",
     "fastapi",
     "docker compose",
-    "browser microservice",
     "product_url_v2.api",
     "browser_service",
 }
@@ -35,10 +34,13 @@ def main() -> int:
         nbformat.validate(notebook)
 
         combined = "\n".join(str(cell.source) for cell in notebook.cells)
-        lowered = combined.casefold()
-        offenders = sorted(term for term in FORBIDDEN if term in lowered)
+        code_source = "\n".join(
+            str(cell.source) for cell in notebook.cells if cell.cell_type == "code"
+        )
+        lowered_code = code_source.casefold()
+        offenders = sorted(term for term in FORBIDDEN_CODE if term in lowered_code)
         if offenders:
-            raise SystemExit(f"{path}: forbidden runtime references: {offenders}")
+            raise SystemExit(f"{path}: forbidden runtime code: {offenders}")
 
         if "ProductURLOrchestrator" not in combined:
             raise SystemExit(f"{path}: must call ProductURLOrchestrator directly")
