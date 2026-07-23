@@ -1,7 +1,8 @@
 from product_url_v2.config import RuntimeConfig
-from product_url_v2.evaluation import apply_browser_evidence, assess_candidate, choose_delivery
+from product_url_v2.evaluation import apply_browser_evidence, assess_candidate
 from product_url_v2.interpretation import DeterministicProductInterpreter
 from product_url_v2.models import BrowserEvidence, DeliveryStatus, GateStatus, PageEvidence, ProductInput, SearchResult
+from product_url_v2.policy import choose_delivery, evaluate_acceptance
 
 
 def page(text: str, products=()):
@@ -39,10 +40,13 @@ def test_missing_coding_evidence_retains_exact_usable_review_url() -> None:
         ),
         RuntimeConfig(),
     )
+    verdict = evaluate_acceptance(candidate)
     decision = choose_delivery([candidate])
+
     assert decision.status is DeliveryStatus.REVIEW_REQUIRED
     assert decision.selected_url == candidate.url
-    assert candidate.mapping_eligible is True
+    assert verdict.eligible is True
+    assert verdict.strictly_verified is False
     assert candidate.coding_evidence_complete is GateStatus.FAIL
 
 
@@ -57,6 +61,7 @@ def test_explicit_ean_conflict_is_not_delivered() -> None:
         {"required_fields": ["brand", "product_name"]},
         RuntimeConfig(),
     )
+
     assert candidate.conflicts
-    assert candidate.mapping_eligible is False
+    assert evaluate_acceptance(candidate).eligible is False
     assert choose_delivery([candidate]).status is DeliveryStatus.FAILED
