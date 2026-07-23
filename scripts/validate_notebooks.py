@@ -14,12 +14,12 @@ REQUIRED = {
     "02_resolve_csv_batch.ipynb",
 }
 FORBIDDEN_CODE = {
-    "nest_asyncio",
+    "nest" + "_asyncio",
     "streamlit",
     "fastapi",
     "docker compose",
     "product_url_v2.api",
-    "browser_service",
+    "browser" + "_service",
 }
 
 
