@@ -64,4 +64,4 @@ jobs:
           test ! -e src/product_url_v2/browser_service.py
           test ! -e scripts/start.sh
           test ! -e scripts/run_ui.sh
-          if grep -RInE 'product_evidence_harness|compat_patches|monkey_patch|monkeypatch_runtime|nest_asyncio' src scripts; then exit 1; fi
+          if grep -RInE 'product_evidence_harness|compat_patches|monkey_patch|monkeypatch|monkeypatch_runtime|nest_asyncio' src scripts; then exit 1; fi
