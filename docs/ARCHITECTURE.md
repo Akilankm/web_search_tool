@@ -1,91 +1,124 @@
-# Architecture and decision contract
+# Architecture and exact mapping contract
 
-## Canonical packages
+## Canonical runtime
 
-There is one runtime package: `product_url_v2`. It contains no legacy imports, compatibility wrappers, hardening modules, monkey patches or import-time mutation.
+There is one runtime package: `product_url_v2`. It contains no legacy imports, compatibility wrappers, monkey patches or import-time mutation.
 
 | Module | Responsibility |
 |---|---|
-| `models.py` | Immutable typed contracts and terminal invariants |
-| `config.py` | Validated JSON/environment/per-request configuration |
-| `interpretation.py` | Normalization, exact identity signals, uncertainty and deterministic hypotheses |
-| `reasoning.py` | Optional structured PCA LLM refinement with strict anti-invention validation |
-| `search.py` | SerpAPI planning, billable-request deduplication, parsing, URL admission and search progress events |
-| `acquisition.py` | Bounded HTTP acquisition, JSON-LD extraction and acquisition progress events |
-| `evaluation.py` | Identity, direct-page, source, country, retailer and coding judgments plus mandatory URL-first selection |
-| `trace.py` | Public observable evidence and candidate-judgment summaries |
-| `ui_presenter.py` | Pure UI table/stage/event transformations |
-| `browser.py` | Browser allocation and service client |
-| `browser_service.py` | Isolated Playwright renderer and screenshot service |
-| `orchestrator.py` | One explicit end-to-end state flow and structured run-event emission |
-| `artifacts.py` | Stable machine-readable and reviewer-readable artifacts |
-| `api.py` | FastAPI health, synchronous jobs and incremental trace endpoint |
-| `cli.py` | Single and batch execution |
-| `metrics.py` | Frozen-benchmark metrics and release gates |
+| `models.py` | Immutable contracts, mapping eligibility and terminal invariants |
+| `config.py` | Validated configuration with mandatory browser validation defaults |
+| `interpretation.py` | Product normalization, exact anchors, variants and uncertainty |
+| `reasoning.py` | Optional structured LLM refinement with anti-invention validation |
+| `search.py` | Identifier-locked manufacturer-first search, parsing, canonicalization and admission |
+| `acquisition.py` | Bounded HTTP acquisition plus JSON-LD Product/Book evidence extraction |
+| `evaluation.py` | Exact identity, identifier conflict, source, page, browser and scrapability judgments |
+| `browser.py` | Evidence-prioritized browser allocation and service client |
+| `browser_service.py` | Playwright HTTP/render/error validation and screenshots |
+| `trace.py` | Public gate evidence, strengths, risks and blockers |
+| `ui_presenter.py` | Pure mapping-console table transformations |
+| `orchestrator.py` | One explicit product-to-URL state flow |
+| `artifacts.py` | Stable JSON, CSV, Markdown and screenshot artifacts |
+| `api.py` | FastAPI jobs, health policy and incremental trace endpoint |
+| `cli.py` | Single, batch and benchmark execution |
+| `metrics.py` | Frozen benchmark metrics and release gates |
+
+## Product-to-URL state flow
+
+```text
+Submitted identity
+→ exact anchors and competing variants
+→ identifier-locked manufacturer/publisher search
+→ exact requested/country retailer recovery
+→ exact global recovery
+→ canonical direct-product candidates
+→ HTTP and structured-data acquisition
+→ page identity and identifier conflict evaluation
+→ rendered-browser accessibility and content validation
+→ manufacturer-first ranking among fully eligible mappings
+→ one URL or an explicit unresolved failure
+```
+
+## Identifier-locked search
+
+When an EAN, GTIN or ISBN is supplied, the identifier is never broadened away:
+
+1. `EXACT_IDENTIFIER_MANUFACTURER`
+2. `EXACT_IDENTIFIER_COUNTRY_RETAILER`
+3. `EXACT_IDENTIFIER_GLOBAL_RECOVERY`
+
+Every billable query contains the submitted identifier. Search snippets support discovery only; they cannot prove final identity.
+
+When no identifier is supplied, the same source order is used with the strongest model, brand, pack, size and product-form anchors available.
+
+## Source hierarchy
+
+Source priority is evaluated only after all mandatory mapping gates pass:
+
+1. local manufacturer or publisher;
+2. global manufacturer or publisher;
+3. requested retailer;
+4. country retailer;
+5. global retailer;
+6. marketplace.
+
+An authoritative page for a different edition is a mismatch, not a preferred result. For example, a publisher page containing a print ISBN cannot be selected for a supplied eBook EAN.
+
+## Candidate admission versus final mapping
+
+A product-like URL may enter acquisition as a discovery candidate. That does not make it deliverable.
+
+The following remain audit-only until verified:
+
+- URLs outside the acquisition budget;
+- HTTP failures;
+- anti-bot or consent surfaces;
+- browser failures;
+- pages without scrapable text;
+- pages without the supplied identifier;
+- pages with conflicting identifiers;
+- redirected homepages, categories, login pages or search pages.
+
+Tracking parameters including `srsltid`, UTM fields and click identifiers are removed during canonicalization.
+
+## Mapping eligibility
+
+A candidate is `mapping_eligible` only when all of these are true:
+
+- identity status is `EXACT`;
+- supplied EAN/GTIN/ISBN is verified from acquired or rendered page content;
+- no page, field or URL-path identifier conflicts exist;
+- direct product-page gate passes;
+- durable URL gate passes;
+- rendered browser accessibility passes;
+- rendered product text is extractable;
+- no hard URL blocker remains.
+
+Coding completeness, country confidence and requested-retailer alignment remain separate secondary axes. They can produce `REVIEW_REQUIRED` only after the URL is already a valid exact mapping.
+
+## Terminal decisions
+
+| Status | Contract |
+|---|---|
+| `VERIFIED` | Exact, accessible and scrapable mapping; downstream coding evidence also passes |
+| `REVIEW_REQUIRED` | Exact, accessible and scrapable mapping; only secondary coding or market evidence requires review |
+| `FAILED` | No candidate passed the full exact mapping contract |
+| `TECHNICAL_FAILURE` | Configuration or runtime defect prevented the campaign from reaching a valid decision |
+
+The system never returns an inaccessible or unverified discovery URL merely to avoid `FAILED`.
 
 ## Observable decision trace
 
-The trace contract is `observable-decision-trace-v1`.
+The trace contract is `observable-decision-trace-v1`. It exposes:
 
-It may expose:
+- submitted constraints and identifier lock;
+- deterministic and validated inferred identity signals;
+- each paid search query and purpose;
+- acquired page status and redirects;
+- identifiers found in page fields, text and URL paths;
+- source role and authority;
+- browser final URL, rendered title, text length, product controls and screenshot;
+- exact identity, accessibility, scrapability and mapping-eligibility gates;
+- final ranking and decision reasons.
 
-- submitted product constraints;
-- deterministic identity signals;
-- LLM-derived hypotheses that pass anti-invention validation;
-- unresolved discriminators and negative constraints;
-- each paid search action and its declared purpose;
-- retained external sources and structural URL admission;
-- fetch, structured-data and browser evidence;
-- independent candidate gates;
-- explicit strengths, risks, blockers and final selection reasons.
-
-It must not claim to expose hidden chain-of-thought. The trace is a structured audit of observable system state and judgment inputs.
-
-Jobs persist every `RunEvent` in sequence. The API exposes incremental retrieval through:
-
-```text
-GET /v1/jobs/{job_id}/trace?after_sequence=<last-consumed-sequence>
-```
-
-The final `result.json` contains the complete event sequence for replay and audit.
-
-## Search budget
-
-1. **Establish identity** using EAN/GTIN, model codes and exact submitted text.
-2. **Resolve the highest-risk uncertainty**, such as single pack versus bundle/display.
-3. **Mandatory URL recovery** using a fresh product entity or AI Mode cited-source recovery.
-
-Duplicate identity is calculated from the actual billable request. Reusing an Immersive Product token is duplicate regardless of a descriptive country/global scope.
-
-## Candidate admission
-
-All external observations remain in the search artifact. Only structurally product-like external URLs enter acquisition. Homepages, search/category pages, documents, social/media URLs, Google redirects and SerpAPI intermediary URLs cannot become deliverable candidates.
-
-The admitted search URL is retained as the primary delivery handle. If automated acquisition redirects to a homepage, consent page, login page or other non-product path, the redirect does not replace the original product-like URL.
-
-## Candidate judgment
-
-Each candidate is evaluated independently across:
-
-- identity match and identity confidence;
-- direct product-page evidence;
-- URL durability;
-- country-market alignment;
-- requested-retailer alignment;
-- rendered-browser usability;
-- text extractability;
-- coding-field completeness;
-- source role and source authority;
-- explicit conflicts and warnings.
-
-A single weighted score cannot overwrite these axes.
-
-Absence of evidence is represented as `UNVERIFIED` or `NOT_ASSESSED`. `MISMATCH` is reserved for explicit contradictory evidence, such as an EAN/GTIN conflict. Failed acquisition, failed browser automation or missing coding fields are review risks, not proof that the URL is unusable.
-
-## Delivery invariant
-
-- `VERIFIED` always contains a direct URL and all strict gates pass.
-- `REVIEW_REQUIRED` always contains the strongest non-conflicting product-like URL, even when page, browser, country or coding evidence is incomplete.
-- `FAILED` is valid only when no product-like external URL exists or every discovered URL has an explicit wrong-product, non-product or transient/intermediary blocker.
-
-A run with one or more non-conflicting product-like candidates cannot finish with an empty URL.
+It does not expose or fabricate hidden chain-of-thought.
