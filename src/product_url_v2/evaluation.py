@@ -32,8 +32,9 @@ _LABELED_IDENTIFIER_PATTERN = re.compile(
     re.I,
 )
 _ENTITY_LABEL_PATTERN = re.compile(
-    r"(?:manufacturer|hersteller|publisher|brand|marke)\s*[:\-]?\s*"
+    r"(?:manufacturer|hersteller|publisher|verlag|brand|marke)\s*[:\-]?\s*"
     r"([A-ZÄÖÜ][A-Za-zÀ-ÖØ-öø-ÿ0-9&.'’\- ]{1,70})",
+    re.I,
 )
 _ENTITY_STOP_PATTERN = re.compile(
     r"\b(?:ean|isbn|gtin|price|preis|format|product|produkt|publication|published|"
