@@ -1,141 +1,86 @@
-# Architecture and canonical acceptance contract
+# Notebook-first architecture
 
-## Runtime boundary
+## Supported runtime
 
-There is one runtime package: `product_url_v2`. It contains no legacy imports, compatibility wrappers, monkey patches or import-time mutation.
-
-| Module | Responsibility |
-|---|---|
-| `models.py` | Immutable data contracts and type invariants only |
-| `config.py` | Validated configuration and browser-required defaults |
-| `interpretation.py` | Product normalization, exact anchors, variants and uncertainty |
-| `reasoning.py` | Optional structured LLM refinement with anti-invention validation |
-| `search.py` | Identifier-locked manufacturer-first search, parsing and URL canonicalization |
-| `acquisition.py` | Bounded HTTP acquisition and JSON-LD Product/Book extraction |
-| `evaluation.py` | Evidence production: identity, identifiers, direct page, source and secondary gates |
-| `browser.py` | Browser client and policy-driven recovery allocation |
-| `browser_service.py` | Playwright render, HTTP/error validation, text and screenshot collection |
-| `policy.py` | The only acceptance, source-priority, ranking and delivery decision boundary |
-| `trace.py` | Observable policy verdicts and evidence summaries |
-| `ui_presenter.py` | UI projections derived from the canonical verdict |
-| `orchestrator.py` | Explicit evidence flow and policy invocation |
-| `artifacts.py` | Stable JSON, CSV, Markdown and screenshot artifacts |
-| `api.py` | Jobs, health, active policy metadata and incremental trace endpoint |
-| `cli.py` | Single, batch and benchmark execution |
-| `metrics.py` | Frozen benchmark metrics and release gates |
-
-## State flow
+The supported execution environment is a Jupyter kernel running the resolver directly in one Python process.
 
 ```text
-Submitted identity
-→ deterministic and optional LLM interpretation
-→ identifier-locked manufacturer or publisher search
-→ exact retailer and global recovery
-→ canonical direct-product candidates
-→ HTTP and structured-data acquisition
-→ evidence-only candidate evaluation
-→ browser recovery and rendered evidence
-→ product-url-acceptance-v1
-→ source-priority ranking among accepted candidates
-→ one final URL or explicit unresolved failure
+Notebook
+  ├─ loads .env
+  ├─ creates ProductInput
+  └─ calls ProductURLOrchestrator.resolve()
+       ├─ deterministic interpretation
+       ├─ optional structured PCA LLM refinement
+       ├─ SerpAPI search
+       ├─ HTTP acquisition
+       ├─ local Playwright rendering
+       ├─ candidate evidence evaluation
+       ├─ canonical acceptance policy
+       └─ artifact writing
 ```
 
-## Decision ownership
+There is no UI service, API service, browser service, queue, polling layer, container network, host-port contract, event-loop patch, or compatibility shim.
 
-Only `policy.py` may define:
+## Module boundaries
+
+| Module | Single responsibility |
+|---|---|
+| `models.py` | Immutable input, evidence, and output contracts |
+| `config.py` | File and environment configuration |
+| `interpretation.py` | Product identity extraction and hypotheses |
+| `reasoning.py` | Optional structured PCA LLM refinement |
+| `search.py` | Bounded search planning and SerpAPI calls |
+| `acquisition.py` | HTTP and JSON-LD acquisition |
+| `browser.py` | Local Playwright rendering |
+| `evaluation.py` | Candidate evidence production |
+| `policy.py` | Final acceptance, source priority, ranking, and delivery |
+| `orchestrator.py` | Sequential execution of the above modules |
+| `artifacts.py` | Auditable JSON, CSV, Markdown, and screenshots |
+
+## No monkey patching
+
+Jupyter normally owns an active asyncio event loop. The browser implementation does not patch that loop and does not use `nest_asyncio`.
+
+When the resolver is called from a notebook, asynchronous Playwright work is executed in one isolated worker thread with its own event loop. In a normal Python process, it uses `asyncio.run()` directly.
+
+## Decision boundary
+
+`src/product_url_v2/policy.py` is the only module allowed to define:
 
 - mandatory acceptance gates;
-- browser precheck;
-- browser candidate ranking;
+- mapping eligibility;
+- browser candidate priority;
 - source hierarchy;
 - final candidate ranking;
-- delivery status and selected URL.
+- delivery status;
+- final selected URL.
 
-Every other module either produces evidence or consumes `AcceptanceVerdict`. No other layer may reconstruct “mapping eligible.”
+Search, acquisition, evaluation, browser, notebook, and artifact code may only produce or present evidence.
 
-## Identifier-locked search
+## Mandatory gates
 
-When an EAN, GTIN or ISBN is supplied, the identifier is retained in every billable search:
+A candidate is deliverable only when:
 
-1. `EXACT_IDENTIFIER_MANUFACTURER`
-2. `EXACT_IDENTIFIER_COUNTRY_RETAILER`
-3. `EXACT_IDENTIFIER_GLOBAL_RECOVERY`
+- identity is `EXACT`;
+- a supplied EAN, GTIN, or ISBN is verified;
+- the URL is a direct product page;
+- the URL is durable;
+- the page opens in local Playwright;
+- rendered product text is scrapable;
+- there are no product, edition, field, or URL-identifier conflicts.
 
-Search snippets support discovery only. They cannot prove exact identity.
+Coding completeness, country confidence, and requested-retailer alignment are secondary review axes. They cannot rescue a candidate that fails a mandatory URL gate.
 
-## Evidence and browser recovery
+## Notebook outputs
 
-HTTP acquisition is not the final acceptance boundary. JavaScript-rendered content may expose an identifier or product details that are absent from static HTML.
+The single-product notebook displays:
 
-A candidate may proceed to browser validation when page-only evidence is incomplete. It cannot proceed when there is an explicit product/edition mismatch, conflicting identifier, transient URL or non-product result.
+- final submission row;
+- candidate acceptance table;
+- identity signals;
+- paid search actions;
+- observable stage trace;
+- evidence artifact paths;
+- final acceptance assertion.
 
-After browser rendering, the evaluator recomputes identity, direct-page, durability and scrapability evidence. The policy then makes the final decision.
-
-## Source classification and hierarchy
-
-Source role is inferred from domain/entity evidence, not from the search query that discovered the page. A retailer returned by a manufacturer-focused query remains a retailer.
-
-The source hierarchy is defined once in `policy.py`:
-
-1. local manufacturer or publisher;
-2. global manufacturer or publisher;
-3. requested retailer;
-4. country retailer;
-5. global retailer;
-6. marketplace;
-7. unknown.
-
-Priority is applied only among candidates that already pass every mandatory gate. An authoritative page for a different edition is rejected.
-
-## Mandatory acceptance gates
-
-`product-url-acceptance-v1` requires:
-
-- exact identity;
-- supplied identifier verified when present;
-- direct product-detail page;
-- durable canonical URL;
-- rendered-browser accessibility;
-- scrapable rendered product content;
-- no identity or edition conflicts.
-
-Coding completeness, country alignment and requested-retailer alignment are secondary. They may produce `REVIEW_REQUIRED` only after the URL passes all mandatory gates.
-
-Free-form warnings and explanatory messages never determine status.
-
-## Terminal decisions
-
-| Status | Contract |
-|---|---|
-| `VERIFIED` | Every mandatory gate and downstream coding evidence pass, with no secondary review reason |
-| `REVIEW_REQUIRED` | Every mandatory gate passes; only secondary evidence needs review |
-| `FAILED` | No candidate passes the canonical acceptance contract |
-| `TECHNICAL_FAILURE` | Configuration or runtime failure prevents a valid decision |
-
-The system never returns an inaccessible, unverified or conflicting discovery URL to avoid `FAILED`.
-
-## Architecture enforcement
-
-`scripts/check_architecture.py` fails CI when:
-
-- acceptance functions or legacy eligibility properties are defined outside `policy.py`;
-- source priority is defined outside `policy.py`;
-- ad hoc hard-blocker state is reintroduced.
-
-Acceptance-contract tests run before the full suite on every supported Python version.
-
-## Observable trace
-
-The trace exposes:
-
-- submitted constraints and identifier lock;
-- identity signals and hypotheses;
-- each paid search action;
-- page acquisition and redirects;
-- identifiers found in page and URL evidence;
-- source classification evidence;
-- browser final URL, rendered text, controls and screenshot;
-- the canonical acceptance policy and gate verdicts;
-- final ranking and decision reasons.
-
-It does not expose or fabricate hidden chain-of-thought.
+The batch notebook writes a checkpointed output CSV after every row.
