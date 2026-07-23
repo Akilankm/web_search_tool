@@ -1,4 +1,4 @@
-"""Canonical product URL resolver. No legacy imports, monkey patches or import-time mutation."""
+"""Exact product-to-URL resolver. No legacy imports, monkey patches or import-time mutation."""
 
 from product_url_v2.config import RuntimeConfig, load_config, load_feature_set
 from product_url_v2.interpretation import DeterministicProductInterpreter, build_search_context, normalize_product_text
@@ -20,7 +20,7 @@ from product_url_v2.models import (
 from product_url_v2.orchestrator import ProductURLOrchestrator
 from product_url_v2.trace import TRACE_CONTRACT, TRACE_NOTICE, candidate_judgment
 
-__version__ = "1.1.1"
+__version__ = "1.2.0"
 
 __all__ = [
     "BrowserEvidence", "CandidateAssessment", "DeliveryDecision", "DeliveryStatus",
