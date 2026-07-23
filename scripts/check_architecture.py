@@ -9,9 +9,6 @@ POLICY = PACKAGE / "policy.py"
 
 FORBIDDEN_TEXT = {
     "hard_url_blockers": "Ad hoc blocker state is forbidden; derive blockers in policy.py.",
-    ".mapping_eligible": "Mapping eligibility must come from evaluate_acceptance().",
-    ".strictly_verified": "Strict verification must come from evaluate_acceptance().",
-    ".review_eligible": "Review eligibility must come from evaluate_acceptance().",
 }
 POLICY_FUNCTIONS = {
     "evaluate_acceptance",
@@ -19,6 +16,9 @@ POLICY_FUNCTIONS = {
     "browser_rank",
     "final_rank",
     "choose_delivery",
+    "mapping_eligible",
+    "strictly_verified",
+    "review_eligible",
 }
 
 
