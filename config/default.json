@@ -1,5 +1,5 @@
 {
-  "runtime_contract": "product-url-resolver-v1",
+  "runtime_contract": "product-url-notebook-v1",
   "artifact_root": "data/artifacts",
   "feature_set_root": "feature_sets",
   "request_timeout_seconds": 30,
@@ -14,27 +14,18 @@
     "max_per_domain": 2,
     "max_workers": 6,
     "max_response_bytes": 3000000,
-    "user_agent": "Mozilla/5.0 ProductURLResolver/1.2"
+    "user_agent": "Mozilla/5.0 ProductURLResolver/2.0"
   },
   "browser": {
     "enabled": true,
     "required": true,
     "max_candidates": 6,
-    "base_url": "http://browser:9000",
     "timeout_seconds": 90
   },
   "decision": {
     "verified_identity_threshold": 0.86,
     "review_identity_threshold": 0.55,
-    "wrong_product_threshold": 0.3,
     "minimum_direct_page_score": 0.5
-  },
-  "release_gates": {
-    "url_delivery_rate": 0.98,
-    "correct_product_delivery_rate": 0.95,
-    "candidate_recall_at_k": 0.98,
-    "wrong_product_escape_rate": 0.01,
-    "direct_product_page_rate": 0.98
   },
   "reasoning": {
     "enabled": false,

@@ -4,29 +4,28 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "product-url-resolver"
-version = "1.3.0"
-description = "Exact product mapping with one canonical acceptance policy"
+version = "2.0.0"
+description = "Notebook-first exact product URL resolver"
 requires-python = ">=3.10,<3.13"
 dependencies = [
   "beautifulsoup4>=4.12,<5",
-  "fastapi>=0.115,<1",
-  "httpx>=0.27,<1",
   "openai>=1,<3",
-  "openpyxl>=3.1,<4",
-  "pandas>=2.2,<3",
-  "pillow>=11,<12",
   "playwright>=1.52,<2",
-  "python-dotenv>=1.0,<2",
-  "requests>=2.32,<3",
-  "streamlit>=1.41,<2",
-  "uvicorn[standard]>=0.30,<1"
+  "requests>=2.32,<3"
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<9", "pytest-cov>=5,<7"]
-
-[project.scripts]
-product-url = "product_url_v2.cli:main"
+notebook = [
+  "ipykernel>=6,<8",
+  "jupyterlab>=4,<5",
+  "nbformat>=5.10,<6",
+  "pandas>=2.2,<3",
+  "python-dotenv>=1.0,<2"
+]
+dev = [
+  "pytest>=8,<9",
+  "nbformat>=5.10,<6"
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

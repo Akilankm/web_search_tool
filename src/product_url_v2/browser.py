@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-import os
+import asyncio
+import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Sequence
+from urllib.parse import urlparse
 
-import requests
+from playwright.async_api import Page, async_playwright
 
 from product_url_v2.config import BrowserConfig
 from product_url_v2.models import BrowserEvidence, CandidateAssessment, GateStatus
@@ -14,62 +17,121 @@ from product_url_v2.policy import browser_precheck, browser_rank
 
 @dataclass(slots=True)
 class BrowserClient:
+    """Open candidate URLs directly with local Playwright.
+
+    The notebook runtime does not call a browser microservice and does not alter
+    the Jupyter event loop. When a notebook event loop is already active, the
+    asynchronous Playwright work runs in one isolated worker thread.
+    """
+
     config: BrowserConfig
-    token: str = ""
-    session: requests.Session | None = None
-
-    @classmethod
-    def from_env(cls, config: BrowserConfig) -> "BrowserClient":
-        token = str(os.getenv("BROWSER_API_TOKEN") or "").strip()
-        token_file = str(os.getenv("BROWSER_API_TOKEN_FILE") or "").strip()
-        if not token and token_file and Path(token_file).is_file():
-            token = Path(token_file).read_text(encoding="utf-8").strip()
-        return cls(config=config, token=token)
-
-    def health(self) -> dict[str, Any]:
-        if not self.config.enabled:
-            return {"status": "disabled"}
-        try:
-            response = (self.session or requests).get(
-                f"{self.config.base_url}/health",
-                headers=self._headers(),
-                timeout=min(15, self.config.timeout_seconds),
-            )
-            response.raise_for_status()
-            data = response.json()
-            return dict(data) if isinstance(data, Mapping) else {"status": "invalid"}
-        except Exception as exc:
-            return {"status": "unavailable", "error": f"{type(exc).__name__}: {exc}"}
+    artifact_root: Path
 
     def investigate(self, url: str, row_id: str, candidate_id: str) -> BrowserEvidence:
         if not self.config.enabled:
-            return BrowserEvidence(url=url, access=GateStatus.NOT_ASSESSED, error="browser disabled")
-        try:
-            response = (self.session or requests).post(
-                f"{self.config.base_url}/investigate",
-                headers=self._headers(),
-                json={"url": url, "row_id": row_id, "candidate_id": candidate_id},
-                timeout=self.config.timeout_seconds,
-            )
-            response.raise_for_status()
-            data = response.json()
-            if not isinstance(data, Mapping):
-                raise ValueError("browser service returned non-object JSON")
             return BrowserEvidence(
                 url=url,
-                access=GateStatus(str(data.get("access") or "FAIL")),
-                final_url=str(data.get("final_url") or ""),
-                title=str(data.get("title") or ""),
-                visible_text=str(data.get("visible_text") or "")[:200000],
-                screenshot_path=str(data.get("screenshot_path") or ""),
-                product_controls=tuple(str(item) for item in data.get("product_controls") or []),
-                error=str(data.get("error") or ""),
+                access=GateStatus.NOT_ASSESSED,
+                error="browser disabled",
             )
-        except Exception as exc:
-            return BrowserEvidence(url=url, access=GateStatus.FAIL, error=f"{type(exc).__name__}: {exc}")
 
-    def _headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self.token}"} if self.token else {}
+        coroutine = self._investigate(url, row_id, candidate_id)
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coroutine)
+
+        # Jupyter owns the main-thread event loop. The worker thread runs
+        # Playwright with an independent event loop and leaves Jupyter untouched.
+        with ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="product-browser",
+        ) as executor:
+            return executor.submit(asyncio.run, coroutine).result()
+
+    async def _investigate(
+        self,
+        url: str,
+        row_id: str,
+        candidate_id: str,
+    ) -> BrowserEvidence:
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return BrowserEvidence(
+                url=url,
+                access=GateStatus.FAIL,
+                error="absolute HTTP(S) URL required",
+            )
+
+        screenshot_dir = self.artifact_root / row_id / "browser"
+        screenshot_dir.mkdir(parents=True, exist_ok=True)
+        screenshot_path = screenshot_dir / f"{candidate_id}.png"
+
+        try:
+            async with async_playwright() as playwright:
+                browser = await playwright.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-dev-shm-usage"],
+                )
+                try:
+                    context = await browser.new_context(
+                        viewport={"width": 1440, "height": 1100},
+                        locale="en-US",
+                    )
+                    page = await context.new_page()
+                    page.set_default_timeout(
+                        min(self.config.timeout_seconds * 1000, 30_000)
+                    )
+                    response = await page.goto(
+                        url,
+                        wait_until="domcontentloaded",
+                        timeout=self.config.timeout_seconds * 1000,
+                    )
+                    try:
+                        await page.wait_for_load_state(
+                            "networkidle",
+                            timeout=8_000,
+                        )
+                    except Exception:
+                        pass
+
+                    final_url = page.url
+                    title = " ".join((await page.title()).split())
+                    visible_text = " ".join(
+                        (await page.locator("body").inner_text()).split()
+                    )[:200_000]
+                    controls = await _product_controls(page)
+                    status_code = response.status if response is not None else None
+                    error = _render_error(status_code, title, visible_text)
+
+                    rendered_screenshot = ""
+                    try:
+                        await page.screenshot(
+                            path=str(screenshot_path),
+                            full_page=True,
+                        )
+                        rendered_screenshot = str(screenshot_path)
+                    except Exception:
+                        rendered_screenshot = ""
+
+                    return BrowserEvidence(
+                        url=url,
+                        access=GateStatus.FAIL if error else GateStatus.PASS,
+                        final_url=final_url,
+                        title=title,
+                        visible_text=visible_text,
+                        screenshot_path=rendered_screenshot,
+                        product_controls=tuple(controls),
+                        error=error,
+                    )
+                finally:
+                    await browser.close()
+        except Exception as exc:
+            return BrowserEvidence(
+                url=url,
+                access=GateStatus.FAIL,
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
 
 def select_browser_candidates(
@@ -80,3 +142,53 @@ def select_browser_candidates(
         return ()
     eligible = [candidate for candidate in candidates if browser_precheck(candidate)]
     return tuple(sorted(eligible, key=browser_rank, reverse=True)[:limit])
+
+
+async def _product_controls(page: Page) -> list[str]:
+    selectors = (
+        "button",
+        "[role=button]",
+        "input[type=submit]",
+        "select",
+        "[itemprop=price]",
+        "[itemprop=isbn]",
+        "[itemprop=gtin13]",
+        "[data-testid*=cart]",
+        "[class*=price]",
+        "[class*=stock]",
+        "[class*=product]",
+    )
+    values: list[str] = []
+    for selector in selectors:
+        try:
+            nodes = page.locator(selector)
+            count = min(await nodes.count(), 40)
+            for index in range(count):
+                text = " ".join((await nodes.nth(index).inner_text()).split())
+                if text and re.search(
+                    r"cart|basket|buy|price|stock|variant|format|isbn|ean|gtin|"
+                    r"product|size|color|quantity|warenkorb|kaufen|produkt|prix|"
+                    r"acheter",
+                    text,
+                    flags=re.I,
+                ):
+                    values.append(text[:300])
+        except Exception:
+            continue
+    return list(dict.fromkeys(values))[:30]
+
+
+def _render_error(http_status: int | None, title: str, text: str) -> str:
+    if http_status is not None and http_status >= 400:
+        return f"Rendered navigation returned HTTP {http_status}."
+    if len(text) < 80:
+        return "Rendered page did not expose enough visible product text."
+    surface = f"{title} {text[:1000]}"
+    if re.search(
+        r"\b404\b|page not found|seite nicht gefunden|access denied|forbidden|"
+        r"service unavailable",
+        surface,
+        flags=re.I,
+    ):
+        return "Rendered page appears to be an error or access-denied surface."
+    return ""

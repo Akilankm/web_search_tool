@@ -21,7 +21,7 @@ class AcquisitionConfig:
     max_per_domain: int = 2
     max_workers: int = 6
     max_response_bytes: int = 3_000_000
-    user_agent: str = "Mozilla/5.0 ProductURLResolver/1.2"
+    user_agent: str = "Mozilla/5.0 ProductURLResolver/2.0"
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,7 +29,6 @@ class BrowserConfig:
     enabled: bool = True
     required: bool = True
     max_candidates: int = 6
-    base_url: str = "http://browser:9000"
     timeout_seconds: int = 90
 
 
@@ -51,22 +50,12 @@ class ReasoningConfig:
 class DecisionConfig:
     verified_identity_threshold: float = 0.86
     review_identity_threshold: float = 0.55
-    wrong_product_threshold: float = 0.30
     minimum_direct_page_score: float = 0.50
 
 
 @dataclass(frozen=True, slots=True)
-class ReleaseGates:
-    url_delivery_rate: float = 0.98
-    correct_product_delivery_rate: float = 0.95
-    candidate_recall_at_k: float = 0.98
-    wrong_product_escape_rate: float = 0.01
-    direct_product_page_rate: float = 0.98
-
-
-@dataclass(frozen=True, slots=True)
 class RuntimeConfig:
-    runtime_contract: str = "product-url-resolver-v1"
+    runtime_contract: str = "product-url-notebook-v1"
     artifact_root: Path = Path("data/artifacts")
     feature_set_root: Path = Path("feature_sets")
     request_timeout_seconds: int = 30
@@ -75,7 +64,6 @@ class RuntimeConfig:
     browser: BrowserConfig = field(default_factory=BrowserConfig)
     reasoning: ReasoningConfig = field(default_factory=ReasoningConfig)
     decision: DecisionConfig = field(default_factory=DecisionConfig)
-    release_gates: ReleaseGates = field(default_factory=ReleaseGates)
 
     def with_runtime_options(self, options: Mapping[str, Any] | None) -> "RuntimeConfig":
         if not options:
@@ -83,7 +71,12 @@ class RuntimeConfig:
         search = replace(
             self.search,
             credit_limit=_bounded_int(options.get("search_credits"), self.search.credit_limit, 1, 3),
-            results_per_search=_bounded_int(options.get("results_per_search"), self.search.results_per_search, 5, 100),
+            results_per_search=_bounded_int(
+                options.get("results_per_search"),
+                self.search.results_per_search,
+                5,
+                100,
+            ),
         )
         acquisition = replace(
             self.acquisition,
@@ -113,23 +106,25 @@ def load_config(path: str | Path | None = None) -> RuntimeConfig:
         if not isinstance(loaded, dict):
             raise ValueError("runtime configuration must be a JSON object")
         payload = loaded
+
     runtime = RuntimeConfig(
-        runtime_contract=str(payload.get("runtime_contract") or "product-url-resolver-v1"),
+        runtime_contract=str(payload.get("runtime_contract") or "product-url-notebook-v1"),
         artifact_root=Path(os.getenv("PRODUCT_URL_ARTIFACT_ROOT") or payload.get("artifact_root") or "data/artifacts"),
-        feature_set_root=Path(os.getenv("PRODUCT_URL_FEATURE_SET_ROOT") or payload.get("feature_set_root") or "feature_sets"),
+        feature_set_root=Path(
+            os.getenv("PRODUCT_URL_FEATURE_SET_ROOT") or payload.get("feature_set_root") or "feature_sets"
+        ),
         request_timeout_seconds=_bounded_int(payload.get("request_timeout_seconds"), 30, 5, 300),
         search=_from_mapping(SearchConfig, payload.get("search")),
         acquisition=_from_mapping(AcquisitionConfig, payload.get("acquisition")),
         browser=_from_mapping(BrowserConfig, payload.get("browser")),
         reasoning=_from_mapping(ReasoningConfig, payload.get("reasoning")),
         decision=_from_mapping(DecisionConfig, payload.get("decision")),
-        release_gates=_from_mapping(ReleaseGates, payload.get("release_gates")),
     )
+
     browser = replace(
         runtime.browser,
         enabled=_as_bool(os.getenv("PRODUCT_URL_BROWSER_ENABLED"), runtime.browser.enabled),
         required=_as_bool(os.getenv("PRODUCT_URL_BROWSER_REQUIRED"), runtime.browser.required),
-        base_url=str(os.getenv("PRODUCT_URL_BROWSER_BASE_URL") or runtime.browser.base_url).rstrip("/"),
     )
     reasoning = replace(
         runtime.reasoning,

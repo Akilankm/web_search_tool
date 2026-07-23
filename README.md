@@ -1,131 +1,111 @@
-# Exact Product Mapping Resolver
+# Product URL Resolver — Notebook First
 
-`product-url-resolver` maps the submitted product identity to one defensible direct product URL.
+This repository resolves a submitted product description to one defensible direct product URL.
 
 ## Release
 
-- Version: `1.3.0`
-- Runtime contract: `product-url-resolver-v1`
+- Version: `2.0.0`
+- Runtime contract: `product-url-notebook-v1`
 - Acceptance policy: `product-url-acceptance-v1`
-- Canonical policy module: `src/product_url_v2/policy.py`
-- Observable trace: `observable-decision-trace-v1`
-- Python: `3.10–3.12`
-- Services: FastAPI resolver, Playwright browser validator, Streamlit mapping console
+- Primary execution: Jupyter notebooks
+- Browser validation: local Playwright in the notebook process
+- Python: 3.10–3.12
 
-## Non-negotiable business contract
+## What was intentionally removed
 
-```text
-Submitted product
-→ exact product and edition identity
-→ exact manufacturer or publisher first
-→ exact retailer fallback
-→ rendered browser accessibility
-→ scrapable rendered product content
-→ one final direct URL
-```
+The supported runtime no longer includes:
 
-A search result is discovery evidence. It is never a successful mapping by itself.
+- Streamlit;
+- FastAPI;
+- Docker Compose;
+- agent, UI, or browser containers;
+- a browser microservice;
+- host-port allocation;
+- job queues or polling;
+- `nest_asyncio`;
+- runtime monkey patches;
+- compatibility wrappers.
 
-A candidate can be delivered only when all mandatory gates pass:
-
-| Mandatory gate | Requirement |
-|---|---|
-| Exact identity | Product, edition, format, model, size, pack and variant must not conflict |
-| Supplied identifier | The submitted EAN, GTIN or ISBN must be verified when provided |
-| Direct page | Homepage, category, search, login, consent and intermediary pages are rejected |
-| Durable URL | Tracking, redirect, session and transient URL forms are removed or rejected |
-| Browser access | The final URL must render successfully in the browser service |
-| Scrapability | Rendered product-specific content must be available downstream |
-| Conflict-free | No contradictory identifier, edition or product evidence may survive |
-
-`REVIEW_REQUIRED` is permitted only after the URL has already passed the complete product-mapping contract. Review may concern secondary coding, country or requested-retailer evidence. It is never a fallback for an inaccessible or uncertain URL.
-
-## One authoritative decision boundary
-
-All final acceptance behavior is implemented in:
+The base execution path is now:
 
 ```text
-src/product_url_v2/policy.py
-```
-
-That module alone defines:
-
-- mandatory acceptance gates;
-- browser-recovery eligibility;
-- manufacturer/retailer source priority;
-- final candidate ranking;
-- `VERIFIED`, `REVIEW_REQUIRED`, and `FAILED` selection.
-
-`models.py` contains data contracts only. `evaluation.py` produces evidence only. Browser, trace, UI, API and artifacts consume the canonical policy verdict rather than recreating it.
-
-An architecture guard fails CI if acceptance logic or source priority is reintroduced outside `policy.py`.
-
-## Identifier-locked search
-
-When an EAN, GTIN or ISBN is supplied, every paid search remains locked to it:
-
-1. exact manufacturer or publisher discovery;
-2. exact requested or country retailer recovery;
-3. exact global recovery.
-
-Manufacturer priority is applied only after the manufacturer page proves the same exact edition. A print publisher page cannot outrank an exact eBook retailer page for a supplied eBook EAN.
-
-## Browser recovery
-
-HTTP acquisition is evidence collection, not the final word. A JavaScript-rendered product page may expose the exact identifier only after browser rendering.
-
-Therefore, incomplete HTTP identity evidence may proceed to the browser. Explicit mismatch, conflicting identifier, transient URL or non-product result cannot.
-
-## Architecture
-
-```text
-Input
-→ deterministic identity interpretation
-→ optional structured LLM refinement
-→ identifier-locked manufacturer-first search
-→ URL canonicalization and candidate admission
-→ HTTP / JSON-LD Product and Book evidence
-→ evidence-only candidate evaluation
-→ rendered-browser identity and scrapability recovery
+notebook
+→ product interpretation
+→ optional PCA LLM refinement
+→ SerpAPI search
+→ HTTP and structured-data acquisition
+→ local Playwright rendering
 → canonical acceptance policy
-→ manufacturer-first ranking among accepted candidates
-→ one URL or an explicit unresolved failure
-→ JSON, CSV, Markdown and screenshot evidence
+→ one URL or explicit failure
+→ auditable artifacts
 ```
 
-The observable trace exposes inputs, evidence, hypotheses, gate outcomes and selection judgments. It does not expose or fabricate hidden chain-of-thought.
+## Notebooks
 
-## Start
+| Notebook | Purpose |
+|---|---|
+| `notebooks/01_resolve_one_product.ipynb` | Resolve and inspect one product |
+| `notebooks/02_resolve_csv_batch.ipynb` | Resolve a CSV batch and checkpoint the output |
+
+## Setup
+
+Run from the repository root:
 
 ```bash
+conda env create -f environment.yml
+conda activate product-url-notebook
+python -m ipykernel install --user --name product-url-notebook --display-name "product-url-notebook"
+python -m playwright install chromium
 cp .env.example .env
-# Set SERPAPI_API_KEY and optional PCA_LLM_* values
-./scripts/start.sh --build
+jupyter lab
 ```
 
-Default addresses when available:
+Open either notebook and select the **product-url-notebook** kernel.
 
-- UI: `http://127.0.0.1:8501`
-- API health: `http://127.0.0.1:8788/health`
-- API docs: `http://127.0.0.1:8788/docs`
+Set this mandatory value in `.env`:
 
-The health endpoint exposes `acceptance_policy`, `acceptance_policy_module`, source priority and browser status.
-
-## API example
-
-```bash
-curl -X POST http://127.0.0.1:8788/v1/resolve \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "main_text": "MENSCH TÖTE DICH NICHT!",
-    "country_code": "CH",
-    "ean": "9783311706717",
-    "language_code": "de",
-    "feature_set": "toy"
-  }'
+```dotenv
+SERPAPI_API_KEY=<your-key>
 ```
 
-## Evidence artifacts
+The deterministic baseline is:
+
+```dotenv
+PRODUCT_URL_BROWSER_ENABLED=true
+PRODUCT_URL_BROWSER_REQUIRED=true
+PRODUCT_URL_REASONING_ENABLED=false
+PRODUCT_URL_REASONING_REQUIRED=false
+```
+
+PCA LLM reasoning is optional. When enabled, configure the `PCA_LLM_*` values in `.env.example`.
+
+## Input contract
+
+| Field | Required | Rule |
+|---|---:|---|
+| `main_text` | Yes | Vendor product description |
+| `country_code` | Yes | Two-letter country code |
+| `retailer_name` | No | Requested retailer; do not guess |
+| `ean` | No | EAN, GTIN, or ISBN; do not guess |
+| `language_code` | No | Two-letter language code |
+
+## Acceptance contract
+
+A final URL is delivered only when all mandatory gates pass:
+
+1. exact product and edition identity;
+2. supplied EAN, GTIN, or ISBN agreement when provided;
+3. direct product-detail page;
+4. durable canonical URL;
+5. rendered-browser accessibility;
+6. scrapable rendered product content;
+7. no identity or edition conflict.
+
+`REVIEW_REQUIRED` is allowed only after the URL itself passes every mandatory mapping gate. `FAILED` contains no delivered URL. `TECHNICAL_FAILURE` is reserved for an operational or configuration defect.
+
+## Evidence output
+
+Each row writes:
 
 ```text
 data/artifacts/<row_id>/
@@ -140,28 +120,33 @@ data/artifacts/<row_id>/
 └── browser/*.png
 ```
 
+The batch notebook also writes:
+
+```text
+data/results/product_urls.csv
+```
+
 ## Validation
 
 ```bash
 python -m pip install -e '.[dev]'
+python -m playwright install chromium
 ./scripts/validate_release.sh
 ```
 
-Release validation runs in this order:
+The release checks compile the Python package and notebook cells, validate the notebook schema, enforce the single acceptance-policy boundary, reject service infrastructure and monkey-patch references, and run the complete test suite.
 
-1. Python compilation;
-2. JSON, shell and Docker Compose validation;
-3. canonical architecture guard;
-4. acceptance-contract regression suite;
-5. complete test suite;
-6. legacy and monkey-patch reference rejection.
+## Core modules
 
-CI runs the full sequence on Python 3.10, 3.11 and 3.12.
+| Module | Responsibility |
+|---|---|
+| `interpretation.py` | Product identity signals and hypotheses |
+| `search.py` | Bounded SerpAPI discovery |
+| `acquisition.py` | HTTP and structured product evidence |
+| `browser.py` | Local Playwright rendering without event-loop patches |
+| `evaluation.py` | Candidate evidence production |
+| `policy.py` | The only final URL acceptance and ranking policy |
+| `orchestrator.py` | Straight sequential execution |
+| `artifacts.py` | JSON, CSV, Markdown, and screenshot evidence |
 
-## Documentation
-
-- [Canonical acceptance contract](docs/ACCEPTANCE_CONTRACT.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Human-review UI](docs/UI_REVIEW.md)
-- [Operations](docs/OPERATIONS.md)
-- [Release gates](docs/RELEASE.md)
+See `notebooks/README.md` for the exact notebook workflow.

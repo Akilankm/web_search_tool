@@ -1,3 +1,4 @@
+import os
 import sys
 from types import ModuleType, SimpleNamespace
 
@@ -60,20 +61,35 @@ def test_reasoner_refines_hypotheses_but_rejects_invented_identifiers() -> None:
 
     assert result.strongest("model").value == "ME04"
     assert "9999999999999" not in result.values("ean")
-    assert any(item.attributes.get("pack_configuration") == "SINGLE_PACK" for item in result.hypotheses)
+    assert any(
+        item.attributes.get("pack_configuration") == "SINGLE_PACK"
+        for item in result.hypotheses
+    )
     assert client.completions.last_kwargs["model"] == "fixture-deployment"
 
 
-def test_pca_environment_values_take_precedence(monkeypatch) -> None:
-    monkeypatch.setenv("PCA_LLM_API_KEY", "pca-key")
-    monkeypatch.setenv("PCA_LLM_API_VERSION", "2024-10-21")
-    monkeypatch.setenv("PCA_LLM_ENDPOINT", "https://pca.example")
-    monkeypatch.setenv("PCA_LLM_DEPLOYMENT", "pca-deployment")
-    monkeypatch.setenv("PCA_LLM_CONSUMER_ID", "pca-consumer")
-    monkeypatch.setenv("LLM_API_KEY", "generic-key")
-    monkeypatch.setenv("LLM_MODEL", "generic-model")
-
-    settings = ReasoningSettings.from_runtime(ReasoningConfig(enabled=True, required=True))
+def test_pca_environment_values_take_precedence() -> None:
+    values = {
+        "PCA_LLM_API_KEY": "pca-key",
+        "PCA_LLM_API_VERSION": "2024-10-21",
+        "PCA_LLM_ENDPOINT": "https://pca.example",
+        "PCA_LLM_DEPLOYMENT": "pca-deployment",
+        "PCA_LLM_CONSUMER_ID": "pca-consumer",
+        "LLM_API_KEY": "generic-key",
+        "LLM_MODEL": "generic-model",
+    }
+    previous = {name: os.environ.get(name) for name in values}
+    try:
+        os.environ.update(values)
+        settings = ReasoningSettings.from_runtime(
+            ReasoningConfig(enabled=True, required=True)
+        )
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
     assert settings.api_key == "pca-key"
     assert settings.api_version == "2024-10-21"
@@ -83,7 +99,7 @@ def test_pca_environment_values_take_precedence(monkeypatch) -> None:
     assert settings.default_headers == {"X-NIQ-CIS-Consumer": "pca-consumer"}
 
 
-def test_azure_client_uses_enterprise_contract(monkeypatch) -> None:
+def test_azure_client_uses_enterprise_contract() -> None:
     captured = {}
 
     class FakeAzureOpenAI:
@@ -95,18 +111,32 @@ def test_azure_client_uses_enterprise_contract(monkeypatch) -> None:
     openai_module.AzureOpenAI = FakeAzureOpenAI
     httpx_module = ModuleType("httpx")
     httpx_module.Timeout = lambda **kwargs: ("timeout", kwargs)
-    monkeypatch.setitem(sys.modules, "openai", openai_module)
-    monkeypatch.setitem(sys.modules, "httpx", httpx_module)
 
-    product = ProductInput("P2", "PKM ME04 WACHSENDES CHAOS BOOSTER", "CH")
-    deterministic = DeterministicProductInterpreter().interpret(product)
-    StructuredIdentityReasoner(_settings()).refine(product, deterministic)
+    previous_openai = sys.modules.get("openai")
+    previous_httpx = sys.modules.get("httpx")
+    try:
+        sys.modules["openai"] = openai_module
+        sys.modules["httpx"] = httpx_module
+        product = ProductInput("P2", "PKM ME04 WACHSENDES CHAOS BOOSTER", "CH")
+        deterministic = DeterministicProductInterpreter().interpret(product)
+        StructuredIdentityReasoner(_settings()).refine(product, deterministic)
+    finally:
+        if previous_openai is None:
+            sys.modules.pop("openai", None)
+        else:
+            sys.modules["openai"] = previous_openai
+        if previous_httpx is None:
+            sys.modules.pop("httpx", None)
+        else:
+            sys.modules["httpx"] = previous_httpx
 
     assert captured["api_key"] == "fixture-key"
     assert captured["api_version"] == "2024-10-21"
     assert captured["azure_endpoint"] == "https://fixture.example"
     assert captured["azure_deployment"] == "fixture-deployment"
-    assert captured["default_headers"] == {"X-NIQ-CIS-Consumer": "fixture-consumer"}
+    assert captured["default_headers"] == {
+        "X-NIQ-CIS-Consumer": "fixture-consumer"
+    }
 
 
 def test_required_reasoning_rejects_incomplete_pca_configuration() -> None:
