@@ -27,6 +27,21 @@ FORBIDDEN_RUNTIME_OPTION_FRAGMENTS = {
     '"reasoning_enabled":',
     '"reasoning_required":',
 }
+REQUIRED_OUTPUT_COLUMNS = {
+    "MAIN_TEXT",
+    "COUNTRY",
+    "RETAILER",
+    "EAN",
+    "PROP_PG_NAME",
+    "CANDIDATE_URLS",
+    "PRODUCT_URL",
+    "CONFIDENCE",
+    "VALIDATION_STATUS",
+    "IDENTITY_STATUS",
+    "RETAILER_CHECK",
+    "JUSTIFICATION",
+    "ARTIFACT_DIR",
+}
 
 
 def main() -> int:
@@ -57,6 +72,14 @@ def main() -> int:
             raise SystemExit(
                 f"{path}: runtime modes must come from .env/config, not notebook options: "
                 f"{duplicated_modes}"
+            )
+
+        missing_output_columns = sorted(
+            column for column in REQUIRED_OUTPUT_COLUMNS if column not in code_source
+        )
+        if missing_output_columns:
+            raise SystemExit(
+                f"{path}: missing required submission columns: {missing_output_columns}"
             )
 
         if "ProductURLOrchestrator" not in combined:
