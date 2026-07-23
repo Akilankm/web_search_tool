@@ -71,10 +71,9 @@ class PageAcquirer:
                 if progress:
                     progress("PAGE_FETCHED", page_evidence_summary(evidence))
 
-        # Acquisition is a bounded evidence operation, not an admission gate.
-        # Candidates outside the HTTP budget remain first-class URL candidates
-        # with explicit NOT_ASSESSED page evidence so delivery can still return
-        # their original product-like URL for human review.
+        # Candidates outside the bounded acquisition budget remain visible for
+        # audit and later recovery, but they cannot become final mappings until
+        # page and browser evidence are actually collected.
         for item in candidates:
             if item.url in selected_urls:
                 continue
@@ -228,19 +227,30 @@ def product_fields(evidence: PageEvidence) -> dict[str, str]:
     output: dict[str, str] = {}
     for product in evidence.jsonld_products:
         _set(output, "product_name", product.get("name"))
-        brand = product.get("brand")
-        if isinstance(brand, Mapping):
-            brand = brand.get("name")
-        _set(output, "brand", brand)
-        for key in ("sku", "mpn", "gtin", "gtin8", "gtin12", "gtin13", "gtin14", "model", "color", "size"):
-            _set(output, key, product.get(key))
+        for entity_key in ("brand", "manufacturer", "publisher", "seller"):
+            entity = product.get(entity_key)
+            if isinstance(entity, Mapping):
+                entity = entity.get("name")
+            _set(output, entity_key, entity)
+        for key in (
+            "sku", "mpn", "gtin", "gtin8", "gtin12", "gtin13", "gtin14",
+            "ean", "isbn", "model", "color", "size", "productID",
+        ):
+            _set(output, key.casefold(), product.get(key))
         offers = product.get("offers")
         if isinstance(offers, Mapping):
             _set(output, "price", offers.get("price"))
             _set(output, "currency", offers.get("priceCurrency"))
             _set(output, "availability", offers.get("availability"))
+            seller = offers.get("seller")
+            if isinstance(seller, Mapping):
+                seller = seller.get("name")
+            _set(output, "seller", seller)
     _set(output, "product_name", evidence.metadata.get("og:title") or evidence.title)
     _set(output, "brand", evidence.metadata.get("product:brand"))
+    _set(output, "manufacturer", evidence.metadata.get("product:manufacturer"))
+    _set(output, "publisher", evidence.metadata.get("book:publisher"))
+    _set(output, "gtin13", evidence.metadata.get("product:retailer_item_id"))
     _set(output, "price", evidence.metadata.get("product:price:amount"))
     _set(output, "currency", evidence.metadata.get("product:price:currency"))
     return output
@@ -275,7 +285,7 @@ def _walk_products(value: Any) -> Iterable[dict[str, Any]]:
     if isinstance(value, Mapping):
         kind = value.get("@type")
         kinds = {str(item).casefold() for item in kind} if isinstance(kind, list) else {str(kind).casefold()}
-        if "product" in kinds:
+        if "product" in kinds or "book" in kinds:
             yield dict(value)
         for key, nested in value.items():
             if key != "@context":
