@@ -31,6 +31,15 @@ _LABELED_IDENTIFIER_PATTERN = re.compile(
     r"(?:ean|isbn(?:-13)?|gtin(?:-8|-12|-13|-14)?)[^0-9]{0,16}(\d{8}|\d{12,14})",
     re.I,
 )
+_ENTITY_LABEL_PATTERN = re.compile(
+    r"(?:manufacturer|hersteller|publisher|brand|marke)\s*[:\-]?\s*"
+    r"([A-ZÄÖÜ][A-Za-zÀ-ÖØ-öø-ÿ0-9&.'’\- ]{1,70})",
+)
+_ENTITY_STOP_PATTERN = re.compile(
+    r"\b(?:ean|isbn|gtin|price|preis|format|product|produkt|publication|published|"
+    r"erscheinung|seiten|pages|download|lieferbar|availability|in den warenkorb|add to cart)\b",
+    re.I,
+)
 
 
 def assess_candidate(
@@ -77,7 +86,8 @@ def assess_candidate(
         product=product,
         identity=identity,
         exact_identifier_verified=exact_identifier_verified,
-        page=page,
+        page_fetch_status=page.fetch_status,
+        page_fetch_error=page.fetch_error,
         browser_access=browser_access,
         extractable=extractable,
         coding=coding,
@@ -102,6 +112,10 @@ def assess_candidate(
         "page_fetch_status": page.fetch_status.value,
         "page_fetch_error": page.fetch_error,
         "delivery_basis": "page_evidence" if page.fetch_status is GateStatus.PASS else "discovery_only",
+        "source_role_evidence": {
+            "domain": domain,
+            "labeled_entities": _labeled_entity_names(page_text),
+        },
     }
 
     candidate = CandidateAssessment(
@@ -138,7 +152,7 @@ def apply_browser_evidence(
     browser: BrowserEvidence,
     config: RuntimeConfig,
 ) -> CandidateAssessment:
-    """Merge rendered-page evidence and recompute identity/page gates."""
+    """Merge rendered evidence and recompute all evidence affected by the final page."""
 
     browser_final = browser.final_url or candidate.url
     final_product_like = is_product_like_url(browser_final)
@@ -185,23 +199,33 @@ def apply_browser_evidence(
             direct_score = min(1.0, max(direct_score, 0.70))
     direct_gate = GateStatus.PASS if direct_score >= config.decision.minimum_direct_page_score else GateStatus.FAIL
 
-    warnings = [
-        item
-        for item in candidate.warnings
-        if not item.startswith("Rendered browser")
-        and not item.startswith("Automation browser")
-        and not item.startswith("Exact identifier")
-    ]
-    if browser_access is not GateStatus.PASS:
-        warnings.append("Rendered browser could not confirm that a human-usable product page opens.")
-    if product.ean and not exact_identifier_verified:
-        warnings.append(f"Exact identifier {product.ean} was not found in the rendered product content.")
-
     final_url = browser_final if browser_access is GateStatus.PASS and final_product_like else candidate.url
     final_domain = (urlparse(final_url).hostname or "").lower().removeprefix("www.")
+    country = _country_gate(product, final_domain, combined_text)
+    retailer = _retailer_gate(product, final_domain, combined_text)
+    source_role, authority = _source_role(product, interpretation, final_domain, combined_text, fields)
+
+    warnings = _candidate_warnings(
+        product=product,
+        identity=identity,
+        exact_identifier_verified=exact_identifier_verified,
+        page_fetch_status=GateStatus.PASS if browser_access is GateStatus.PASS else GateStatus.FAIL,
+        page_fetch_error=browser.error,
+        browser_access=browser_access,
+        extractable=text_extractable,
+        coding=candidate.coding_evidence_complete,
+        country=country,
+        retailer=retailer,
+    )
+
     evidence = dict(candidate.evidence) | identity_evidence | {
         "exact_identifier_verified": exact_identifier_verified,
         "delivery_basis": "rendered_product_evidence" if browser_access is GateStatus.PASS else "rejected_browser_evidence",
+        "source_role_evidence": {
+            "domain": final_domain,
+            "labeled_entities": _labeled_entity_names(combined_text),
+            "recomputed_after_browser": True,
+        },
         "browser": {
             "final_url": browser.final_url,
             "title": browser.title,
@@ -216,11 +240,15 @@ def apply_browser_evidence(
         candidate,
         url=final_url,
         domain=final_domain,
+        source_role=source_role,
+        source_authority=authority,
         identity_match=identity,
         identity_confidence=support,
         direct_product_page=direct_gate,
         direct_page_score=direct_score,
         durable_url=durable,
+        country_match=country,
+        retailer_match=retailer,
         browser_access=browser_access,
         text_extractable=text_extractable,
         evidence=evidence,
@@ -409,6 +437,7 @@ def _source_role(
         fields.get("brand", ""),
         fields.get("manufacturer", ""),
         fields.get("publisher", ""),
+        *_labeled_entity_names(text),
     ]
     brand_signal = interpretation.strongest("brand")
     if brand_signal:
@@ -438,7 +467,8 @@ def _candidate_warnings(
     product: ProductInput,
     identity: IdentityMatch,
     exact_identifier_verified: bool,
-    page: PageEvidence,
+    page_fetch_status: GateStatus,
+    page_fetch_error: str,
     browser_access: GateStatus,
     extractable: GateStatus,
     coding: GateStatus,
@@ -449,9 +479,9 @@ def _candidate_warnings(
     if identity is not IdentityMatch.EXACT:
         warnings.append("Exact product identity has not yet passed.")
     if product.ean and not exact_identifier_verified:
-        warnings.append(f"Exact identifier {product.ean} is absent from acquired page evidence.")
-    if page.fetch_status is not GateStatus.PASS:
-        warnings.append(f"Page acquisition did not pass: {page.fetch_error or page.fetch_status.value}.")
+        warnings.append(f"Exact identifier {product.ean} is absent from final product evidence.")
+    if page_fetch_status is not GateStatus.PASS:
+        warnings.append(f"Page acquisition or rendering did not pass: {page_fetch_error or page_fetch_status.value}.")
     if browser_access is not GateStatus.PASS:
         warnings.append("Rendered browser accessibility has not passed.")
     if extractable is not GateStatus.PASS:
@@ -491,6 +521,16 @@ def _page_identifiers(text: str, fields: Mapping[str, str]) -> set[str]:
     values.update(match.group(1) for match in _LABELED_IDENTIFIER_PATTERN.finditer(text))
     values.update(match.group(1) for match in _IDENTIFIER_PATTERN.finditer(text))
     return values
+
+
+def _labeled_entity_names(text: str) -> list[str]:
+    values: list[str] = []
+    for match in _ENTITY_LABEL_PATTERN.finditer(text):
+        candidate = _ENTITY_STOP_PATTERN.split(match.group(1), maxsplit=1)[0]
+        candidate = " ".join(candidate.strip(" :-|,.;").split())
+        if 2 <= len(candidate) <= 60:
+            values.append(candidate)
+    return list(dict.fromkeys(values))
 
 
 def _domain_matches_entity(domain: str, names: Sequence[str]) -> bool:
