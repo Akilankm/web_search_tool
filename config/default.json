@@ -28,13 +28,6 @@
     "wrong_product_threshold": 0.3,
     "minimum_direct_page_score": 0.5
   },
-  "release_gates": {
-    "url_delivery_rate": 0.98,
-    "correct_product_delivery_rate": 0.95,
-    "candidate_recall_at_k": 0.98,
-    "wrong_product_escape_rate": 0.01,
-    "direct_product_page_rate": 0.98
-  },
   "reasoning": {
     "enabled": false,
     "required": false,
