@@ -1,88 +1,103 @@
-# Human-review UI and observable trace
+# Exact Product Mapping Console and observable trace
 
 ## Purpose
 
-The UI is a product URL delivery workbench for human coders. Its first responsibility is to show whether a usable direct URL was delivered. Evidence quality, identity confidence, browser behavior and coding readiness are secondary independent judgments.
+The UI is a product-mapping console for human coders and stakeholders. It answers one business question first:
 
-The workspace must not display a stakeholder-facing failure when non-conflicting product-like candidates exist. Incomplete evidence changes the delivery grade to `REVIEW_REQUIRED`; it does not erase the URL.
+> Did the submitted product map to exactly one accessible and scrapable direct URL?
 
-## Thinking mode
+Discovery candidates, search snippets and inaccessible pages are evidence, not successful mappings.
 
-The sidebar control **Thinking mode: live decision trace** enables real-time rendering of the `observable-decision-trace-v1` event stream.
+## Visual hierarchy
 
-The wording “thinking mode” is user-facing. The technical contract is intentionally narrower and auditable: it exposes observable evidence, hypotheses, gate outcomes and selection judgments. It does not expose or fabricate hidden chain-of-thought.
+The final screen presents:
+
+1. **Exact product mapped — Yes or No**
+2. **Supplied identifier verified — Yes or No**
+3. **Rendered browser opens — Yes or No**
+4. **Product content scrapable — Yes or No**
+5. **Selected source role**
+6. **One final direct URL**
+
+The interface uses a modern dark visual system, clear evidence cards, compact stage tracking and prominent success/failure states. A failed run does not display a discovery URL as though it were a business result.
+
+## Mapping contract banner
+
+The console permanently displays the four mandatory principles:
+
+- exact identity and edition;
+- manufacturer/publisher first, retailer fallback;
+- human-openable rendered page;
+- scrapable product content.
 
 ## Live stages
 
 | Stage | Reviewer visibility |
 |---|---|
-| Interpret | Input constraints, deterministic signals, PCA LLM hypotheses, unresolved discriminators |
-| Search | Credit number, engine, purpose, query, rationale, source results and admitted candidates |
-| Acquire | URL selection budget, fetch status, redirects, HTTP status, JSON-LD and text availability |
-| Evaluate | Identity, direct-page, durability, country, retailer, extraction and coding gates |
-| Browser | Allocation, browser access, final URL, product controls, screenshot and automation errors |
-| Deliver | Candidate ranking, strengths, risks, blockers, selected URL and decision reasons |
+| Interpret | Submitted text, country, retailer, EAN/GTIN/ISBN, exact signals and unresolved variants |
+| Search | Identifier-locked manufacturer, country-retailer and global recovery queries |
+| Acquire | HTTP status, final URL, redirects, content type, JSON-LD Product/Book and visible text |
+| Evaluate | Exact identifier, conflicting identifiers, direct-page, durability and source role |
+| Browser | Rendered HTTP result, final URL, title, product text, controls, errors and screenshot |
+| Deliver | Final mapping eligibility, manufacturer-first ranking and one selected URL |
 
-## Stakeholder hierarchy
+## Candidate proof table
 
-The final screen presents outcomes in this order:
+Every candidate row exposes:
 
-1. **URL delivered — Yes or No**
-2. **Selected direct product URL**
-3. **Delivery grade — Verified or Review Required**
-4. **Identity evidence confidence**
-5. **Candidate, source, browser and coding evidence**
+- selected;
+- final mapping eligible;
+- source role;
+- exact identity;
+- identifier verified;
+- browser accessible;
+- scrapable;
+- direct product page;
+- durable URL;
+- country and retailer alignment;
+- coding completeness;
+- conflicts and URL.
 
-A 0% automated identity-evidence score is not displayed as an overall system failure when a usable URL is delivered. It means the URL requires human identity confirmation.
+A candidate that fails any mandatory gate is marked discovery-only.
 
-## Final workspace
+## Terminal states
 
-The final result is divided into six tabs:
+### Verified
 
-1. **Decision** — selected URL, delivery grade, reasons, warnings and selected-candidate gates.
-2. **Candidate evidence** — side-by-side candidates, delivery basis, structured fields, strengths, risks and blockers.
-3. **Identity & hypotheses** — signals, evidence source, hypotheses, probabilities and unresolved discriminators.
-4. **Search sources** — every paid action and retained source observation.
-5. **Browser usability** — browser status, final URL, controls, errors and screenshots.
-6. **Audit & export** — complete trace, result JSON, candidate CSV and artifact directory.
+The exact product, supplied identifier, direct page, durable URL, rendered-browser access, scrapable text and downstream coding evidence all pass.
+
+### Review required
+
+The exact product URL is already accessible and scrapable. Review is limited to secondary fields such as coding completeness, country confidence or requested-retailer alignment.
+
+### Failed
+
+No URL satisfied the complete mapping contract. The console shows why each discovery candidate was rejected rather than presenting a false success.
+
+### Technical failure
+
+A configuration, dependency or runtime defect prevented a valid campaign.
 
 ## Reliability rules
 
-- A non-conflicting product-like candidate must be delivered.
-- Missing identity support is `UNVERIFIED`, not `MISMATCH`.
-- `NOT_ASSESSED` is displayed as unknown, never as failure.
-- Browser automation failure is not labeled as human URL failure.
-- Acquisition failure does not erase the original product-like search URL.
-- A redirect to a homepage, consent page or login page does not replace the original product URL.
-- Missing coding fields do not erase a valid direct product URL.
-- Explicit EAN/model conflicts remain hard blockers.
-- Homepages, categories, search pages and intermediary URLs cannot be selected.
-- The selected candidate is visually distinguished, but rejected candidates remain visible.
-- Evidence screenshots are mounted read-only into the UI container.
+- Search snippets never prove final identity.
+- A supplied EAN/GTIN/ISBN must be present in acquired or rendered product content.
+- A conflicting identifier in page data or the URL path blocks selection.
+- HTTP failure blocks selection.
+- Browser failure blocks selection.
+- Empty or non-product rendered content blocks selection.
+- Redirects to homepages, search, category, login or consent pages block selection.
+- Tracking parameters are removed from canonical URLs.
+- Manufacturer priority applies only to the same exact product edition.
+- Rejected candidates remain visible for audit and recovery.
+- Screenshots are mounted read-only into the UI container.
 
-## API contract
+## Observable trace API
 
 ```text
 GET /v1/jobs/{job_id}/trace?after_sequence=<n>
 ```
 
-Response fields:
+Each event contains a monotonically increasing sequence, stage, event type, reviewer-readable message and structured details. The final result artifact contains the complete trace for replay and audit.
 
-- `trace_contract`
-- `notice`
-- `status`
-- `stage`
-- `message`
-- `event_count`
-- `last_event_sequence`
-- `events`
-
-Each event contains:
-
-- monotonically increasing `sequence`;
-- `stage`;
-- `event_type`;
-- reviewer-readable `message`;
-- structured `details`.
-
-The final result artifact contains the complete event sequence so the UI trace can be replayed after execution.
+The trace exposes observable evidence and gate outcomes. It does not expose or fabricate hidden chain-of-thought.
