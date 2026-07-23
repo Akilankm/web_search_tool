@@ -46,6 +46,21 @@ def test_exact_candidate_fixture() -> None:
     assert not candidate["blockers"]
 
 
+def test_pca_environment_contract_is_consistent() -> None:
+    paths = [ROOT / ".env.example", ROOT / "README.md", ROOT / "src/product_url/resolver.py"]
+    text = "\n".join(path.read_text(encoding="utf-8") for path in paths)
+    assert "PCA_LMM" not in text
+    for name in (
+        "PCA_LLM_API_KEY",
+        "PCA_LLM_API_VERSION",
+        "PCA_LLM_ENDPOINT",
+        "PCA_LLM_DEPLOYMENT",
+        "PCA_LLM_CONSUMER_ID",
+        "PCA_LLM_MAX_RETRIES",
+    ):
+        assert name in text
+
+
 def test_notebooks_are_plain_and_compilable() -> None:
     forbidden = ("streamlit", "fastapi", "docker", "nest_asyncio", "monkeypatch", "asyncio.run")
     notebooks = sorted((ROOT / "notebooks").glob("*.ipynb"))
