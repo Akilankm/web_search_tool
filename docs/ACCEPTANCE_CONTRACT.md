@@ -1,77 +1,65 @@
 # Canonical product URL acceptance contract
 
-## Purpose
+## Authority
 
-The resolver has one authoritative business decision: whether a discovered candidate may be delivered as the final product URL.
+`src/product_url_v2/policy.py` is the only authoritative final URL decision module.
 
-That decision is implemented only in:
+The notebook, search, acquisition, browser, evaluation, trace, and artifact layers cannot independently declare a candidate successful.
 
-```text
-src/product_url_v2/policy.py
-```
+## Mandatory gates
 
-No model, evaluator, browser allocator, trace renderer, UI component, or test may independently reconstruct acceptance.
+A candidate is eligible only when all gates pass:
 
-## Mandatory final gates
+| Gate | Required result |
+|---|---|
+| Exact identity | `EXACT` |
+| Supplied identifier | Verified, or `NOT_REQUIRED` when absent |
+| Direct product page | `PASS` |
+| Durable URL | `PASS` |
+| Rendered browser | `PASS` |
+| Scrapable rendered content | `PASS` |
+| Identity conflicts | None |
 
-A candidate can be delivered only when all mandatory gates pass:
+## Terminal statuses
 
-1. exact product identity;
-2. supplied EAN, GTIN, or ISBN verified when present;
-3. direct product-detail page;
-4. durable canonical URL;
-5. rendered-browser accessibility;
-6. scrapable rendered product content;
-7. no identity, edition, or identifier conflicts.
+| Status | Meaning |
+|---|---|
+| `VERIFIED` | Mandatory gates and downstream coding evidence pass |
+| `REVIEW_REQUIRED` | Mandatory URL gates pass; only secondary evidence needs review |
+| `FAILED` | No candidate passes the mandatory URL contract |
+| `TECHNICAL_FAILURE` | An operational defect prevents a valid decision |
 
-Search snippets are discovery evidence only. They are never final identity proof.
+`FAILED` and `TECHNICAL_FAILURE` must not contain a selected URL.
 
 ## Source hierarchy
 
-Source priority is defined once in `policy.py`:
+After eligibility is established, source preference is:
 
 1. local manufacturer or publisher;
 2. global manufacturer or publisher;
 3. requested retailer;
 4. country retailer;
 5. global retailer;
-6. marketplace;
-7. unknown.
+6. marketplace.
 
-Source priority is applied only among candidates that already pass every mandatory final gate.
+Authority never overrides product identity. A manufacturer page for the wrong edition is rejected.
 
-## Pre-browser recovery
+## Browser evidence
 
-Browser allocation intentionally allows candidates whose page-only evidence is incomplete. JavaScript-rendered content may reveal the exact identifier, product controls, and product description.
+Local Playwright is mandatory by default. It runs directly inside the notebook process.
 
-The browser precheck rejects only explicit mismatch, transient URLs, non-product discovery results, and explicit conflicts. Missing page-only EAN evidence is not treated as a final blocker before rendering.
+The implementation does not use `nest_asyncio` or alter the Jupyter event loop. A dedicated worker thread owns the Playwright event loop when the notebook kernel already has one running.
 
-## Secondary review
+## Observable evidence
 
-`REVIEW_REQUIRED` is permitted only after the final URL is already an exact, accessible, and scrapable mapping. Secondary review may cover:
+The notebooks expose:
 
-- incomplete coding fields;
-- unconfirmed country alignment;
-- requested-retailer fallback.
+- submitted constraints;
+- extracted identity signals;
+- each paid search action;
+- candidate URLs and acquired evidence;
+- browser final URL and screenshot;
+- every acceptance gate;
+- final selection or rejection reasons.
 
-It is never used to return an inaccessible or uncertain discovery URL.
-
-## Architecture guard
-
-`scripts/check_architecture.py` fails the release when:
-
-- acceptance functions are defined outside `policy.py`;
-- source priority is defined outside `policy.py`;
-- legacy ad hoc blocker state is reintroduced;
-- legacy mapping-eligibility properties are reintroduced in data models.
-
-## Release order
-
-Every release must pass, in this order:
-
-1. Python compilation;
-2. JSON, shell, and Docker Compose validation;
-3. canonical architecture guard;
-4. acceptance contract test suite;
-5. complete unit and integration suite;
-6. legacy-reference rejection.
+This is an observable decision trace, not hidden chain-of-thought.
