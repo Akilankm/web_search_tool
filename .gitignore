@@ -2,12 +2,6 @@
 .venv/
 __pycache__/
 .ipynb_checkpoints/
-.pytest_cache/
-.coverage
-htmlcov/
-data/artifacts/
-data/results/
+data/
 *.pyc
-*.pyo
-*.pyd
 .DS_Store
