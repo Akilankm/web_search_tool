@@ -18,7 +18,7 @@ FORBIDDEN_CODE = {
     "streamlit",
     "fastapi",
     "docker compose",
-    "product_url_v2.api",
+    "product_url_v2." + "api",
     "browser" + "_service",
 }
 
