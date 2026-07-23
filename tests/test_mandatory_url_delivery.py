@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from product_url_v2.config import RuntimeConfig
-from product_url_v2.evaluation import apply_browser_evidence, assess_candidate, choose_delivery
+from product_url_v2.evaluation import apply_browser_evidence, assess_candidate
 from product_url_v2.interpretation import DeterministicProductInterpreter
 from product_url_v2.models import (
     BrowserEvidence,
@@ -14,6 +14,7 @@ from product_url_v2.models import (
     SearchResult,
     SourceRole,
 )
+from product_url_v2.policy import browser_precheck, choose_delivery, evaluate_acceptance
 from product_url_v2.search import canonical_url
 
 EAN = "9783311706717"
@@ -60,8 +61,8 @@ def _fully_mapped_candidate(role: SourceRole, url: str, candidate_id: str) -> Ca
         evidence={
             "required_identifier": EAN,
             "exact_identifier_verified": True,
-            "hard_url_blockers": [],
-            "delivery_basis": "rendered_exact_product_page",
+            "delivery_basis": "rendered_product_evidence",
+            "search_product_like": True,
         },
     )
 
@@ -78,10 +79,11 @@ def test_schreiber_conflicting_identifier_and_inaccessible_page_is_rejected() ->
     page = _page(url, "", status=GateStatus.FAIL, error="HTTP 503")
 
     candidate = assess_candidate(product, interpretation, search, page, {}, RuntimeConfig())
+    verdict = evaluate_acceptance(candidate)
     decision = choose_delivery((candidate,))
 
     assert "srsltid" not in candidate.url
-    assert candidate.mapping_eligible is False
+    assert verdict.eligible is False
     assert candidate.identity_match is IdentityMatch.MISMATCH
     assert any("URL identifier conflict" in conflict for conflict in candidate.conflicts)
     assert decision.status is DeliveryStatus.FAILED
@@ -112,10 +114,12 @@ def test_exact_exlibris_ebook_page_is_selected_after_browser_validation() -> Non
         product_controls=("In den Warenkorb",),
     )
     candidate = apply_browser_evidence(product, interpretation, candidate, browser, RuntimeConfig())
+    verdict = evaluate_acceptance(candidate)
     decision = choose_delivery((candidate,))
 
     assert candidate.exact_identifier_verified is True
-    assert candidate.mapping_eligible is True
+    assert verdict.eligible is True
+    assert candidate.source_role is SourceRole.COUNTRY_RETAILER
     assert decision.status in {DeliveryStatus.VERIFIED, DeliveryStatus.REVIEW_REQUIRED}
     assert decision.selected_url == url
 
@@ -132,7 +136,7 @@ def test_print_manufacturer_page_does_not_match_supplied_ebook_ean() -> None:
     candidate = assess_candidate(product, interpretation, search, page, {}, RuntimeConfig())
 
     assert candidate.identity_match is IdentityMatch.MISMATCH
-    assert candidate.mapping_eligible is False
+    assert evaluate_acceptance(candidate).eligible is False
     assert any(print_ean in conflict for conflict in candidate.conflicts)
 
 
@@ -169,7 +173,7 @@ def test_browser_failure_blocks_delivery_even_when_http_page_has_exact_ean() -> 
         RuntimeConfig(),
     )
 
-    assert candidate.mapping_eligible is False
+    assert evaluate_acceptance(candidate).eligible is False
     assert choose_delivery((candidate,)).selected_url is None
 
 
@@ -184,7 +188,52 @@ def test_search_snippet_cannot_substitute_for_exact_page_evidence() -> None:
 
     assert candidate.exact_identifier_verified is False
     assert candidate.identity_match is not IdentityMatch.EXACT
-    assert candidate.mapping_eligible is False
+    assert evaluate_acceptance(candidate).eligible is False
+
+
+def test_browser_can_recover_identity_from_javascript_rendered_content() -> None:
+    url = "https://retailer.example/product/mensch-toete-dich-nicht/id/9783311706717"
+    product = ProductInput("BOOK-JS", TITLE, "CH", ean=EAN, language_code="de")
+    interpretation = DeterministicProductInterpreter().interpret(product)
+    search = SearchResult(url, TITLE, EAN, "fixture", "google", EAN, 1, True)
+    failed_http_page = _page(url, "", status=GateStatus.FAIL, error="HTTP 403")
+    candidate = assess_candidate(product, interpretation, search, failed_http_page, {}, RuntimeConfig())
+
+    assert browser_precheck(candidate) is True
+
+    rendered = BrowserEvidence(
+        url=url,
+        access=GateStatus.PASS,
+        final_url=url,
+        title=TITLE,
+        visible_text=f"{TITLE} Philipp Gurt EAN {EAN} E-Book Produktdetails In den Warenkorb",
+        product_controls=("In den Warenkorb",),
+    )
+    candidate = apply_browser_evidence(product, interpretation, candidate, rendered, RuntimeConfig())
+
+    assert evaluate_acceptance(candidate).eligible is True
+
+
+def test_search_purpose_cannot_promote_a_retailer_to_manufacturer() -> None:
+    url = "https://www.exlibris.ch/de/buecher-buch/e-books/id/9783311706717"
+    product = ProductInput("BOOK-SOURCE", TITLE, "CH", ean=EAN, language_code="de")
+    interpretation = DeterministicProductInterpreter().interpret(product)
+    search = SearchResult(
+        url,
+        TITLE,
+        EAN,
+        "google:organic:EXACT_IDENTIFIER_MANUFACTURER",
+        "google",
+        EAN,
+        1,
+        True,
+    )
+    text = f"{TITLE} EAN {EAN} Verlag Kampa Produktdetails Preis"
+    page = _page(url, text, ({"@type": "Book", "name": TITLE, "isbn": EAN, "publisher": {"name": "Kampa Verlag"}},))
+
+    candidate = assess_candidate(product, interpretation, search, page, {}, RuntimeConfig())
+
+    assert candidate.source_role is SourceRole.COUNTRY_RETAILER
 
 
 def test_inaccessible_candidates_remain_audit_evidence_not_final_mapping() -> None:
@@ -210,7 +259,7 @@ def test_inaccessible_candidates_remain_audit_evidence_not_final_mapping() -> No
             evidence={
                 "required_identifier": EAN,
                 "exact_identifier_verified": True,
-                "hard_url_blockers": ["Selected URL did not pass rendered-browser accessibility."],
+                "search_product_like": True,
             },
         )
         for index in range(1, 8)
