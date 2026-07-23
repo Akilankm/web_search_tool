@@ -2,9 +2,9 @@
 
 ## Purpose
 
-The UI is a product-mapping console for human coders and stakeholders. It answers one business question first:
+The UI answers one business question first:
 
-> Did the submitted product map to exactly one accessible and scrapable direct URL?
+> Did the submitted product pass the canonical policy and map to exactly one accessible, scrapable direct URL?
 
 Discovery candidates, search snippets and inaccessible pages are evidence, not successful mappings.
 
@@ -12,83 +12,87 @@ Discovery candidates, search snippets and inaccessible pages are evidence, not s
 
 The final screen presents:
 
-1. **Exact product mapped — Yes or No**
-2. **Supplied identifier verified — Yes or No**
-3. **Rendered browser opens — Yes or No**
-4. **Product content scrapable — Yes or No**
-5. **Selected source role**
-6. **One final direct URL**
+1. exact product mapped;
+2. supplied identifier verified;
+3. rendered browser accessibility;
+4. product content scrapability;
+5. selected source role;
+6. one final direct URL.
 
-The interface uses a modern dark visual system, clear evidence cards, compact stage tracking and prominent success/failure states. A failed run does not display a discovery URL as though it were a business result.
+The active `acceptance_policy` and `acceptance_policy_module` are shown in the sidebar. Candidate tables are produced from the same canonical verdict used by the API and orchestrator.
 
-## Mapping contract banner
+## Contract banner
 
-The console permanently displays the four mandatory principles:
+The console permanently presents:
 
 - exact identity and edition;
-- manufacturer/publisher first, retailer fallback;
-- human-openable rendered page;
+- supplied identifier agreement;
+- browser-accessible direct page;
 - scrapable product content.
+
+Manufacturer or publisher priority is applied only after these gates pass.
 
 ## Live stages
 
 | Stage | Reviewer visibility |
 |---|---|
-| Interpret | Submitted text, country, retailer, EAN/GTIN/ISBN, exact signals and unresolved variants |
-| Search | Identifier-locked manufacturer, country-retailer and global recovery queries |
-| Acquire | HTTP status, final URL, redirects, content type, JSON-LD Product/Book and visible text |
-| Evaluate | Exact identifier, conflicting identifiers, direct-page, durability and source role |
-| Browser | Rendered HTTP result, final URL, title, product text, controls, errors and screenshot |
-| Deliver | Final mapping eligibility, manufacturer-first ranking and one selected URL |
+| Interpret | Submitted constraints, exact signals and unresolved variants |
+| Search | Identifier-locked manufacturer, retailer and global queries |
+| Acquire | HTTP status, redirects, content type and structured data |
+| Evaluate | Page identity, identifiers, direct-page evidence and source role |
+| Browser | Rendered final URL, title, product text, controls, errors and screenshot |
+| Deliver | `product-url-acceptance-v1`, source-priority ranking and selected URL |
 
 ## Candidate proof table
 
-Every candidate row exposes:
+Every row exposes:
 
 - selected;
-- final mapping eligible;
+- canonical mapping eligibility;
+- acceptance policy;
 - source role;
 - exact identity;
-- identifier verified;
-- browser accessible;
-- scrapable;
-- direct product page;
-- durable URL;
-- country and retailer alignment;
-- coding completeness;
+- identifier verification;
+- browser accessibility;
+- scrapability;
+- direct-page and durability gates;
+- secondary country, retailer and coding gates;
+- canonical blockers;
 - conflicts and URL.
 
-A candidate that fails any mandatory gate is marked discovery-only.
+The UI does not independently calculate acceptance.
 
 ## Terminal states
 
 ### Verified
 
-The exact product, supplied identifier, direct page, durable URL, rendered-browser access, scrapable text and downstream coding evidence all pass.
+Every mandatory gate and downstream coding evidence pass, with no secondary review reason.
 
 ### Review required
 
-The exact product URL is already accessible and scrapable. Review is limited to secondary fields such as coding completeness, country confidence or requested-retailer alignment.
+Every mandatory mapping gate passes. Review is limited to secondary coding, country or requested-retailer evidence.
 
 ### Failed
 
-No URL satisfied the complete mapping contract. The console shows why each discovery candidate was rejected rather than presenting a false success.
+No candidate passes the canonical acceptance contract. Discovery candidates remain visible without being presented as successful mappings.
 
 ### Technical failure
 
-A configuration, dependency or runtime defect prevented a valid campaign.
+A configuration, dependency or runtime defect prevents a valid decision.
 
 ## Reliability rules
 
 - Search snippets never prove final identity.
-- A supplied EAN/GTIN/ISBN must be present in acquired or rendered product content.
-- A conflicting identifier in page data or the URL path blocks selection.
-- HTTP failure blocks selection.
-- Browser failure blocks selection.
-- Empty or non-product rendered content blocks selection.
-- Redirects to homepages, search, category, login or consent pages block selection.
-- Tracking parameters are removed from canonical URLs.
+- A supplied EAN, GTIN or ISBN must be present in acquired or rendered product evidence.
+- Conflicting product, edition or identifier evidence blocks selection.
+- Static HTTP failure may proceed to browser recovery when the URL is product-like and no explicit conflict exists.
+- Browser failure blocks final selection.
+- Empty or non-product rendered content blocks final selection.
+- Redirects to homepages, search, category, login or consent pages block final selection.
+- Tracking parameters are removed during canonicalization.
+- Search purpose cannot change source authority.
 - Manufacturer priority applies only to the same exact product edition.
+- Warning text cannot change business status.
 - Rejected candidates remain visible for audit and recovery.
 - Screenshots are mounted read-only into the UI container.
 
@@ -100,4 +104,4 @@ GET /v1/jobs/{job_id}/trace?after_sequence=<n>
 
 Each event contains a monotonically increasing sequence, stage, event type, reviewer-readable message and structured details. The final result artifact contains the complete trace for replay and audit.
 
-The trace exposes observable evidence and gate outcomes. It does not expose or fabricate hidden chain-of-thought.
+The trace exposes observable evidence and policy gate outcomes. It does not expose or fabricate hidden chain-of-thought.

@@ -15,10 +15,10 @@ from product_url_v2.browser import BrowserClient
 from product_url_v2.config import RuntimeConfig, load_config
 from product_url_v2.models import ProductInput, RunEvent, to_jsonable
 from product_url_v2.orchestrator import ProductURLOrchestrator
+from product_url_v2.policy import ACCEPTANCE_POLICY_VERSION, SOURCE_PRIORITY
 from product_url_v2.trace import TRACE_CONTRACT, TRACE_NOTICE
 
-VERSION = "1.2.0"
-URL_DELIVERY_POLICY = "exact-accessible-scrapable-mapping-v3"
+VERSION = "1.3.0"
 TERMINAL_JOB_STATUSES = {"COMPLETED", "REVIEW_REQUIRED", "FAILED", "TECHNICAL_FAILURE"}
 
 
@@ -123,28 +123,17 @@ app = FastAPI(title="Exact Product Mapping Resolver", version=VERSION)
 @app.get("/health")
 def health() -> dict[str, Any]:
     browser = BrowserClient.from_env(CONFIG.browser).health()
+    source_priority = [
+        role
+        for role, _ in sorted(SOURCE_PRIORITY.items(), key=lambda item: item[1], reverse=True)
+    ]
     return {
         "status": "healthy",
         "version": VERSION,
         "runtime_contract": CONFIG.runtime_contract,
-        "url_delivery_policy": URL_DELIVERY_POLICY,
-        "mapping_contract": {
-            "one_product_one_url": True,
-            "manufacturer_first": True,
-            "retailer_fallback": True,
-            "supplied_identifier_must_match": True,
-            "browser_access_required": True,
-            "scrapable_product_text_required": True,
-            "search_snippet_is_not_identity_proof": True,
-        },
-        "source_priority": [
-            "LOCAL_MANUFACTURER",
-            "GLOBAL_MANUFACTURER",
-            "REQUESTED_RETAILER",
-            "COUNTRY_RETAILER",
-            "GLOBAL_RETAILER",
-            "MARKETPLACE",
-        ],
+        "acceptance_policy": ACCEPTANCE_POLICY_VERSION,
+        "acceptance_policy_module": "product_url_v2.policy",
+        "source_priority": source_priority,
         "trace_contract": TRACE_CONTRACT,
         "trace_notice": TRACE_NOTICE,
         "browser": browser,

@@ -3,7 +3,7 @@ from pathlib import Path
 from product_url_v2.acquisition import PageAcquirer
 from product_url_v2.api import Job, JobStore
 from product_url_v2.artifacts import ArtifactWriter
-from product_url_v2.config import AcquisitionConfig, RuntimeConfig
+from product_url_v2.config import RuntimeConfig
 from product_url_v2.interpretation import DeterministicProductInterpreter
 from product_url_v2.models import (
     CandidateAssessment,
@@ -17,6 +17,7 @@ from product_url_v2.models import (
     SearchResult,
     SourceRole,
 )
+from product_url_v2.policy import ACCEPTANCE_POLICY_VERSION
 from product_url_v2.search import InformationGainSearchPlanner
 from product_url_v2.trace import TRACE_CONTRACT, TRACE_NOTICE, candidate_judgment
 from product_url_v2.ui_presenter import merge_events, stage_rows
@@ -45,8 +46,8 @@ def _candidate(**changes):
             "matched_signals": ["model=ME04"],
             "required_identifier": "",
             "exact_identifier_verified": True,
-            "hard_url_blockers": [],
-            "delivery_basis": "rendered_exact_product_page",
+            "delivery_basis": "rendered_product_evidence",
+            "search_product_like": True,
         },
         "conflicts": (),
         "warnings": ("Some downstream coding fields are incomplete.",),
@@ -55,13 +56,15 @@ def _candidate(**changes):
     return CandidateAssessment(**values)
 
 
-def test_candidate_judgment_separates_strengths_risks_and_blockers() -> None:
+def test_candidate_judgment_uses_canonical_acceptance_policy() -> None:
     judgment = candidate_judgment(_candidate())
+
+    assert judgment["acceptance_policy"] == ACCEPTANCE_POLICY_VERSION
     assert judgment["mapping_eligible"] is True
     assert judgment["review_eligible"] is True
-    assert any("Direct product-page" in item for item in judgment["strengths"])
+    assert any("Direct product page passed" in item for item in judgment["strengths"])
     assert any("Rendered browser accessibility passed" in item for item in judgment["strengths"])
-    assert any("Coding-field coverage failed" in item for item in judgment["risks"])
+    assert any("coding" in item.casefold() for item in judgment["risks"])
     assert not judgment["blockers"]
 
 
@@ -69,8 +72,9 @@ def test_identity_mismatch_is_an_explicit_blocker() -> None:
     judgment = candidate_judgment(
         _candidate(identity_match=IdentityMatch.MISMATCH, identity_confidence=0.1)
     )
+
     assert judgment["review_eligible"] is False
-    assert any("different product" in item for item in judgment["blockers"])
+    assert any("Exact product identity" in item for item in judgment["blockers"])
 
 
 def test_trace_contract_excludes_hidden_chain_of_thought() -> None:

@@ -8,7 +8,7 @@ from product_url_v2.acquisition import PageAcquirer
 from product_url_v2.artifacts import ArtifactWriter
 from product_url_v2.browser import BrowserClient, select_browser_candidates
 from product_url_v2.config import RuntimeConfig, load_feature_set
-from product_url_v2.evaluation import apply_browser_evidence, assess_candidate, choose_delivery
+from product_url_v2.evaluation import apply_browser_evidence, assess_candidate
 from product_url_v2.interpretation import DeterministicProductInterpreter
 from product_url_v2.models import (
     DeliveryDecision,
@@ -20,6 +20,7 @@ from product_url_v2.models import (
     SearchObservation,
     to_jsonable,
 )
+from product_url_v2.policy import ACCEPTANCE_POLICY_VERSION, choose_delivery, evaluate_acceptance
 from product_url_v2.reasoning import ReasoningPort, ReasoningSettings, StructuredIdentityReasoner
 from product_url_v2.search import InformationGainSearchPlanner, SearchClient, SerpAPIClient
 from product_url_v2.trace import candidate_judgment, candidate_ranking, interpretation_summary
@@ -63,6 +64,7 @@ class ProductURLOrchestrator:
                 feature_set=product.feature_set,
                 reasoning_enabled=runtime.reasoning.enabled,
                 reasoning_required=runtime.reasoning.required,
+                acceptance_policy=ACCEPTANCE_POLICY_VERSION,
             )
             deterministic = DeterministicProductInterpreter().interpret(product)
             emit(
@@ -135,7 +137,7 @@ class ProductURLOrchestrator:
             emit(
                 PipelineStage.ACQUIRE,
                 "START",
-                "Acquiring page content to prove exact identity and scrapability.",
+                "Acquiring page content for identity, source and direct-page evidence.",
                 max_candidates=runtime.acquisition.max_candidates,
                 max_per_domain=runtime.acquisition.max_per_domain,
                 max_workers=runtime.acquisition.max_workers,
@@ -163,8 +165,9 @@ class ProductURLOrchestrator:
             emit(
                 PipelineStage.EVALUATE,
                 "START",
-                "Evaluating exact identity, direct-page evidence, durability and source hierarchy.",
+                "Producing candidate identity, page, durability and source evidence.",
                 candidate_count=len(campaign.candidates),
+                acceptance_policy=ACCEPTANCE_POLICY_VERSION,
             )
             assessed = []
             for search_result in campaign.candidates:
@@ -184,22 +187,16 @@ class ProductURLOrchestrator:
             emit(
                 PipelineStage.EVALUATE,
                 "COMPLETE",
-                f"Candidate evaluation completed for {len(candidates)} page(s).",
+                f"Candidate evidence evaluation completed for {len(candidates)} page(s).",
                 exact_count=sum(1 for item in candidates if item.identity_match.value == "EXACT"),
                 identifier_verified_count=sum(1 for item in candidates if item.exact_identifier_verified),
-                acquisition_eligible_count=sum(
-                    1
-                    for item in candidates
-                    if item.identity_match.value == "EXACT"
-                    and item.direct_product_page.value == "PASS"
-                    and item.durable_url.value == "PASS"
-                ),
+                browser_recoverable_count=len(select_browser_candidates(candidates, runtime.browser.max_candidates)),
             )
 
             emit(
                 PipelineStage.BROWSER,
                 "START",
-                "Opening exact candidates in the rendered browser to verify accessibility and extractability.",
+                "Opening recoverable candidates to establish rendered accessibility, identity and scrapability.",
                 browser_enabled=runtime.browser.enabled,
                 browser_required=runtime.browser.required,
                 browser_candidate_limit=runtime.browser.max_candidates,
@@ -209,14 +206,14 @@ class ProductURLOrchestrator:
             emit(
                 PipelineStage.BROWSER,
                 "BROWSER_ALLOCATION",
-                f"Allocated {len(selected)} exact page candidate(s) for rendered-browser validation.",
+                f"Allocated {len(selected)} recoverable candidate(s) for rendered-browser validation.",
                 candidates=[
                     {
                         "candidate_id": item.candidate_id,
                         "url": item.url,
                         "source_role": item.source_role.value,
                         "identity_match": item.identity_match.value,
-                        "exact_identifier_verified": item.exact_identifier_verified,
+                        "exact_identifier_verified_before_browser": item.exact_identifier_verified,
                     }
                     for item in selected
                 ],
@@ -234,6 +231,7 @@ class ProductURLOrchestrator:
                 browser_evidence = browser_client.investigate(item.url, product.row_id, item.candidate_id)
                 updated = apply_browser_evidence(product, interpretation, item, browser_evidence, runtime)
                 by_id[item.candidate_id] = updated
+                verdict = evaluate_acceptance(updated)
                 emit(
                     PipelineStage.BROWSER,
                     "BROWSER_COMPLETED",
@@ -243,7 +241,9 @@ class ProductURLOrchestrator:
                     access=updated.browser_access.value,
                     exact_identifier_verified=updated.exact_identifier_verified,
                     extractable=updated.text_extractable.value,
-                    mapping_eligible=updated.mapping_eligible,
+                    mapping_eligible=verdict.eligible,
+                    acceptance_policy=verdict.policy_version,
+                    mandatory_blockers=list(verdict.blockers),
                     final_url=browser_evidence.final_url,
                     title=browser_evidence.title,
                     product_controls=list(browser_evidence.product_controls),
@@ -253,6 +253,7 @@ class ProductURLOrchestrator:
 
             candidates = tuple(by_id[item.candidate_id] for item in candidates)
             writer.write_intermediate(product.row_id, candidates=candidates)
+            final_verdicts = [evaluate_acceptance(item) for item in candidates]
             emit(
                 PipelineStage.BROWSER,
                 "COMPLETE",
@@ -260,23 +261,26 @@ class ProductURLOrchestrator:
                 assessed_count=len(selected),
                 browser_pass_count=sum(1 for item in candidates if item.browser_access.value == "PASS"),
                 browser_fail_count=sum(1 for item in candidates if item.browser_access.value == "FAIL"),
-                mapping_eligible_count=sum(1 for item in candidates if item.mapping_eligible),
+                mapping_eligible_count=sum(1 for verdict in final_verdicts if verdict.eligible),
+                acceptance_policy=ACCEPTANCE_POLICY_VERSION,
             )
 
             emit(
                 PipelineStage.DELIVER,
                 "START",
-                "Selecting one exact, accessible and scrapable product URL with manufacturer-first priority.",
+                "Applying the single canonical acceptance contract and manufacturer-first ranking.",
                 candidate_count=len(candidates),
-                mapping_eligible_count=sum(1 for item in candidates if item.mapping_eligible),
+                mapping_eligible_count=sum(1 for verdict in final_verdicts if verdict.eligible),
+                acceptance_policy=ACCEPTANCE_POLICY_VERSION,
             )
             decision = choose_delivery(candidates)
             ranking = candidate_ranking(candidates, decision.selected_candidate_id)
             emit(
                 PipelineStage.DELIVER,
                 "CANDIDATE_RANKING",
-                "Ranked only exact usable mappings; discovery-only candidates remain rejected.",
+                "Ranked candidates using the canonical acceptance verdict and source hierarchy.",
                 selected_candidate_id=decision.selected_candidate_id,
+                acceptance_policy=ACCEPTANCE_POLICY_VERSION,
                 ranking=ranking,
             )
             emit(
@@ -288,10 +292,11 @@ class ProductURLOrchestrator:
                 selected_candidate_id=decision.selected_candidate_id,
                 confidence=decision.confidence,
                 coding_ready=decision.coding_ready,
+                acceptance_policy=ACCEPTANCE_POLICY_VERSION,
                 reasons=list(decision.reasons),
                 warnings=list(decision.warnings),
             )
-            emit(PipelineStage.DELIVER, "COMPLETE", "Exact product-to-URL mapping policy completed.")
+            emit(PipelineStage.DELIVER, "COMPLETE", "Canonical product-to-URL acceptance policy completed.")
             emit(PipelineStage.COMPLETE, "COMPLETE", "Product URL resolution completed.")
 
             result = ResolutionResult(

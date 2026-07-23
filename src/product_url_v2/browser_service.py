@@ -10,7 +10,8 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 from playwright.async_api import async_playwright
 
-app = FastAPI(title="Exact Product Mapping Browser", version="1.2.0")
+VERSION = "1.3.0"
+app = FastAPI(title="Exact Product Mapping Browser", version=VERSION)
 ARTIFACT_ROOT = Path(os.getenv("PRODUCT_URL_ARTIFACT_ROOT") or "/data/artifacts")
 API_TOKEN = str(os.getenv("BROWSER_API_TOKEN") or "").strip()
 if not API_TOKEN:
@@ -30,7 +31,7 @@ async def health() -> dict[str, Any]:
     return {
         "status": "healthy",
         "runtime_contract": "product-url-browser-v1",
-        "version": "1.2.0",
+        "version": VERSION,
         "validation": ["HTTP success", "rendered body", "final URL", "product controls"],
     }
 
