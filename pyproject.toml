@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "product-url-resolver"
-version = "1.1.1"
-description = "Auditable product identity resolution and direct product URL delivery"
+version = "1.2.0"
+description = "Exact product identity mapping to one accessible and scrapable direct URL"
 requires-python = ">=3.10,<3.13"
 dependencies = [
   "beautifulsoup4>=4.12,<5",
