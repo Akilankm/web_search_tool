@@ -10,7 +10,7 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 from playwright.async_api import async_playwright
 
-app = FastAPI(title="Product URL Browser", version="1.1.1")
+app = FastAPI(title="Exact Product Mapping Browser", version="1.2.0")
 ARTIFACT_ROOT = Path(os.getenv("PRODUCT_URL_ARTIFACT_ROOT") or "/data/artifacts")
 API_TOKEN = str(os.getenv("BROWSER_API_TOKEN") or "").strip()
 if not API_TOKEN:
@@ -27,7 +27,12 @@ class InvestigationRequest(BaseModel):
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    return {"status": "healthy", "runtime_contract": "product-url-browser-v1", "version": "1.1.1"}
+    return {
+        "status": "healthy",
+        "runtime_contract": "product-url-browser-v1",
+        "version": "1.2.0",
+        "validation": ["HTTP success", "rendered body", "final URL", "product controls"],
+    }
 
 
 @app.post("/investigate")
@@ -45,26 +50,35 @@ async def investigate(payload: InvestigationRequest, authorization: str | None =
             context = await browser.new_context(viewport={"width": 1440, "height": 1100}, locale="en-US")
             page = await context.new_page()
             page.set_default_timeout(int(os.getenv("BROWSER_ACTION_TIMEOUT_MS") or 10000))
-            await page.goto(payload.url, wait_until="domcontentloaded", timeout=int(os.getenv("BROWSER_NAVIGATION_TIMEOUT_MS") or 60000))
+            response = await page.goto(
+                payload.url,
+                wait_until="domcontentloaded",
+                timeout=int(os.getenv("BROWSER_NAVIGATION_TIMEOUT_MS") or 60000),
+            )
             try:
                 await page.wait_for_load_state("networkidle", timeout=8000)
             except Exception:
                 pass
+
             final_url = page.url
-            title = await page.title()
+            title = " ".join((await page.title()).split())
             text = " ".join((await page.locator("body").inner_text()).split())[:200000]
             controls = await _product_controls(page)
+            http_status = response.status if response is not None else None
             await page.screenshot(path=str(screenshot_path), full_page=True)
             await context.close()
             await browser.close()
+
+            error = _render_error(http_status, title, text)
             return {
-                "access": "PASS",
+                "access": "FAIL" if error else "PASS",
                 "final_url": final_url,
                 "title": title,
                 "visible_text": text,
                 "product_controls": controls,
                 "screenshot_path": str(screenshot_path),
-                "error": "",
+                "http_status": http_status,
+                "error": error,
             }
     except Exception as exc:
         return {
@@ -74,6 +88,7 @@ async def investigate(payload: InvestigationRequest, authorization: str | None =
             "visible_text": "",
             "product_controls": [],
             "screenshot_path": "",
+            "http_status": None,
             "error": f"{type(exc).__name__}: {exc}",
         }
 
@@ -81,7 +96,8 @@ async def investigate(payload: InvestigationRequest, authorization: str | None =
 async def _product_controls(page) -> list[str]:
     selectors = [
         "button", "[role=button]", "input[type=submit]", "select", "[itemprop=price]",
-        "[data-testid*=cart]", "[class*=price]", "[class*=stock]",
+        "[itemprop=isbn]", "[itemprop=gtin13]", "[data-testid*=cart]", "[class*=price]",
+        "[class*=stock]", "[class*=product]",
     ]
     values: list[str] = []
     for selector in selectors:
@@ -90,11 +106,27 @@ async def _product_controls(page) -> list[str]:
             count = min(await nodes.count(), 40)
             for index in range(count):
                 text = " ".join((await nodes.nth(index).inner_text()).split())
-                if text and re.search(r"cart|basket|buy|price|stock|variant|size|color|quantity|warenkorb|kaufen|prix|acheter", text, flags=re.I):
-                    values.append(text[:200])
+                if text and re.search(
+                    r"cart|basket|buy|price|stock|variant|format|isbn|ean|gtin|product|size|color|quantity|"
+                    r"warenkorb|kaufen|produkt|prix|acheter",
+                    text,
+                    flags=re.I,
+                ):
+                    values.append(text[:300])
         except Exception:
             continue
     return list(dict.fromkeys(values))[:30]
+
+
+def _render_error(http_status: int | None, title: str, text: str) -> str:
+    if http_status is not None and http_status >= 400:
+        return f"Rendered navigation returned HTTP {http_status}."
+    if len(text) < 80:
+        return "Rendered page did not expose enough visible product text."
+    error_surface = f"{title} {text[:1000]}"
+    if re.search(r"\b404\b|page not found|seite nicht gefunden|access denied|forbidden|service unavailable", error_surface, flags=re.I):
+        return "Rendered page appears to be an error or access-denied surface."
+    return ""
 
 
 def _authorize(value: str | None) -> None:
