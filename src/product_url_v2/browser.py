@@ -20,7 +20,7 @@ from product_url_v2.policy import browser_precheck, browser_rank
 class BrowserClient:
     """Open candidate URLs directly with local Playwright.
 
-    The notebook runtime does not call a browser microservice and does not patch
+    The notebook runtime does not call a browser microservice and does not alter
     the Jupyter event loop. When a notebook event loop is already active, the
     asynchronous Playwright work runs in one isolated worker thread.
     """
@@ -43,8 +43,8 @@ class BrowserClient:
         except RuntimeError:
             return asyncio.run(coroutine)
 
-        # Jupyter already owns an asyncio loop in the main thread. Running the
-        # coroutine in a separate thread avoids nest_asyncio and all monkey patches.
+        # Jupyter owns the main-thread event loop. The worker thread runs
+        # Playwright with an independent event loop and leaves Jupyter untouched.
         with ThreadPoolExecutor(max_workers=1, thread_name_prefix="product-browser") as executor:
             return executor.submit(asyncio.run, coroutine).result()
 
