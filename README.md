@@ -51,7 +51,7 @@ Keep your existing PCA values in `.env`. The code uses the same enterprise varia
 
 ```dotenv
 PCA_LLM_API_KEY=
-PCA_LMM_API_VERSION=2024-10-21
+PCA_LLM_API_VERSION=2024-10-21
 PCA_LLM_ENDPOINT=
 PCA_LLM_DEPLOYMENT=
 PCA_LLM_CONSUMER_ID=
