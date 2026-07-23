@@ -24,65 +24,44 @@ from product_url_v2.ui_presenter import (
 
 API_URL = str(os.getenv("PRODUCT_URL_API_URL") or "http://127.0.0.1:8788").rstrip("/")
 
-st.set_page_config(page_title="Exact Product Mapping Console", page_icon="◆", layout="wide")
+st.set_page_config(page_title="Exact Product Mapping", page_icon="◆", layout="wide")
 st.markdown(
     """
     <style>
-    :root {
-      --ink: #f8fafc;
-      --muted: #94a3b8;
-      --panel: rgba(15, 23, 42, .72);
-      --line: rgba(148, 163, 184, .18);
-      --accent: #8b5cf6;
-      --accent2: #22d3ee;
-      --ok: #22c55e;
-      --bad: #ef4444;
-    }
     .stApp {
       background:
-        radial-gradient(circle at 15% 10%, rgba(139,92,246,.18), transparent 30%),
-        radial-gradient(circle at 85% 5%, rgba(34,211,238,.12), transparent 28%),
-        linear-gradient(180deg, #07101f 0%, #0b1220 42%, #0f172a 100%);
+        radial-gradient(circle at 15% 5%, rgba(124,58,237,.18), transparent 30%),
+        radial-gradient(circle at 85% 0%, rgba(6,182,212,.12), transparent 25%),
+        linear-gradient(180deg, #07101f 0%, #0f172a 100%);
     }
-    .block-container {padding-top: 1.4rem; padding-bottom: 4rem; max-width: 1540px;}
-    h1, h2, h3 {letter-spacing: -.025em;}
-    .hero {
-      padding: 1.45rem 1.55rem;
-      border: 1px solid rgba(139,92,246,.34);
+    .block-container {max-width: 1480px; padding-top: 1.3rem; padding-bottom: 4rem;}
+    .hero, .result-card {
+      border: 1px solid rgba(148,163,184,.2);
       border-radius: 1rem;
-      background: linear-gradient(135deg, rgba(139,92,246,.16), rgba(34,211,238,.06));
+      background: rgba(15,23,42,.7);
       box-shadow: 0 18px 50px rgba(0,0,0,.22);
-      margin-bottom: 1.15rem;
     }
-    .hero-kicker {font-size: .78rem; font-weight: 800; letter-spacing: .16em; color: #c4b5fd; text-transform: uppercase;}
-    .hero-title {font-size: 2.05rem; font-weight: 780; margin: .25rem 0 .4rem 0; color: var(--ink);}
-    .hero-copy {max-width: 980px; color: #cbd5e1; line-height: 1.55;}
-    .contract-grid {display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:.65rem; margin-top:1rem;}
-    .contract-card {padding:.8rem .9rem; border:1px solid var(--line); border-radius:.7rem; background:rgba(2,6,23,.36);}
+    .hero {padding: 1.45rem 1.55rem; margin-bottom: 1rem;}
+    .hero-kicker {font-size:.76rem; font-weight:800; letter-spacing:.16em; color:#c4b5fd; text-transform:uppercase;}
+    .hero-title {font-size:2rem; font-weight:780; margin:.25rem 0 .4rem; color:#f8fafc;}
+    .hero-copy {max-width:980px; color:#cbd5e1; line-height:1.55;}
+    .contract-grid {display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.65rem; margin-top:1rem;}
+    .contract-card {padding:.78rem .9rem; border:1px solid rgba(148,163,184,.18); border-radius:.7rem; background:rgba(2,6,23,.35);}
     .contract-card b {display:block; color:#f8fafc; font-size:.9rem; margin-bottom:.15rem;}
-    .contract-card span {color:#94a3b8; font-size:.8rem;}
-    .result-card {
-      padding: 1.25rem 1.35rem;
-      border-radius: .95rem;
-      border: 1px solid var(--line);
-      background: var(--panel);
-      box-shadow: 0 14px 35px rgba(0,0,0,.18);
-      margin: .75rem 0 1rem 0;
-    }
-    .result-ok {border-color: rgba(34,197,94,.5); box-shadow: 0 0 0 1px rgba(34,197,94,.08), 0 18px 45px rgba(0,0,0,.2);}
-    .result-bad {border-color: rgba(239,68,68,.5);}
+    .contract-card span {color:#94a3b8; font-size:.79rem;}
+    .result-card {padding:1.2rem 1.35rem; margin:.75rem 0 1rem;}
+    .result-ok {border-color:rgba(34,197,94,.52);}
+    .result-bad {border-color:rgba(239,68,68,.52);}
     .badge {display:inline-block; padding:.25rem .55rem; border-radius:999px; font-size:.72rem; font-weight:800; letter-spacing:.06em;}
-    .badge-ok {background:rgba(34,197,94,.16); color:#86efac; border:1px solid rgba(34,197,94,.34);}
+    .badge-ok {background:rgba(34,197,94,.15); color:#86efac; border:1px solid rgba(34,197,94,.34);}
     .badge-bad {background:rgba(239,68,68,.14); color:#fca5a5; border:1px solid rgba(239,68,68,.32);}
     .mapped-url {font-family:ui-monospace,SFMono-Regular,Menlo,monospace; word-break:break-all; color:#cffafe; margin-top:.7rem;}
-    .stage-card {padding:.62rem .35rem; border:1px solid var(--line); border-radius:.62rem; text-align:center; min-height:64px; background:rgba(15,23,42,.52);}
-    .stage-active {border-color:rgba(34,211,238,.65); box-shadow:0 0 0 1px rgba(34,211,238,.12);}
-    .stage-complete {border-color:rgba(34,197,94,.38);}
-    .small-muted {color:#94a3b8; font-size:.76rem;}
-    .trace-note {border-left:3px solid #8b5cf6; padding:.65rem .8rem; background:rgba(139,92,246,.08); border-radius:.35rem; color:#cbd5e1;}
-    div[data-testid="stMetric"] {background:rgba(15,23,42,.62); border:1px solid var(--line); padding:.75rem .85rem; border-radius:.75rem;}
-    div[data-testid="stForm"] {background:rgba(15,23,42,.48); border:1px solid var(--line); padding:1rem; border-radius:.9rem;}
-    @media (max-width: 900px) {.contract-grid {grid-template-columns:1fr 1fr;}}
+    .stage-card {padding:.58rem .3rem; border:1px solid rgba(148,163,184,.18); border-radius:.62rem; text-align:center; background:rgba(15,23,42,.52);}
+    .stage-active {border-color:rgba(34,211,238,.65);}
+    .stage-complete {border-color:rgba(34,197,94,.4);}
+    .muted {color:#94a3b8; font-size:.76rem;}
+    div[data-testid="stMetric"], div[data-testid="stForm"] {background:rgba(15,23,42,.58); border:1px solid rgba(148,163,184,.18); padding:.75rem; border-radius:.75rem;}
+    @media (max-width:900px) {.contract-grid {grid-template-columns:1fr 1fr;}}
     </style>
     """,
     unsafe_allow_html=True,
@@ -93,10 +72,10 @@ def api(method: str, path: str, payload: dict[str, Any] | None = None, timeout: 
     response = requests.request(method, f"{API_URL}{path}", json=payload, timeout=timeout)
     if not response.ok:
         raise RuntimeError(f"API HTTP {response.status_code}: {response.text[:2000]}")
-    value = response.json()
-    if not isinstance(value, dict):
+    data = response.json()
+    if not isinstance(data, dict):
         raise RuntimeError("API returned non-object JSON")
-    return value
+    return data
 
 
 @st.cache_data(ttl=5, show_spinner=False)
@@ -104,66 +83,28 @@ def health() -> dict[str, Any]:
     return api("GET", "/health", timeout=15)
 
 
-def latest_event(events: Sequence[Mapping[str, Any]], event_type: str) -> Mapping[str, Any] | None:
-    return next((item for item in reversed(events) if item.get("event_type") == event_type), None)
-
-
-def ranking_from_events(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    event = latest_event(events, "CANDIDATE_RANKING")
-    return [dict(item) for item in ((event or {}).get("details") or {}).get("ranking") or []]
-
-
-def render_stage_tracker(events: Sequence[Mapping[str, Any]], current_stage: str, status: str) -> None:
-    rows = stage_rows(events, current_stage, status)
-    columns = st.columns(len(rows))
-    for column, row in zip(columns, rows):
+def render_stages(events: Sequence[Mapping[str, Any]], stage: str, status: str) -> None:
+    columns = st.columns(7)
+    for column, row in zip(columns, stage_rows(events, stage, status)):
         state = row["state"]
         css = "stage-active" if state == "ACTIVE" else "stage-complete" if state == "COMPLETE" else ""
         marker = "●" if state == "ACTIVE" else "✓" if state == "COMPLETE" else "○"
         column.markdown(
-            f'<div class="stage-card {css}"><strong>{marker} {row["stage"].title()}</strong><br><span class="small-muted">{state.title()}</span></div>',
+            f'<div class="stage-card {css}"><b>{marker} {row["stage"].title()}</b><br><span class="muted">{state.title()}</span></div>',
             unsafe_allow_html=True,
         )
 
 
-def render_live_trace(events: Sequence[Mapping[str, Any]]) -> None:
-    if not events:
-        st.info("Waiting for observable mapping evidence.")
-        return
-    for event in reversed(events[-10:]):
-        sequence = event.get("sequence")
-        stage = event.get("stage")
-        event_type = event.get("event_type")
-        message = event.get("message")
-        with st.expander(f"#{sequence} · {stage} · {event_type} — {message}", expanded=event is events[-1]):
-            details = event.get("details") or {}
-            if event_type == "SEARCH_ACTION":
-                st.code(str(details.get("query") or details.get("page_token") or ""), language=None)
-                cols = st.columns(4)
-                cols[0].metric("Credit", details.get("credit_number"))
-                cols[1].metric("Purpose", details.get("purpose"))
-                cols[2].metric("Engine", details.get("engine"))
-                cols[3].metric("Scope", details.get("scope"))
-                st.caption(str(details.get("rationale") or ""))
-            elif event_type in {"CANDIDATE_ASSESSED", "BROWSER_COMPLETED", "DECISION_COMPLETE"}:
-                st.json(dict(details), expanded=False)
-            elif details:
-                st.json(dict(details), expanded=False)
-
-
-def run_live_job(payload: dict[str, Any], trace_mode: bool, poll_seconds: float) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def run_job(payload: dict[str, Any], show_trace: bool, poll_seconds: float) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     job = api("POST", "/v1/jobs", payload)
     job_id = str(job["job_id"])
     events: list[dict[str, Any]] = []
     last_sequence = 0
     deadline = time.monotonic() + 1800
-
-    st.markdown("---")
-    st.markdown("## Live mapping campaign")
-    metrics_placeholder = st.empty()
-    stage_placeholder = st.empty()
-    status_placeholder = st.empty()
-    trace_placeholder = st.empty()
+    metrics = st.empty()
+    stages = st.empty()
+    status_box = st.empty()
+    trace_box = st.empty()
 
     while time.monotonic() < deadline:
         job = api("GET", f"/v1/jobs/{job_id}")
@@ -171,69 +112,53 @@ def run_live_job(payload: dict[str, Any], trace_mode: bool, poll_seconds: float)
         events = merge_events(events, trace.get("events") or [])
         last_sequence = max(last_sequence, int(trace.get("last_event_sequence") or 0))
 
-        with metrics_placeholder.container():
+        with metrics.container():
             cols = st.columns(4)
             cols[0].metric("Job", job_id)
             cols[1].metric("Stage", str(job.get("stage") or "QUEUED").title())
             cols[2].metric("Evidence events", len(events))
             cols[3].metric("Status", str(job.get("status") or "RUNNING").replace("_", " ").title())
-        with stage_placeholder.container():
-            render_stage_tracker(events, str(job.get("stage") or "QUEUED"), str(job.get("status") or "QUEUED"))
-        status_placeholder.info(str(job.get("message") or "Mapping product"))
-        if trace_mode:
-            with trace_placeholder.container():
-                st.markdown("### Observable evidence trace")
-                st.caption(TRACE_NOTICE)
-                render_live_trace(events)
+        with stages.container():
+            render_stages(events, str(job.get("stage") or "QUEUED"), str(job.get("status") or "QUEUED"))
+        status_box.info(str(job.get("message") or "Mapping product"))
+        if show_trace:
+            with trace_box.container():
+                with st.expander("Live observable evidence", expanded=True):
+                    st.caption(TRACE_NOTICE)
+                    st.dataframe(pd.DataFrame(event_rows(events[-12:])), hide_index=True, use_container_width=True)
         if str(job.get("status")) in TERMINAL_STATUSES:
             return api("GET", f"/v1/jobs/{job_id}/result", timeout=60), events
         time.sleep(poll_seconds)
     raise TimeoutError("Exact product mapping exceeded 30 minutes")
 
 
-def render_judgment_lists(details: Mapping[str, Any]) -> None:
-    columns = st.columns(3)
-    sections = (
-        (columns[0], "Passed evidence", details.get("strengths") or [], "No mandatory gate passed."),
-        (columns[1], "Secondary risks", details.get("risks") or [], "No secondary risk recorded."),
-        (columns[2], "Mapping blockers", details.get("blockers") or [], "No blocker recorded."),
-    )
-    for column, title, values, empty in sections:
-        with column:
-            st.markdown(f"**{title}**")
-            if values:
-                for item in values:
-                    st.markdown(f"- {item}")
-            else:
-                st.caption(empty)
-
-
-def gate_value(candidate: Mapping[str, Any], field: str) -> bool:
-    if field == "identifier":
-        evidence = candidate.get("evidence") or {}
-        return bool(evidence.get("exact_identifier_verified")) if evidence.get("required_identifier") else True
-    return candidate.get(field) == "PASS"
+def selected_judgment(events: Sequence[Mapping[str, Any]], candidate_id: str | None) -> Mapping[str, Any]:
+    for event in reversed(events):
+        if event.get("event_type") != "CANDIDATE_RANKING":
+            continue
+        ranking = (event.get("details") or {}).get("ranking") or []
+        return next((item for item in ranking if item.get("candidate_id") == candidate_id), {})
+    return {}
 
 
 def render_result(result: Mapping[str, Any], events: Sequence[Mapping[str, Any]]) -> None:
     decision = result.get("decision") or {}
-    status = str(decision.get("status") or "UNKNOWN")
     selected_url = decision.get("selected_url")
     selected_id = decision.get("selected_candidate_id")
     candidates = result.get("candidates") or []
-    selected = next((item for item in candidates if item.get("candidate_id") == selected_id), None) or {}
-    mapping_passed = bool(selected_url)
+    selected = next((item for item in candidates if item.get("candidate_id") == selected_id), {})
+    rows = candidate_rows(candidates, selected_id)
+    selected_row = next((item for item in rows if item.get("selected")), {})
+    passed = bool(selected_url and selected_row.get("mapping_eligible"))
 
-    st.markdown("---")
-    st.markdown("## Final product mapping")
-    badge = "EXACT MAPPING COMPLETE" if mapping_passed else "NO DEFENSIBLE MAPPING"
-    badge_class = "badge-ok" if mapping_passed else "badge-bad"
-    card_class = "result-ok" if mapping_passed else "result-bad"
-    title = "One product. One verified URL." if mapping_passed else "A candidate URL was not falsely accepted."
+    badge = "ACCEPTANCE CONTRACT PASSED" if passed else "NO ACCEPTABLE URL"
+    badge_class = "badge-ok" if passed else "badge-bad"
+    card_class = "result-ok" if passed else "result-bad"
+    title = "One product. One accepted URL." if passed else "No discovery URL was falsely accepted."
     copy = (
-        "The selected page confirms the exact product, opens in the rendered browser, and exposes scrapable product content."
-        if mapping_passed
-        else "The campaign found discovery evidence, but no URL passed every mandatory identity, accessibility, and scrapability gate."
+        "The selected URL passed exact identity, identifier, direct-page, durability, browser-access, scrapability and conflict gates."
+        if passed
+        else "Every discovered URL failed at least one mandatory gate in the canonical acceptance policy."
     )
     url_html = f'<div class="mapped-url">{selected_url}</div>' if selected_url else ""
     st.markdown(
@@ -241,122 +166,87 @@ def render_result(result: Mapping[str, Any], events: Sequence[Mapping[str, Any]]
         unsafe_allow_html=True,
     )
 
-    metrics = st.columns(6)
-    metrics[0].metric("Exact product mapped", "YES" if mapping_passed else "NO")
-    metrics[1].metric("Identifier verified", "YES" if selected and gate_value(selected, "identifier") else "NO")
-    metrics[2].metric("Browser opens", "YES" if selected and gate_value(selected, "browser_access") else "NO")
-    metrics[3].metric("Scrapable", "YES" if selected and gate_value(selected, "text_extractable") else "NO")
-    metrics[4].metric("Source", str(selected.get("source_role") or "—").replace("_", " ").title())
-    metrics[5].metric("Elapsed", f"{int(result.get('elapsed_ms') or 0) / 1000:.1f}s")
+    cols = st.columns(6)
+    cols[0].metric("Exact mapping", "YES" if passed else "NO")
+    cols[1].metric("Identifier", "PASS" if selected_row.get("identifier_verified") else "FAIL")
+    cols[2].metric("Browser", str(selected_row.get("browser_accessible") or "—"))
+    cols[3].metric("Scrapable", str(selected_row.get("scrapable") or "—"))
+    cols[4].metric("Source", str(selected_row.get("source") or "—").replace("_", " ").title())
+    cols[5].metric("Elapsed", f"{int(result.get('elapsed_ms') or 0) / 1000:.1f}s")
 
     if selected_url:
-        st.link_button("Open exact mapped product", str(selected_url), use_container_width=True, type="primary")
+        st.link_button("Open accepted product URL", str(selected_url), use_container_width=True, type="primary")
         st.code(str(selected_url), language=None)
 
-    tabs = st.tabs(["Mapping decision", "Candidate proof", "Identity", "Search campaign", "Browser evidence", "Audit & export"])
-    ranking = ranking_from_events(events)
-    ranking_by_id = {str(item.get("candidate_id")): item for item in ranking}
-
+    tabs = st.tabs(["Decision", "Candidate gates", "Identity", "Search", "Browser", "Audit"])
     with tabs[0]:
-        st.markdown("### Decision basis")
+        st.markdown("### Canonical decision")
+        st.caption(f"Policy: {selected_row.get('acceptance_policy') or 'product-url-acceptance-v1'}")
         for reason in decision.get("reasons") or []:
-            st.success(str(reason)) if mapping_passed else st.warning(str(reason))
+            (st.success if passed else st.warning)(str(reason))
         for warning in decision.get("warnings") or []:
             st.warning(str(warning))
-        if selected_id and ranking_by_id.get(str(selected_id)):
-            render_judgment_lists(ranking_by_id[str(selected_id)])
-            st.dataframe(pd.DataFrame(ranking_by_id[str(selected_id)].get("gates") or []), hide_index=True, use_container_width=True)
+        judgment = selected_judgment(events, selected_id)
+        if judgment:
+            st.dataframe(pd.DataFrame(judgment.get("gates") or []), hide_index=True, use_container_width=True)
 
     with tabs[1]:
-        rows = candidate_rows(candidates, selected_id)
         if rows:
             st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
-        for candidate in candidates:
-            cid = str(candidate.get("candidate_id") or "UNKNOWN")
-            judgment = ranking_by_id.get(cid) or {}
-            with st.expander(f"{'SELECTED · ' if cid == str(selected_id) else ''}{cid} · {candidate.get('domain')}", expanded=cid == str(selected_id)):
-                st.code(str(candidate.get("url") or ""), language=None)
-                st.caption(f"Delivery basis: {judgment.get('delivery_basis') or 'discovery only'}")
-                render_judgment_lists(judgment)
-                gates = judgment.get("gates") or []
-                if gates:
-                    st.dataframe(pd.DataFrame(gates), hide_index=True, use_container_width=True)
+        else:
+            st.info("No candidate passed structural admission.")
 
     with tabs[2]:
         interpretation = result.get("interpretation") or {}
         signals = signal_rows(interpretation)
         hypotheses = hypothesis_rows(interpretation)
-        st.markdown("### Submitted identity and extracted anchors")
         if signals:
             st.dataframe(pd.DataFrame(signals), hide_index=True, use_container_width=True)
         if hypotheses:
-            st.markdown("### Product hypotheses")
             st.dataframe(pd.DataFrame(hypotheses), hide_index=True, use_container_width=True)
-        unresolved = interpretation.get("unresolved_discriminators") or []
-        if unresolved:
-            st.warning("Unresolved: " + ", ".join(str(item) for item in unresolved))
 
     with tabs[3]:
-        observations = result.get("search_observations") or []
-        action_rows = []
-        for observation in observations:
-            action = observation.get("action") or {}
-            action_rows.append({
-                "credit": action.get("credit_number"),
-                "purpose": action.get("purpose"),
-                "engine": action.get("engine"),
-                "scope": action.get("scope"),
-                "query": action.get("query"),
-                "rationale": action.get("rationale"),
-                "status": observation.get("status"),
-            })
-        if action_rows:
-            st.dataframe(pd.DataFrame(action_rows), hide_index=True, use_container_width=True)
-        sources = search_rows(observations)
-        if sources:
-            st.dataframe(pd.DataFrame(sources), hide_index=True, use_container_width=True)
+        searches = search_rows(result.get("search_observations") or [])
+        if searches:
+            st.dataframe(pd.DataFrame(searches), hide_index=True, use_container_width=True)
 
     with tabs[4]:
         browser_rows = []
-        for candidate in candidates:
-            evidence = candidate.get("evidence") or {}
-            browser = evidence.get("browser") or {}
-            browser_rows.append({
-                "candidate": candidate.get("candidate_id"),
-                "mapping_eligible": next((row["mapping_eligible"] for row in candidate_rows([candidate]) if row), False),
-                "access": candidate.get("browser_access"),
-                "scrapable": candidate.get("text_extractable"),
-                "identifier_verified": evidence.get("exact_identifier_verified"),
-                "final_url": browser.get("final_url"),
-                "visible_text_length": browser.get("visible_text_length"),
-                "error": browser.get("error"),
-                "screenshot": browser.get("screenshot_path"),
-            })
+        for candidate, row in zip(candidates, rows):
+            browser = (candidate.get("evidence") or {}).get("browser") or {}
+            browser_rows.append(
+                {
+                    "candidate": candidate.get("candidate_id"),
+                    "eligible": row.get("mapping_eligible"),
+                    "access": candidate.get("browser_access"),
+                    "scrapable": candidate.get("text_extractable"),
+                    "final_url": browser.get("final_url"),
+                    "visible_text_length": browser.get("visible_text_length"),
+                    "error": browser.get("error"),
+                    "screenshot": browser.get("screenshot_path"),
+                }
+            )
         if browser_rows:
             st.dataframe(pd.DataFrame(browser_rows), hide_index=True, use_container_width=True)
         for row in browser_rows:
             path = Path(str(row.get("screenshot") or ""))
             if path.is_file():
-                with st.expander(f"Rendered screenshot · {row.get('candidate')}", expanded=str(row.get("candidate")) == str(selected_id)):
+                with st.expander(f"Screenshot · {row.get('candidate')}"):
                     st.image(str(path), use_container_width=True)
 
     with tabs[5]:
         st.caption(TRACE_NOTICE)
-        trace_table = event_rows(events)
-        if trace_table:
-            st.dataframe(pd.DataFrame(trace_table), hide_index=True, use_container_width=True)
-        result_json = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True)
+        st.dataframe(pd.DataFrame(event_rows(events)), hide_index=True, use_container_width=True)
         st.download_button(
-            "Download complete mapping evidence",
-            data=result_json.encode("utf-8"),
+            "Download complete evidence",
+            data=json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8"),
             file_name=f"{(result.get('product') or {}).get('row_id', 'product')}_mapping.json",
             mime="application/json",
             use_container_width=True,
         )
-        candidate_csv = pd.DataFrame(candidate_rows(candidates, selected_id)).to_csv(index=False).encode("utf-8-sig")
         st.download_button(
-            "Download candidate gate report",
-            data=candidate_csv,
+            "Download candidate gates",
+            data=pd.DataFrame(rows).to_csv(index=False).encode("utf-8-sig"),
             file_name=f"{(result.get('product') or {}).get('row_id', 'product')}_candidates.csv",
             mime="text/csv",
             use_container_width=True,
@@ -368,13 +258,13 @@ st.markdown(
     """
     <div class="hero">
       <div class="hero-kicker">Exact Product Mapping</div>
-      <div class="hero-title">Map the submitted product to one defensible URL</div>
-      <div class="hero-copy">Manufacturer first. Retailer fallback. A URL is delivered only when the exact product identity is proven, the page opens in the rendered browser, and usable product content can be scraped.</div>
+      <div class="hero-title">Map the submitted product to one accepted URL</div>
+      <div class="hero-copy">One canonical policy decides acceptance. Manufacturer or publisher first, then retailer fallback. No search snippet, inaccessible page, or unverified candidate can become the final URL.</div>
       <div class="contract-grid">
-        <div class="contract-card"><b>1 · Exact identity</b><span>EAN/GTIN, model, edition and variant must agree.</span></div>
-        <div class="contract-card"><b>2 · Source hierarchy</b><span>Manufacturer or publisher first; retailer only when necessary.</span></div>
-        <div class="contract-card"><b>3 · Human usable</b><span>The final page must actually open and remain on a product URL.</span></div>
-        <div class="contract-card"><b>4 · Scrapable</b><span>Rendered content must expose the product details needed downstream.</span></div>
+        <div class="contract-card"><b>Exact identity</b><span>Product, edition, format and variant must agree.</span></div>
+        <div class="contract-card"><b>Identifier agreement</b><span>Supplied EAN, GTIN or ISBN must be verified.</span></div>
+        <div class="contract-card"><b>Browser accessible</b><span>The final direct product page must render successfully.</span></div>
+        <div class="contract-card"><b>Scrapable content</b><span>Rendered product details must be available downstream.</span></div>
       </div>
     </div>
     """,
@@ -385,7 +275,8 @@ try:
     runtime = health()
     st.sidebar.success("Resolver ready")
     st.sidebar.caption(f"Version {runtime.get('version')} · {runtime.get('runtime_contract')}")
-    st.sidebar.caption(f"Policy: {runtime.get('url_delivery_policy', 'unknown')}")
+    st.sidebar.caption(f"Policy: {runtime.get('acceptance_policy', 'unknown')}")
+    st.sidebar.caption(f"Policy module: {runtime.get('acceptance_policy_module', 'unknown')}")
     browser = runtime.get("browser") or {}
     st.sidebar.caption(f"Browser: {browser.get('status', 'unknown')}")
     profiles = runtime.get("profiles") or {}
@@ -395,9 +286,9 @@ except Exception as exc:
     st.sidebar.exception(exc)
     profiles = {"Standard": {"search_credits": 3, "max_candidates": 16, "browser_candidates": 6, "browser_required": True}}
 
-trace_mode = st.sidebar.toggle("Live evidence trace", value=True)
+show_trace = st.sidebar.toggle("Live evidence trace", value=True)
 poll_seconds = float(st.sidebar.select_slider("Refresh", options=[0.5, 1.0, 2.0, 3.0], value=1.0, format_func=lambda value: f"{value:g}s"))
-st.sidebar.markdown(f'<div class="trace-note">{TRACE_NOTICE}</div>', unsafe_allow_html=True)
+st.sidebar.caption(TRACE_NOTICE)
 
 with st.form("resolve"):
     left, right = st.columns(2)
@@ -406,7 +297,7 @@ with st.form("resolve"):
         country_code = st.text_input("Country code", value="CH", max_chars=2)
         retailer_name = st.text_input("Requested retailer (optional)")
     with right:
-        ean = st.text_input("EAN / GTIN / ISBN (recommended)", placeholder="9783311706717")
+        ean = st.text_input("EAN / GTIN / ISBN", placeholder="9783311706717")
         language_code = st.text_input("Language code (optional)", value="de")
         feature_set = st.text_input("Feature set", value="toy")
         profile_names = list(profiles) or ["Standard"]
@@ -428,7 +319,7 @@ if submitted:
             "runtime_options": profiles.get(profile_name) or {},
         }
         try:
-            result, events = run_live_job(payload, trace_mode, poll_seconds)
+            result, events = run_job(payload, show_trace, poll_seconds)
             render_result(result, events)
         except Exception as exc:
             st.exception(exc)
