@@ -21,6 +21,12 @@ FORBIDDEN_CODE = {
     "product_url_v2." + "api",
     "browser" + "_service",
 }
+FORBIDDEN_RUNTIME_OPTION_FRAGMENTS = {
+    '"browser_enabled":',
+    '"browser_required":',
+    '"reasoning_enabled":',
+    '"reasoning_required":',
+}
 
 
 def main() -> int:
@@ -41,6 +47,17 @@ def main() -> int:
         offenders = sorted(term for term in FORBIDDEN_CODE if term in lowered_code)
         if offenders:
             raise SystemExit(f"{path}: forbidden runtime code: {offenders}")
+
+        duplicated_modes = sorted(
+            fragment
+            for fragment in FORBIDDEN_RUNTIME_OPTION_FRAGMENTS
+            if fragment in code_source
+        )
+        if duplicated_modes:
+            raise SystemExit(
+                f"{path}: runtime modes must come from .env/config, not notebook options: "
+                f"{duplicated_modes}"
+            )
 
         if "ProductURLOrchestrator" not in combined:
             raise SystemExit(f"{path}: must call ProductURLOrchestrator directly")
