@@ -19,7 +19,7 @@ jobs:
       - name: Install
         run: python -m pip install -e '.[dev]'
       - name: Compile
-        run: python -m compileall -q src apps
+        run: python -m compileall -q src apps scripts
       - name: Validate JSON
         run: |
           python -m json.tool config/default.json >/dev/null
@@ -32,6 +32,10 @@ jobs:
           mkdir -p secrets data/artifacts
           printf 'ci-token\n' > secrets/browser_api_token.txt
           docker compose config --quiet
+      - name: Enforce canonical architecture
+        run: python scripts/check_architecture.py
+      - name: Acceptance contract
+        run: pytest -q tests/test_acceptance_policy.py tests/test_mandatory_url_delivery.py
       - name: Test
         shell: bash
         run: |
