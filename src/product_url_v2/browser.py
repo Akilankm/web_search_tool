@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -28,14 +27,13 @@ class BrowserClient:
     config: BrowserConfig
     artifact_root: Path
 
-    @classmethod
-    def from_env(cls, config: BrowserConfig) -> "BrowserClient":
-        root = Path(os.getenv("PRODUCT_URL_ARTIFACT_ROOT") or "data/artifacts")
-        return cls(config=config, artifact_root=root)
-
     def investigate(self, url: str, row_id: str, candidate_id: str) -> BrowserEvidence:
         if not self.config.enabled:
-            return BrowserEvidence(url=url, access=GateStatus.NOT_ASSESSED, error="browser disabled")
+            return BrowserEvidence(
+                url=url,
+                access=GateStatus.NOT_ASSESSED,
+                error="browser disabled",
+            )
 
         coroutine = self._investigate(url, row_id, candidate_id)
         try:
@@ -45,13 +43,25 @@ class BrowserClient:
 
         # Jupyter owns the main-thread event loop. The worker thread runs
         # Playwright with an independent event loop and leaves Jupyter untouched.
-        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="product-browser") as executor:
+        with ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="product-browser",
+        ) as executor:
             return executor.submit(asyncio.run, coroutine).result()
 
-    async def _investigate(self, url: str, row_id: str, candidate_id: str) -> BrowserEvidence:
+    async def _investigate(
+        self,
+        url: str,
+        row_id: str,
+        candidate_id: str,
+    ) -> BrowserEvidence:
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            return BrowserEvidence(url=url, access=GateStatus.FAIL, error="absolute HTTP(S) URL required")
+            return BrowserEvidence(
+                url=url,
+                access=GateStatus.FAIL,
+                error="absolute HTTP(S) URL required",
+            )
 
         screenshot_dir = self.artifact_root / row_id / "browser"
         screenshot_dir.mkdir(parents=True, exist_ok=True)
@@ -69,27 +79,37 @@ class BrowserClient:
                         locale="en-US",
                     )
                     page = await context.new_page()
-                    page.set_default_timeout(min(self.config.timeout_seconds * 1000, 30_000))
+                    page.set_default_timeout(
+                        min(self.config.timeout_seconds * 1000, 30_000)
+                    )
                     response = await page.goto(
                         url,
                         wait_until="domcontentloaded",
                         timeout=self.config.timeout_seconds * 1000,
                     )
                     try:
-                        await page.wait_for_load_state("networkidle", timeout=8_000)
+                        await page.wait_for_load_state(
+                            "networkidle",
+                            timeout=8_000,
+                        )
                     except Exception:
                         pass
 
                     final_url = page.url
                     title = " ".join((await page.title()).split())
-                    visible_text = " ".join((await page.locator("body").inner_text()).split())[:200_000]
+                    visible_text = " ".join(
+                        (await page.locator("body").inner_text()).split()
+                    )[:200_000]
                     controls = await _product_controls(page)
                     status_code = response.status if response is not None else None
                     error = _render_error(status_code, title, visible_text)
 
                     rendered_screenshot = ""
                     try:
-                        await page.screenshot(path=str(screenshot_path), full_page=True)
+                        await page.screenshot(
+                            path=str(screenshot_path),
+                            full_page=True,
+                        )
                         rendered_screenshot = str(screenshot_path)
                     except Exception:
                         rendered_screenshot = ""
@@ -146,8 +166,9 @@ async def _product_controls(page: Page) -> list[str]:
             for index in range(count):
                 text = " ".join((await nodes.nth(index).inner_text()).split())
                 if text and re.search(
-                    r"cart|basket|buy|price|stock|variant|format|isbn|ean|gtin|product|size|color|quantity|"
-                    r"warenkorb|kaufen|produkt|prix|acheter",
+                    r"cart|basket|buy|price|stock|variant|format|isbn|ean|gtin|"
+                    r"product|size|color|quantity|warenkorb|kaufen|produkt|prix|"
+                    r"acheter",
                     text,
                     flags=re.I,
                 ):
@@ -164,7 +185,8 @@ def _render_error(http_status: int | None, title: str, text: str) -> str:
         return "Rendered page did not expose enough visible product text."
     surface = f"{title} {text[:1000]}"
     if re.search(
-        r"\b404\b|page not found|seite nicht gefunden|access denied|forbidden|service unavailable",
+        r"\b404\b|page not found|seite nicht gefunden|access denied|forbidden|"
+        r"service unavailable",
         surface,
         flags=re.I,
     ):
