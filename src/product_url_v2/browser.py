@@ -8,7 +8,8 @@ from typing import Any, Mapping, Sequence
 import requests
 
 from product_url_v2.config import BrowserConfig
-from product_url_v2.models import BrowserEvidence, CandidateAssessment, GateStatus, SourceRole
+from product_url_v2.models import BrowserEvidence, CandidateAssessment, GateStatus
+from product_url_v2.policy import browser_precheck, browser_rank
 
 
 @dataclass(slots=True)
@@ -77,40 +78,5 @@ def select_browser_candidates(
 ) -> tuple[CandidateAssessment, ...]:
     if limit <= 0:
         return ()
-
-    eligible = [
-        item
-        for item in candidates
-        if item.browser_access is GateStatus.NOT_ASSESSED
-        and item.direct_product_page is GateStatus.PASS
-        and item.durable_url is GateStatus.PASS
-        and item.identity_match.value != "MISMATCH"
-        and str(item.evidence.get("page_fetch_status") or "") == GateStatus.PASS.value
-        and not item.conflicts
-        and not item.hard_url_blockers
-    ]
-
-    source_priority = {
-        SourceRole.LOCAL_MANUFACTURER: 6,
-        SourceRole.GLOBAL_MANUFACTURER: 5,
-        SourceRole.REQUESTED_RETAILER: 4,
-        SourceRole.COUNTRY_RETAILER: 3,
-        SourceRole.GLOBAL_RETAILER: 2,
-        SourceRole.MARKETPLACE: 1,
-        SourceRole.UNKNOWN: 0,
-    }
-    ranked = sorted(
-        eligible,
-        key=lambda item: (
-            1.0 if item.exact_identifier_verified else 0.0,
-            1.0 if item.identity_match.value == "EXACT" else 0.0,
-            float(source_priority[item.source_role]),
-            item.identity_confidence,
-            item.direct_page_score,
-            item.source_authority,
-            item.search_support,
-            -(item.search_rank or 9999),
-        ),
-        reverse=True,
-    )
-    return tuple(ranked[:limit])
+    eligible = [candidate for candidate in candidates if browser_precheck(candidate)]
+    return tuple(sorted(eligible, key=browser_rank, reverse=True)[:limit])
