@@ -17,8 +17,8 @@ from product_url_v2.models import ProductInput, RunEvent, to_jsonable
 from product_url_v2.orchestrator import ProductURLOrchestrator
 from product_url_v2.trace import TRACE_CONTRACT, TRACE_NOTICE
 
-VERSION = "1.1.1"
-URL_DELIVERY_POLICY = "mandatory-url-first-v2"
+VERSION = "1.2.0"
+URL_DELIVERY_POLICY = "exact-accessible-scrapable-mapping-v3"
 TERMINAL_JOB_STATUSES = {"COMPLETED", "REVIEW_REQUIRED", "FAILED", "TECHNICAL_FAILURE"}
 
 
@@ -61,7 +61,7 @@ class JobStore:
             job = self._require(job_id)
             job.status = "RUNNING"
             job.stage = "INTERPRET"
-            job.message = "Starting product resolution."
+            job.message = "Starting exact product-to-URL mapping."
             job.updated_at = _now()
             return job.product
 
@@ -117,7 +117,7 @@ CONFIG: RuntimeConfig = load_config()
 ORCHESTRATOR = ProductURLOrchestrator(CONFIG)
 STORE = JobStore()
 EXECUTOR = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("PRODUCT_URL_JOB_WORKERS") or 2)))
-app = FastAPI(title="Product URL Resolver", version=VERSION)
+app = FastAPI(title="Exact Product Mapping Resolver", version=VERSION)
 
 
 @app.get("/health")
@@ -128,6 +128,23 @@ def health() -> dict[str, Any]:
         "version": VERSION,
         "runtime_contract": CONFIG.runtime_contract,
         "url_delivery_policy": URL_DELIVERY_POLICY,
+        "mapping_contract": {
+            "one_product_one_url": True,
+            "manufacturer_first": True,
+            "retailer_fallback": True,
+            "supplied_identifier_must_match": True,
+            "browser_access_required": True,
+            "scrapable_product_text_required": True,
+            "search_snippet_is_not_identity_proof": True,
+        },
+        "source_priority": [
+            "LOCAL_MANUFACTURER",
+            "GLOBAL_MANUFACTURER",
+            "REQUESTED_RETAILER",
+            "COUNTRY_RETAILER",
+            "GLOBAL_RETAILER",
+            "MARKETPLACE",
+        ],
         "trace_contract": TRACE_CONTRACT,
         "trace_notice": TRACE_NOTICE,
         "browser": browser,
@@ -142,9 +159,9 @@ def health() -> dict[str, Any]:
         "feature_set_root": str(CONFIG.feature_set_root),
         "artifact_root": str(CONFIG.artifact_root),
         "profiles": {
-            "Focused": {"search_credits": 2, "max_candidates": 6, "browser_candidates": 1},
-            "Standard": {"search_credits": 3, "max_candidates": 12, "browser_candidates": 3},
-            "Extended": {"search_credits": 3, "max_candidates": 24, "max_per_domain": 3, "browser_candidates": 6},
+            "Focused": {"search_credits": 2, "max_candidates": 8, "browser_candidates": 3, "browser_required": True},
+            "Standard": {"search_credits": 3, "max_candidates": 16, "browser_candidates": 6, "browser_required": True},
+            "Extended": {"search_credits": 3, "max_candidates": 30, "max_per_domain": 4, "browser_candidates": 10, "browser_required": True},
         },
     }
 
@@ -174,10 +191,7 @@ def get_job(job_id: str) -> dict[str, Any]:
 
 
 @app.get("/v1/jobs/{job_id}/trace")
-def get_trace(
-    job_id: str,
-    after_sequence: int = Query(default=0, ge=0),
-) -> dict[str, Any]:
+def get_trace(job_id: str, after_sequence: int = Query(default=0, ge=0)) -> dict[str, Any]:
     try:
         return STORE.trace(job_id, after_sequence=after_sequence)
     except KeyError as exc:
