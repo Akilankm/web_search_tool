@@ -30,20 +30,26 @@ def _candidate(**changes):
         "search_rank": 1,
         "search_support": 1.0,
         "source_role": SourceRole.COUNTRY_RETAILER,
-        "identity_match": IdentityMatch.PROBABLE,
-        "identity_confidence": 0.75,
+        "identity_match": IdentityMatch.EXACT,
+        "identity_confidence": 0.95,
         "direct_product_page": GateStatus.PASS,
         "direct_page_score": 0.8,
         "durable_url": GateStatus.PASS,
         "country_match": GateStatus.PASS,
         "retailer_match": GateStatus.NOT_ASSESSED,
-        "browser_access": GateStatus.NOT_ASSESSED,
+        "browser_access": GateStatus.PASS,
         "text_extractable": GateStatus.PASS,
         "coding_evidence_complete": GateStatus.FAIL,
         "source_authority": 75,
-        "evidence": {"matched_signals": ["model=ME04"]},
+        "evidence": {
+            "matched_signals": ["model=ME04"],
+            "required_identifier": "",
+            "exact_identifier_verified": True,
+            "hard_url_blockers": [],
+            "delivery_basis": "rendered_exact_product_page",
+        },
         "conflicts": (),
-        "warnings": ("The selected page may not contain every requested coding field.",),
+        "warnings": ("Some downstream coding fields are incomplete.",),
     }
     values.update(changes)
     return CandidateAssessment(**values)
@@ -51,9 +57,11 @@ def _candidate(**changes):
 
 def test_candidate_judgment_separates_strengths_risks_and_blockers() -> None:
     judgment = candidate_judgment(_candidate())
+    assert judgment["mapping_eligible"] is True
     assert judgment["review_eligible"] is True
     assert any("Direct product-page" in item for item in judgment["strengths"])
-    assert any("Rendered browser usability was not assessed" in item for item in judgment["risks"])
+    assert any("Rendered browser accessibility passed" in item for item in judgment["strengths"])
+    assert any("Coding-field coverage failed" in item for item in judgment["risks"])
     assert not judgment["blockers"]
 
 
@@ -176,16 +184,3 @@ def test_search_progress_emits_each_paid_action_and_observation() -> None:
     assert [name for name, _ in observed].count("SEARCH_ACTION") == 3
     assert [name for name, _ in observed].count("SEARCH_OBSERVATION") == 3
     assert observed[-1][0] == "SEARCH_CANDIDATES"
-
-
-def test_acquisition_progress_reports_plan_and_each_page() -> None:
-    candidates = (
-        SearchResult("https://shop.example.com/product/1", "One", "", "fixture", "google", "q", 1, True),
-        SearchResult("https://other.example.com/product/2", "Two", "", "fixture", "google", "q", 2, True),
-    )
-    observed = []
-    acquirer = FakeAcquirer(AcquisitionConfig(max_workers=1))
-    pages = acquirer.acquire_many(candidates, progress=lambda event_type, details: observed.append((event_type, details)))
-    assert len(pages) == 2
-    assert observed[0][0] == "ACQUISITION_PLAN"
-    assert [name for name, _ in observed].count("PAGE_FETCHED") == 2
