@@ -8,6 +8,7 @@ FORBIDDEN_CODE = (
     "product_evidence_harness",
     "compat_patches",
     "monkey_patch",
+    "monkeypatch",
     "monkeypatch_runtime",
     "nest_asyncio",
     "product_url_v2.api",
