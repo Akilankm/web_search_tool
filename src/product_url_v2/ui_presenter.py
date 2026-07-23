@@ -83,21 +83,35 @@ def search_rows(observations: Sequence[Mapping[str, Any]]) -> list[dict[str, Any
 def candidate_rows(candidates: Sequence[Mapping[str, Any]], selected_candidate_id: str | None = None) -> list[dict[str, Any]]:
     rows = []
     for item in candidates:
+        evidence = item.get("evidence") or {}
+        exact_required = bool(evidence.get("required_identifier"))
+        exact_verified = bool(evidence.get("exact_identifier_verified")) if exact_required else True
+        mapping_eligible = bool(
+            item.get("identity_match") == "EXACT"
+            and exact_verified
+            and item.get("direct_product_page") == "PASS"
+            and item.get("durable_url") == "PASS"
+            and item.get("browser_access") == "PASS"
+            and item.get("text_extractable") == "PASS"
+            and not item.get("conflicts")
+            and not evidence.get("hard_url_blockers")
+        )
         rows.append(
             {
                 "selected": item.get("candidate_id") == selected_candidate_id,
+                "mapping_eligible": mapping_eligible,
                 "candidate": item.get("candidate_id"),
-                "identity": item.get("identity_match"),
-                "identity_confidence": item.get("identity_confidence"),
+                "source": item.get("source_role"),
+                "exact_identity": item.get("identity_match"),
+                "identifier_verified": exact_verified,
+                "browser_accessible": item.get("browser_access"),
+                "scrapable": item.get("text_extractable"),
                 "direct_page": item.get("direct_product_page"),
-                "direct_page_score": item.get("direct_page_score"),
                 "durable": item.get("durable_url"),
                 "country": item.get("country_match"),
                 "retailer": item.get("retailer_match"),
-                "browser": item.get("browser_access"),
-                "extractable": item.get("text_extractable"),
                 "coding": item.get("coding_evidence_complete"),
-                "source": item.get("source_role"),
+                "identity_confidence": item.get("identity_confidence"),
                 "authority": item.get("source_authority"),
                 "conflicts": "; ".join(item.get("conflicts") or []),
                 "url": item.get("url"),
