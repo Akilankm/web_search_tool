@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 from product_url_v2.browser import BrowserClient
@@ -32,10 +33,16 @@ def test_browser_client_runs_inside_existing_notebook_event_loop(tmp_path: Path)
     assert evidence.final_url == "https://shop.example/product/item"
 
 
-def test_browser_client_uses_local_artifact_root(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("PRODUCT_URL_ARTIFACT_ROOT", str(tmp_path))
-
-    client = BrowserClient.from_env(BrowserConfig())
+def test_browser_client_uses_local_artifact_root(tmp_path: Path) -> None:
+    previous = os.environ.get("PRODUCT_URL_ARTIFACT_ROOT")
+    os.environ["PRODUCT_URL_ARTIFACT_ROOT"] = str(tmp_path)
+    try:
+        client = BrowserClient.from_env(BrowserConfig())
+    finally:
+        if previous is None:
+            os.environ.pop("PRODUCT_URL_ARTIFACT_ROOT", None)
+        else:
+            os.environ["PRODUCT_URL_ARTIFACT_ROOT"] = previous
 
     assert client.artifact_root == tmp_path
     assert not hasattr(client.config, "base_url")
