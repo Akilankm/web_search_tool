@@ -1,8 +1,8 @@
-name: product-url-notebook
+name: product-url-minimal
 channels:
   - conda-forge
 dependencies:
   - python=3.11
   - pip
   - pip:
-      - "-e .[notebook]"
+      - "-e ."
