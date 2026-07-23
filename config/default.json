@@ -25,7 +25,6 @@
   "decision": {
     "verified_identity_threshold": 0.86,
     "review_identity_threshold": 0.55,
-    "wrong_product_threshold": 0.3,
     "minimum_direct_page_score": 0.5
   },
   "reasoning": {
