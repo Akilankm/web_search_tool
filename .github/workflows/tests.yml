@@ -33,7 +33,23 @@ jobs:
           printf 'ci-token\n' > secrets/browser_api_token.txt
           docker compose config --quiet
       - name: Test
-        run: pytest -q
+        shell: bash
+        run: |
+          set +e
+          pytest -q --junitxml=test-results.xml > test-output.txt 2>&1
+          status=$?
+          cat test-output.txt
+          exit "$status"
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-${{ matrix.python-version }}
+          path: |
+            test-output.txt
+            test-results.xml
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Reject legacy references
         run: |
           if grep -RInE 'product_evidence_harness|compat_patches|monkey_patch|monkeypatch_runtime' src apps scripts docker docs README.md pyproject.toml docker-compose.yml; then exit 1; fi
