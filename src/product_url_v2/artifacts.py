@@ -13,13 +13,8 @@ class ArtifactWriter:
         self.root = root
 
     def prepare(self, row_id: str) -> Path:
-        self.root.mkdir(parents=True, exist_ok=True)
         path = self.root / row_id
         path.mkdir(parents=True, exist_ok=True)
-        # Agent and browser containers use distinct UIDs but a shared runtime GID.
-        # The setgid directory keeps browser screenshots and agent artifacts in the
-        # same writable group without running either service as root.
-        path.chmod(0o2775)
         return path
 
     def write_intermediate(
@@ -53,25 +48,43 @@ class ArtifactWriter:
     @staticmethod
     def _json(path: Path, value: Any) -> None:
         temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps(to_jsonable(value), ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        temporary.write_text(
+            json.dumps(to_jsonable(value), ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
         temporary.replace(path)
-        path.chmod(0o664)
 
     @staticmethod
     def _candidate_csv(path: Path, candidates: Sequence[CandidateAssessment]) -> None:
         columns = [
-            "candidate_id", "url", "domain", "source_role", "identity_match",
-            "identity_confidence", "direct_product_page", "direct_page_score",
-            "browser_access", "text_extractable", "coding_evidence_complete",
-            "country_match", "retailer_match", "source_authority", "conflicts", "warnings",
+            "candidate_id",
+            "url",
+            "domain",
+            "source_role",
+            "identity_match",
+            "identity_confidence",
+            "direct_product_page",
+            "direct_page_score",
+            "browser_access",
+            "text_extractable",
+            "coding_evidence_complete",
+            "country_match",
+            "retailer_match",
+            "source_authority",
+            "conflicts",
+            "warnings",
         ]
         with path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=columns)
             writer.writeheader()
             for item in candidates:
                 data = to_jsonable(item)
-                writer.writerow({key: " | ".join(data[key]) if isinstance(data.get(key), list) else data.get(key) for key in columns})
-        path.chmod(0o664)
+                writer.writerow(
+                    {
+                        key: " | ".join(data[key]) if isinstance(data.get(key), list) else data.get(key)
+                        for key in columns
+                    }
+                )
 
     @staticmethod
     def _audit(path: Path, result: ResolutionResult) -> None:
@@ -94,18 +107,26 @@ class ArtifactWriter:
             "",
             *([f"- {item}" for item in result.decision.warnings] or ["- None"]),
             "",
-            "## Stage trace",
+            "## Observable stage trace",
             "",
             "| # | Stage | Event | Message |",
             "|---:|---|---|---|",
-            *[f"| {item.sequence} | {item.stage.value} | {item.event_type} | {item.message.replace('|', '/')} |" for item in result.events],
+            *[
+                f"| {item.sequence} | {item.stage.value} | {item.event_type} | "
+                f"{item.message.replace('|', '/')} |"
+                for item in result.events
+            ],
             "",
-            "## Candidate decisions",
+            "## Candidate evidence",
             "",
             "| Candidate | Identity | Direct page | Browser | Coding | URL |",
             "|---|---|---|---|---|---|",
-            *[f"| {item.candidate_id} | {item.identity_match.value} ({item.identity_confidence:.3f}) | {item.direct_product_page.value} | {item.browser_access.value} | {item.coding_evidence_complete.value} | {item.url} |" for item in result.candidates],
+            *[
+                f"| {item.candidate_id} | {item.identity_match.value} "
+                f"({item.identity_confidence:.3f}) | {item.direct_product_page.value} | "
+                f"{item.browser_access.value} | {item.coding_evidence_complete.value} | {item.url} |"
+                for item in result.candidates
+            ],
             "",
         ]
         path.write_text("\n".join(lines), encoding="utf-8")
-        path.chmod(0o664)
