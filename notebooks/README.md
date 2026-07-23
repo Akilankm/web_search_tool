@@ -14,10 +14,13 @@ From the repository root:
 ```bash
 conda env create -f environment.yml
 conda activate product-url-notebook
+python -m ipykernel install --user --name product-url-notebook --display-name "product-url-notebook"
 python -m playwright install chromium
 cp .env.example .env
 jupyter lab
 ```
+
+Both notebooks are bound to the **product-url-notebook** kernel.
 
 Set `SERPAPI_API_KEY` in `.env` before running either notebook.
 
